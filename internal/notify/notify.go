@@ -27,10 +27,16 @@ import (
 // ChannelEmail is declared alongside the Router in router.go.
 const ChannelTelegram = "telegram"
 
+// ChannelPush delivers a digest as a mobile push notification (via Expo), fanned
+// out to every device the user has registered. Unlike Telegram/email it needs no
+// server-side credential, so it is always registered in a Router regardless of
+// environment configuration.
+const ChannelPush = "push"
+
 // Channels is the delivery-channel vocabulary: the single source of truth shared
 // by the router's dispatch and the subscription use case's create-time allowlist,
 // so the two can never drift.
-var Channels = []string{ChannelTelegram, ChannelEmail}
+var Channels = []string{ChannelTelegram, ChannelEmail, ChannelPush}
 
 // ValidChannel reports whether c is a delivery channel. It exists because the slice alone is
 // not usable as an allowlist, so both create-time gates — subscriptions and reminders — built
@@ -158,8 +164,10 @@ func (r *Runner) Run(ctx context.Context) (Stats, error) {
 // recipient resolves the destination string for delivery, and whether the
 // subscription is deliverable right now. Telegram resolves the linked chat_id
 // (absent → not deliverable, soft-skipped); email resolves the user's account
-// email live (absent → soft-skipped); any other channel uses the stored
-// destination.
+// email live (absent → soft-skipped); push resolves the subscribing user's id,
+// deliverable only when they have a currently registered device (absent →
+// soft-skipped, same as an unlinked Telegram chat); any other channel uses the
+// stored destination.
 func recipient(info db.GetSubscriptionForDeliveryRow) (string, bool) {
 	switch info.Channel {
 	case ChannelTelegram:
@@ -172,6 +180,11 @@ func recipient(info db.GetSubscriptionForDeliveryRow) (string, bool) {
 			return "", false
 		}
 		return info.AccountEmail, true
+	case ChannelPush:
+		if !info.HasPushDevice {
+			return "", false
+		}
+		return strconv.FormatInt(info.UserID, 10), true
 	}
 	if !info.Destination.Valid || info.Destination.String == "" {
 		return "", false
