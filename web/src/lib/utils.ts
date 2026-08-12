@@ -3,6 +3,22 @@ export function errorMessage(e: unknown, fallback: string): string {
   return e instanceof Error ? e.message : fallback;
 }
 
+/** Narrows a possibly-null value, throwing if it is missing instead of silently
+ *  trusting it the way a bare `!` would. Chiefly for tests. */
+export function must<T>(value: T | null | undefined, what = 'value'): T {
+  if (value == null) throw new Error(`expected ${what} to be non-null`);
+  return value;
+}
+
+/** Exhaustiveness check for a `switch`/`if` over a closed union: put this in the
+ *  `default`/final branch so an unhandled member fails to compile instead of
+ *  silently falling through. Do not use where the union is meant to stay open
+ *  (e.g. forward-compat with server-sent values) — a thrown error there is the
+ *  wrong failure mode. */
+export function assertNever(x: never): never {
+  throw new Error(`Unreachable case: ${JSON.stringify(x)}`);
+}
+
 /** Format an RFC3339 timestamp as a short local date; '' for null/invalid. */
 export function formatDate(ts: string | null | undefined): string {
   if (!ts) return '';
