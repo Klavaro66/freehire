@@ -215,7 +215,7 @@ func (q *Queries) EstimateHiringCompanies(ctx context.Context) (int64, error) {
 }
 
 const getCompany = `-- name: GetCompany :one
-SELECT slug, name, created_at, updated_at, collections, job_count, regions, countries, domains, company_types, company_sizes, industries, year_founded, employee_count, hq_country, organization_type, tagline, company_info, is_reference, company_info_at, remote_regions, yc_batch, yc_status, yc_stage, yc_flags, maturity, subindustry, upvote_count, downvote_count
+SELECT slug, name, created_at, updated_at, collections, job_count, regions, countries, domains, company_types, company_sizes, industries, year_founded, employee_count, hq_country, organization_type, tagline, company_info, is_reference, company_info_at, remote_regions, yc_batch, yc_status, yc_stage, yc_flags, maturity, subindustry, upvote_count, downvote_count, feedback_count, feedback_rating_avg
 FROM companies
 WHERE slug = $1
 `
@@ -256,12 +256,15 @@ func (q *Queries) GetCompany(ctx context.Context, slug string) (Company, error) 
 		&i.Subindustry,
 		&i.UpvoteCount,
 		&i.DownvoteCount,
+		&i.FeedbackCount,
+		&i.FeedbackRatingAvg,
 	)
 	return i, err
 }
 
 const listCompanies = `-- name: ListCompanies :many
-SELECT slug, name, job_count, tagline, industries, hq_country, collections
+SELECT slug, name, job_count, tagline, industries, hq_country, collections,
+       feedback_count, feedback_rating_avg
 FROM companies
 WHERE job_count > 0
   AND ($1::text = '' OR name ILIKE '%' || $1 || '%' OR slug ILIKE '%' || $1 || '%')
@@ -281,8 +284,10 @@ WHERE job_count > 0
   AND (coalesce(cardinality($13::text[]), 0) = 0 OR maturity = ANY($13::text[]))
   -- subindustry is likewise a NULLABLE SCALAR: membership, not overlap; NULL matches none.
   AND (coalesce(cardinality($14::text[]), 0) = 0 OR subindustry = ANY($14::text[]))
-ORDER BY job_count DESC, name
-LIMIT $16 OFFSET $15
+ORDER BY
+  CASE WHEN $15::text = 'rating' THEN feedback_rating_avg END DESC NULLS LAST,
+  job_count DESC, name
+LIMIT $17 OFFSET $16
 `
 
 type ListCompaniesParams struct {
@@ -300,18 +305,21 @@ type ListCompaniesParams struct {
 	YcFlags       []string `json:"yc_flags"`
 	Maturity      []string `json:"maturity"`
 	Subindustries []string `json:"subindustries"`
+	Sort          string   `json:"sort"`
 	Offset        int32    `json:"offset"`
 	Limit         int32    `json:"limit"`
 }
 
 type ListCompaniesRow struct {
-	Slug        string      `json:"slug"`
-	Name        string      `json:"name"`
-	JobCount    int32       `json:"job_count"`
-	Tagline     pgtype.Text `json:"tagline"`
-	Industries  []string    `json:"industries"`
-	HqCountry   pgtype.Text `json:"hq_country"`
-	Collections []string    `json:"collections"`
+	Slug              string        `json:"slug"`
+	Name              string        `json:"name"`
+	JobCount          int32         `json:"job_count"`
+	Tagline           pgtype.Text   `json:"tagline"`
+	Industries        []string      `json:"industries"`
+	HqCountry         pgtype.Text   `json:"hq_country"`
+	Collections       []string      `json:"collections"`
+	FeedbackCount     int32         `json:"feedback_count"`
+	FeedbackRatingAvg pgtype.Float4 `json:"feedback_rating_avg"`
 }
 
 // Catalog page: companies with their job counts, most active first. The job count
@@ -331,6 +339,14 @@ type ListCompaniesRow struct {
 // actually hiring, excluding the ~92k job-less reference rows imported by the YC
 // and company-info backfills; it also lets both reads ride companies_hiring_job_count_idx
 // (partial index) instead of scanning the full 2.3 GB heap.
+// `sort = 'rating'` orders by the materialized feedback_rating_avg (unrated
+// companies sort last), falling through to the default job_count DESC, name
+// for the tiebreak. Any other value (including ”, the default) leaves the
+// CASE NULL for every row, so this ORDER BY is byte-for-byte the old one.
+// Applies to this Postgres path only — a request that also carries a search
+// or facet, routed to Meili instead when configured (see ListCompanies in
+// internal/handler/companies.go), keeps Meili's relevance ordering; rating is
+// not (yet) a Meili-sortable attribute.
 func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([]ListCompaniesRow, error) {
 	rows, err := q.db.Query(ctx, listCompanies,
 		arg.Search,
@@ -347,6 +363,7 @@ func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([
 		arg.YcFlags,
 		arg.Maturity,
 		arg.Subindustries,
+		arg.Sort,
 		arg.Offset,
 		arg.Limit,
 	)
@@ -365,6 +382,8 @@ func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([
 			&i.Industries,
 			&i.HqCountry,
 			&i.Collections,
+			&i.FeedbackCount,
+			&i.FeedbackRatingAvg,
 		); err != nil {
 			return nil, err
 		}
@@ -377,7 +396,7 @@ func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([
 }
 
 const listCompaniesForReindex = `-- name: ListCompaniesForReindex :many
-SELECT slug, name, created_at, updated_at, collections, job_count, regions, countries, domains, company_types, company_sizes, industries, year_founded, employee_count, hq_country, organization_type, tagline, company_info, is_reference, company_info_at, remote_regions, yc_batch, yc_status, yc_stage, yc_flags, maturity, subindustry, upvote_count, downvote_count
+SELECT slug, name, created_at, updated_at, collections, job_count, regions, countries, domains, company_types, company_sizes, industries, year_founded, employee_count, hq_country, organization_type, tagline, company_info, is_reference, company_info_at, remote_regions, yc_batch, yc_status, yc_stage, yc_flags, maturity, subindustry, upvote_count, downvote_count, feedback_count, feedback_rating_avg
 FROM companies
 WHERE slug > $1 AND job_count > 0
 ORDER BY slug
@@ -434,6 +453,8 @@ func (q *Queries) ListCompaniesForReindex(ctx context.Context, arg ListCompanies
 			&i.Subindustry,
 			&i.UpvoteCount,
 			&i.DownvoteCount,
+			&i.FeedbackCount,
+			&i.FeedbackRatingAvg,
 		); err != nil {
 			return nil, err
 		}

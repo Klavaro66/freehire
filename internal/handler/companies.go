@@ -96,36 +96,43 @@ type companyView struct {
 	UpvoteCount   int32 `json:"upvote_count"`
 	DownvoteCount int32 `json:"downvote_count"`
 	MyVote        int32 `json:"my_vote"`
+	// FeedbackCount/FeedbackRatingAvg are the company's materialized feedback
+	// counters (internal/companyfeedback), the same read-straight-from-the-row
+	// shape as UpvoteCount/DownvoteCount above.
+	FeedbackCount     int32         `json:"feedback_count"`
+	FeedbackRatingAvg pgtype.Float4 `json:"feedback_rating_avg"`
 }
 
 // companyViewFrom projects a stored company onto its public view, dropping only the
 // internal bookkeeping columns.
 func companyViewFrom(c db.Company) companyView {
 	return companyView{
-		Slug:             c.Slug,
-		Name:             c.Name,
-		Collections:      c.Collections,
-		JobCount:         c.JobCount,
-		Regions:          c.Regions,
-		Countries:        c.Countries,
-		Domains:          c.Domains,
-		CompanyTypes:     c.CompanyTypes,
-		CompanySizes:     c.CompanySizes,
-		Industries:       c.Industries,
-		YearFounded:      c.YearFounded,
-		EmployeeCount:    c.EmployeeCount,
-		HqCountry:        c.HqCountry,
-		OrganizationType: c.OrganizationType,
-		Tagline:          c.Tagline,
-		CompanyInfo:      c.CompanyInfo,
-		RemoteRegions:    c.RemoteRegions,
-		YcBatch:          c.YcBatch,
-		YcStatus:         c.YcStatus,
-		YcStage:          c.YcStage,
-		YcFlags:          c.YcFlags,
-		Maturity:         c.Maturity,
-		UpvoteCount:      c.UpvoteCount,
-		DownvoteCount:    c.DownvoteCount,
+		Slug:              c.Slug,
+		Name:              c.Name,
+		Collections:       c.Collections,
+		JobCount:          c.JobCount,
+		Regions:           c.Regions,
+		Countries:         c.Countries,
+		Domains:           c.Domains,
+		CompanyTypes:      c.CompanyTypes,
+		CompanySizes:      c.CompanySizes,
+		Industries:        c.Industries,
+		YearFounded:       c.YearFounded,
+		EmployeeCount:     c.EmployeeCount,
+		HqCountry:         c.HqCountry,
+		OrganizationType:  c.OrganizationType,
+		Tagline:           c.Tagline,
+		CompanyInfo:       c.CompanyInfo,
+		RemoteRegions:     c.RemoteRegions,
+		YcBatch:           c.YcBatch,
+		YcStatus:          c.YcStatus,
+		YcStage:           c.YcStage,
+		YcFlags:           c.YcFlags,
+		Maturity:          c.Maturity,
+		UpvoteCount:       c.UpvoteCount,
+		DownvoteCount:     c.DownvoteCount,
+		FeedbackCount:     c.FeedbackCount,
+		FeedbackRatingAvg: c.FeedbackRatingAvg,
 	}
 }
 
@@ -141,6 +148,12 @@ func companyViewFrom(c db.Company) companyView {
 func (h *companiesHandlers) ListCompanies(c *fiber.Ctx) error {
 	limit, offset := pageParams(c)
 	search := c.Query("q")
+	// sort=rating orders by feedback_rating_avg (see ListCompanies in
+	// internal/db/queries/companies.sql); any other value (including absent)
+	// is the existing job_count DESC, name ordering. Forces the Postgres path
+	// below regardless of any filter present — rating isn't a Meili-sortable
+	// attribute yet (see companySettings' doc comment).
+	sort := c.Query("sort")
 	vals := queryValues(c)
 
 	// Parse each facet once and feed both queries, so their WHERE clauses can't
@@ -167,7 +180,11 @@ func (h *companiesHandlers) ListCompanies(c *fiber.Ctx) error {
 	// Postgres ordering (job_count DESC, name) and its O(1) total estimate, so it is
 	// deliberately not routed to Meili. On ANY Meili error the request falls through to
 	// the Postgres substring path below, so /companies never depends on Meili being up.
-	if h.companySearch != nil && isCompanyFilter(search, collections, regions, countries,
+	//
+	// sort=rating also stays off Meili even when a filter is present: rating isn't a
+	// Meili-sortable attribute yet (see companySettings), so routing there would
+	// silently ignore the caller's requested order instead of honouring it.
+	if h.companySearch != nil && sort != "rating" && isCompanyFilter(search, collections, regions, countries,
 		domains, companyTypes, companySizes, remoteRegions, ycBatch, ycStatus, ycStage, ycFlags, maturity, subindustries) {
 		items, total, err := h.companyHitsViaMeili(c.Context(), search, vals, limit, offset)
 		if err == nil {
@@ -191,6 +208,7 @@ func (h *companiesHandlers) ListCompanies(c *fiber.Ctx) error {
 		YcFlags:       ycFlags,
 		Maturity:      maturity,
 		Subindustries: subindustries,
+		Sort:          sort,
 		Limit:         int32(limit),
 		Offset:        int32(offset),
 	})
@@ -373,19 +391,26 @@ type companyListItem struct {
 	Industries  []string `json:"industries"`
 	HqCountry   *string  `json:"hq_country"`
 	Collections []string `json:"collections"`
+	// FeedbackCount/FeedbackRatingAvg are the company's materialized feedback
+	// counters (internal/companyfeedback) — the same fields the single-company
+	// detail view (companyView) already serves.
+	FeedbackCount     int32    `json:"feedback_count"`
+	FeedbackRatingAvg *float32 `json:"feedback_rating_avg"`
 }
 
 // companyListItemFromRow projects the Postgres read onto the wire shape. The row already carries
 // null-ness, so the two nullable columns pass through as-is.
 func companyListItemFromRow(r db.ListCompaniesRow) companyListItem {
 	return companyListItem{
-		Slug:        r.Slug,
-		Name:        r.Name,
-		JobCount:    r.JobCount,
-		Tagline:     pgconv.TextPtr(r.Tagline),
-		Industries:  r.Industries,
-		HqCountry:   pgconv.TextPtr(r.HqCountry),
-		Collections: r.Collections,
+		Slug:              r.Slug,
+		Name:              r.Name,
+		JobCount:          r.JobCount,
+		Tagline:           pgconv.TextPtr(r.Tagline),
+		Industries:        r.Industries,
+		HqCountry:         pgconv.TextPtr(r.HqCountry),
+		Collections:       r.Collections,
+		FeedbackCount:     r.FeedbackCount,
+		FeedbackRatingAvg: pgconv.Float4Ptr(r.FeedbackRatingAvg),
 	}
 }
 
@@ -396,14 +421,25 @@ func companyListItemFromRow(r db.ListCompaniesRow) companyListItem {
 // array that came back null instead would make those marks disappear the moment a user searched.
 func companyListItemFromDoc(d search.CompanyDocument) companyListItem {
 	return companyListItem{
-		Slug:        d.Slug,
-		Name:        d.Name,
-		JobCount:    d.JobCount,
-		Tagline:     presentOrNil(d.Tagline),
-		Industries:  orEmpty(d.Industries),
-		HqCountry:   presentOrNil(d.HqCountry),
-		Collections: orEmpty(d.Collections),
+		Slug:              d.Slug,
+		Name:              d.Name,
+		JobCount:          d.JobCount,
+		Tagline:           presentOrNil(d.Tagline),
+		Industries:        orEmpty(d.Industries),
+		HqCountry:         presentOrNil(d.HqCountry),
+		Collections:       orEmpty(d.Collections),
+		FeedbackCount:     d.FeedbackCount,
+		FeedbackRatingAvg: presentOrNilFloat(d.FeedbackRatingAvg),
 	}
+}
+
+// presentOrNilFloat treats 0 as absent — CompanyDocument's "no rating" sentinel
+// (see its doc comment): a real average is never 0, since ratings are 1-5.
+func presentOrNilFloat(f float32) *float32 {
+	if f == 0 {
+		return nil
+	}
+	return &f
 }
 
 // presentOrNil treats the empty string as absent — the search document's way of spelling NULL.

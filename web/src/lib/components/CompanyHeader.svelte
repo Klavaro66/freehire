@@ -1,8 +1,12 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { MessageSquare } from '@lucide/svelte';
+  import { MessageSquare, Star } from '@lucide/svelte';
   import { api } from '$lib/api';
-  import type { Company } from '$lib/types';
+  import { isAuthenticated } from '$lib/auth.svelte';
+  import { openAuthDialog } from '$lib/auth-dialog.svelte';
+  import type { Company, CompanyFeedbackSummary } from '$lib/types';
+  import CompanyFeedbackDialog from './CompanyFeedbackDialog.svelte';
+  import CompanyFeedbackListDialog from './CompanyFeedbackListDialog.svelte';
   import CompanyLogo from './CompanyLogo.svelte';
   import CredentialBadge from './CredentialBadge.svelte';
   import BackerBadge from './BackerBadge.svelte';
@@ -29,6 +33,49 @@
       alive = false;
     };
   });
+
+  // The feedback list dialog (star ratings + category + text), opened from the
+  // rating badge below. Before any feedback exists there's nothing to list, so the
+  // same slot instead opens the write dialog directly — the header always carries
+  // one feedback entry point, not just once a rating exists to show. Once the list
+  // is open, its own "Write feedback" button is the way back into the write dialog.
+  //
+  // feedbackCount/feedbackRatingAvg are derived from the server-rendered `company`
+  // prop (so a company switch or refreshed data is picked up, the same as
+  // threadCount reacting to `slug`), overridden only after a save: the dialog's
+  // `onSaved` already carries the write's freshly recomputed counters (Upsert
+  // and Delete both return them), so the badge flips immediately with no
+  // follow-up fetch — and so no window where that fetch can itself fail and
+  // leave the badge stale, which is what the earlier getCompany-refetch version
+  // of this function could do.
+  let showFeedbackList = $state(false);
+  let showFeedbackForm = $state(false);
+  let feedbackOverride = $state<CompanyFeedbackSummary | null>(null);
+  // A save applies to one company only; drop a stale override on a client-side
+  // switch to another company (SvelteKit reuses this component across a
+  // `/companies/[slug]` param change) — otherwise the previous company's
+  // reviewed-just-now counters would keep showing on the new one.
+  $effect(() => {
+    void slug;
+    feedbackOverride = null;
+  });
+  const feedbackCount = $derived(feedbackOverride?.feedback_count ?? company.feedback_count);
+  const feedbackRatingAvg = $derived(feedbackOverride?.feedback_rating_avg ?? company.feedback_rating_avg);
+  function openFeedbackEntry() {
+    if (feedbackCount > 0) {
+      showFeedbackList = true;
+      return;
+    }
+    openFeedbackForm();
+  }
+  function openFeedbackForm() {
+    if (!isAuthenticated()) {
+      openAuthDialog('login');
+      return;
+    }
+    showFeedbackList = false;
+    showFeedbackForm = true;
+  }
 
   const info = $derived(company.company_info ?? {});
   const industries = $derived(company.industries ?? []);
@@ -81,6 +128,19 @@
         ? ` · ${threadCount}`
         : ''}
     </a>
+    <button
+      type="button"
+      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+      onclick={openFeedbackEntry}
+    >
+      {#if feedbackCount > 0}
+        <Star class="size-4" fill="currentColor" aria-hidden="true" />
+        {(feedbackRatingAvg ?? 0).toFixed(1)} · {feedbackCount}
+      {:else}
+        <Star class="size-4" aria-hidden="true" />
+        Leave feedback
+      {/if}
+    </button>
     <VoteControl
       target="company"
       {slug}
@@ -128,3 +188,19 @@
     </div>
   {/if}
 </section>
+
+{#if showFeedbackList}
+  <CompanyFeedbackListDialog
+    {slug}
+    companyName={company.name}
+    onClose={() => (showFeedbackList = false)}
+    onWriteFeedback={openFeedbackForm}
+  />
+{/if}
+{#if showFeedbackForm}
+  <CompanyFeedbackDialog
+    {slug}
+    onClose={() => (showFeedbackForm = false)}
+    onSaved={(summary) => (feedbackOverride = summary)}
+  />
+{/if}

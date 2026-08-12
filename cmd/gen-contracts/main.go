@@ -319,6 +319,12 @@ func genVocab() string {
 	b.WriteString(emitVocab("Relocation", "RELOCATION_VALUES", vocab.RelocationValues))
 	b.WriteString(emitVocab("EnglishLevel", "ENGLISH_LEVEL_VALUES", vocab.EnglishLevelValues))
 	b.WriteString(emitVocab("CompanyType", "COMPANY_TYPE_VALUES", vocab.CompanyTypeValues))
+	// The company feedback category vocabulary (internal/companyfeedback), generated
+	// so the review form's category picker can't drift from the DB CHECK constraint.
+	b.WriteString(emitVocab("CompanyFeedbackType", "COMPANY_FEEDBACK_TYPE_VALUES", vocab.CompanyFeedbackTypeValues))
+	// The report-reason vocabulary for flagging a specific feedback entry, generated
+	// so the report picker can't drift from the DB CHECK constraint.
+	b.WriteString(emitVocab("CompanyFeedbackReportReason", "COMPANY_FEEDBACK_REPORT_REASON_VALUES", vocab.CompanyFeedbackReportReasonValues))
 	b.WriteString(emitVocab("Domain", "DOMAIN_VALUES", vocab.DomainValues))
 	// The six AI skill-signature archetype slugs (internal/aiarchetype), generated
 	// so the AI Specialization filter's valid values can't drift from the rule table.

@@ -402,6 +402,9 @@ type Querier interface {
 	// before upserting to log matched-existing vs inserted-reference counts — the
 	// upsert itself is blind to which path (insert or update) it took.
 	CompanyExists(ctx context.Context, slug string) (bool, error)
+	// The cheap existence check Report uses before writing, so a bad id 404s
+	// cleanly instead of surfacing company_feedback_reports' FK violation.
+	CompanyFeedbackExists(ctx context.Context, id int64) (bool, error)
 	// The tracked company on a board — for the "already tracked" reply: a job's company name and
 	// slug so the bot/UI can link to /companies/<slug>. board_pattern is "<escaped board>:%" (same
 	// index-backed LIKE as JobsExistForBoard). Only rows with a resolved company_slug qualify.
@@ -461,6 +464,7 @@ type Querier interface {
 	// so search/filter pagination reports the filtered total. Keep this WHERE identical
 	// to ListCompanies (including the job_count > 0 hiring scope).
 	CountCompanies(ctx context.Context, arg CountCompaniesParams) (int64, error)
+	CountCompanyFeedback(ctx context.Context, companySlug string) (int64, error)
 	// Total live messages for the caller under the same optional filters as ListEmails, plus
 	// how many of them the `other` default omitted.
 	//
@@ -499,6 +503,12 @@ type Querier interface {
 	// Kept in exact lockstep with that query's WHERE clause deliberately — see its comment for
 	// what the shape means and why the EXISTS join is the evidence, not the WHERE alone.
 	CountPreparingBackfillCandidates(ctx context.Context) (int64, error)
+	// How many companies this user has newly reviewed since `since` — the rate-limit
+	// check backing companyfeedback.Service.checkRate (mirrors
+	// community.CountRecentThreads). An edit-by-resubmit never inserts a new row
+	// (the ON CONFLICT DO UPDATE branch leaves created_at untouched), so this only
+	// grows on genuine new-company writes.
+	CountRecentCompanyFeedback(ctx context.Context, arg CountRecentCompanyFeedbackParams) (int64, error)
 	CountRecentRepliesByUser(ctx context.Context, arg CountRecentRepliesByUserParams) (int64, error)
 	// Rate-limit count: threads a user opened since a cutoff. Served by
 	// threads_author_created_idx.
@@ -675,6 +685,8 @@ type Querier interface {
 	// Delete a CV owned by the user. Returns the affected-row count so the handler can 404
 	// when nothing was deleted (foreign or missing id).
 	DeleteCV(ctx context.Context, arg DeleteCVParams) (int64, error)
+	// Remove the caller's own feedback (no-op when absent).
+	DeleteCompanyFeedback(ctx context.Context, arg DeleteCompanyFeedbackParams) error
 	// Remove a user's company vote (toggle-clear or the DELETE endpoint). No-op when
 	// absent.
 	DeleteCompanyVote(ctx context.Context, arg DeleteCompanyVoteParams) error
@@ -1117,6 +1129,10 @@ type Querier interface {
 	// Recipient resolution for the inbound ingest worker.
 	GetMailboxByAddress(ctx context.Context, address string) (Mailbox, error)
 	GetMailboxByUser(ctx context.Context, userID int64) (Mailbox, error)
+	// The caller's own feedback on a company, for the edit form's prefill. No row
+	// when they have not left one yet. Not filtered by status: the owner can still
+	// see and edit their own review after a moderator hides it.
+	GetMyCompanyFeedback(ctx context.Context, arg GetMyCompanyFeedbackParams) (CompanyFeedback, error)
 	// The caller's notification rule, shared by saved-job reminders and both
 	// lifecycle nudges. No row -> pgx.ErrNoRows, which the service reads as the
 	// opt-out-by-default state (never configured; see the
@@ -1277,6 +1293,10 @@ type Querier interface {
 	// unverified account should be told to confirm its address rather than that somebody
 	// already reported the job.
 	GhostReportRefusalReason(ctx context.Context, arg GhostReportRefusalReasonParams) (GhostReportRefusalReasonRow, error)
+	// The moderator lever: hide a specific review (idempotent — hiding an already-
+	// hidden row is a no-op). Returns the company_slug so the caller can recompute
+	// that company's counters in the same transaction. pgx.ErrNoRows on an unknown id.
+	HideCompanyFeedback(ctx context.Context, id int64) (string, error)
 	IncrementThreadReplyCount(ctx context.Context, id int64) error
 	// Record one change: what it did (ops), what would undo it (inverse), who made it and through
 	// which entry point, and the document version it was computed against. Written in the same
@@ -1287,6 +1307,11 @@ type Querier interface {
 	// return no row (the repository re-reads the winner); a handle-unique violation is a
 	// different collision the repository maps to a retry.
 	InsertCommunityPersona(ctx context.Context, arg InsertCommunityPersonaParams) (CommunityPersona, error)
+	// File a report against a specific review. A second report by the same user on
+	// the same review is a silent no-op (the partial unique index) — evidence for a
+	// moderator to act on, not a per-report ticket with its own state machine (see
+	// internal/report for that fuller shape, built for job postings).
+	InsertCompanyFeedbackReport(ctx context.Context, arg InsertCompanyFeedbackReportParams) error
 	// Append the debit for a metered action. delta is negative (the action cost). The partial
 	// unique index on (user_id, feature, ref) WHERE kind='debit' guards against a double charge
 	// for the same ref even under a race.
@@ -1503,6 +1528,14 @@ type Querier interface {
 	// actually hiring, excluding the ~92k job-less reference rows imported by the YC
 	// and company-info backfills; it also lets both reads ride companies_hiring_job_count_idx
 	// (partial index) instead of scanning the full 2.3 GB heap.
+	// `sort = 'rating'` orders by the materialized feedback_rating_avg (unrated
+	// companies sort last), falling through to the default job_count DESC, name
+	// for the tiebreak. Any other value (including '', the default) leaves the
+	// CASE NULL for every row, so this ORDER BY is byte-for-byte the old one.
+	// Applies to this Postgres path only — a request that also carries a search
+	// or facet, routed to Meili instead when configured (see ListCompanies in
+	// internal/handler/companies.go), keeps Meili's relevance ordering; rating is
+	// not (yet) a Meili-sortable attribute.
 	ListCompanies(ctx context.Context, arg ListCompaniesParams) ([]ListCompaniesRow, error)
 	// Keyset page of hiring companies (job_count > 0) for the companies search reindex,
 	// cursored by the slug primary key (first chunk keyed by the empty string, which
@@ -1531,6 +1564,11 @@ type Querier interface {
 	// maintained (countries by RefreshCompanyFacets, hq_country by the company-info
 	// importers), so this widens the read rather than adding a source of truth.
 	ListCompanyCollections(ctx context.Context) ([]ListCompanyCollectionsRow, error)
+	// A company's feedback, newest first, offset-paginated — the volume per company
+	// is small (bounded by distinct reviewers), so unlike the discussion threads this
+	// does not need keyset paging. Hidden rows (a moderator's lever) are excluded,
+	// same as an open thread listing excludes closed ones.
+	ListCompanyFeedback(ctx context.Context, arg ListCompanyFeedbackParams) ([]ListCompanyFeedbackRow, error)
 	// Slim keyset page of companies for the sitemap, cursored by the slug primary key
 	// (first chunk keyed by the empty string, which sorts before every slug).
 	//
@@ -1842,6 +1880,10 @@ type Querier interface {
 	// Joins the catalogue for the company's display name (LEFT so a request survives a
 	// company the catalogue no longer knows — the UI falls back to the slug).
 	ListReferralRequestsBySeeker(ctx context.Context, seekerUserID int64) ([]ListReferralRequestsBySeekerRow, error)
+	// The moderator view: every review with at least one report, most-reported
+	// first, with the report count and the distinct reasons given so a moderator
+	// can triage without opening each report individually.
+	ListReportedCompanyFeedback(ctx context.Context) ([]ListReportedCompanyFeedbackRow, error)
 	// The open postings sharing a role cluster (company_slug + role_fingerprint) with the
 	// anchor job — the "N openings across cities" list for a collapsed role. Each copy keeps
 	// its own location and apply URL, so a seeker picks their city; the anchor itself is
@@ -2427,6 +2469,12 @@ type Querier interface {
 	// Write one click. Best-effort by contract: the handler redirects whether or not this succeeds,
 	// because a broken redirect lives in a PDF the candidate can neither see nor fix.
 	RecordTracerClick(ctx context.Context, arg RecordTracerClickParams) error
+	// Recompute a single company's materialized feedback_count/feedback_rating_avg
+	// from company_feedback and return them. Run as its own statement AFTER the
+	// write within one transaction, scoped to one company_slug via
+	// company_feedback_company_slug_idx — the same shape as RecountCompanyVotes.
+	// Hidden rows don't count toward either number.
+	RecountCompanyFeedback(ctx context.Context, companySlug string) (RecountCompanyFeedbackRow, error)
 	// Recompute a single company's materialized vote counters from company_votes and
 	// return them. Run as its own statement AFTER the vote write within one transaction.
 	// Scoped to one company_slug via company_votes_company_slug_idx.
@@ -3110,6 +3158,15 @@ type Querier interface {
 	// And it does not distinguish insert from update, because both mean the same thing here:
 	// this person has granted us their calendar.
 	UpsertCalendarGrant(ctx context.Context, arg UpsertCalendarGrantParams) error
+	// Company feedback: one signed-in user's star rating + category + text per
+	// company, upserted in place (edit-by-resubmit). LEFT JOIN community_personas
+	// exactly like the community.sql read paths — content outlives its author (a
+	// deleted account leaves user_id NULL), so a null handle means "no live author",
+	// which the API renders as a deleted-member marker.
+	// Insert or overwrite the caller's feedback on a company in place — the same
+	// upsert-in-place shape as UpsertCompanyVote, but ON CONFLICT names the target
+	// partial index directly since the unique index excludes NULL user_id.
+	UpsertCompanyFeedback(ctx context.Context, arg UpsertCompanyFeedbackParams) (CompanyFeedback, error)
 	// Apply one external-dataset company-info record, matched by slug. A new slug is
 	// inserted as a reference row (is_reference = true) with no jobs; an existing slug
 	// (job-backed or a prior reference) has only its company-info columns refreshed —
