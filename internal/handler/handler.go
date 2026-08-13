@@ -49,6 +49,7 @@ import (
 	"github.com/strelov1/freehire/internal/report"
 	"github.com/strelov1/freehire/internal/resume"
 	"github.com/strelov1/freehire/internal/resumeextract"
+	"github.com/strelov1/freehire/internal/screeninganswers"
 	"github.com/strelov1/freehire/internal/search"
 	"github.com/strelov1/freehire/internal/sources"
 	"github.com/strelov1/freehire/internal/speech"
@@ -335,6 +336,11 @@ func Register(app *fiber.App, cfg Config) {
 	savedSearchH := newSavedSearchHandlers(queries)
 	subscriptionH := newSubscriptionHandlers(queries)
 	profileSvc := userprofile.New(userprofile.NewQueriesRepository(queries))
+	// The candidate's own screening answers (visa, salary, notice period, relocation, …) —
+	// a distinct singleton from profileSvc above (search/targeting preferences, a
+	// different lifecycle; see internal/screeninganswers/AGENTS.md).
+	screeningAnswersSvc := screeninganswers.New(screeninganswers.NewQueriesRepository(queries))
+	screeningAnswersH := newScreeningAnswersHandlers(screeningAnswersSvc)
 	// Résumé storage is nil-safe: a nil Blob (S3 unconfigured) yields a disabled service
 	// whose Enabled() is false, so the upload/verdict paths degrade to in-request parsing.
 	resumeStore := resume.New(cfg.Blob, resume.NewQueriesRepository(queries))
@@ -467,7 +473,7 @@ func Register(app *fiber.App, cfg Config) {
 			Agent: cfg.AssistantLLM, Keys: llmKeys,
 			MaxSteps: cfg.AssistantMaxSteps, MaxPrompt: cfg.AssistantMaxPrompt,
 		},
-		assistantStore, searchH, resumeH, trackingH, cvH, profileH, a.browserTools, inboxH, bank)
+		assistantStore, searchH, resumeH, trackingH, cvH, profileH, a.browserTools, inboxH, bank, screeningAnswersSvc)
 	// Same nil-interface trap as stt above: only assign when cfg.Realtime is
 	// genuinely non-nil, or "no voice mode here" becomes a panic on the first mint.
 	if cfg.Realtime != nil {
@@ -478,7 +484,7 @@ func Register(app *fiber.App, cfg Config) {
 	// The autofill planner is one cheap structured call per run, so it travels on the
 	// shared client's default timeout. The contact block it plans over comes from the base
 	// CV, then the structured résumé — see autofillHandlers.autofillProfile.
-	autofillH := newAutofillHandlers(cvStore, resumeStore, queries, a.browserTools, llmBinding{client: cfg.LLM, keys: llmKeys})
+	autofillH := newAutofillHandlers(cvStore, resumeStore, queries, screeningAnswersSvc, a.browserTools, llmBinding{client: cfg.LLM, keys: llmKeys})
 	usageH := newUsageHandlers(cfg.LLMKeys)
 	accountDeletion.WithGatewayKeys(llmKeys.Revoke)
 
@@ -635,6 +641,8 @@ func Register(app *fiber.App, cfg Config) {
 
 	// The per-user profile singleton (see profileHandlers).
 	profileH.register(api, mw)
+	// The candidate's own screening answers (see screeningAnswersHandlers).
+	screeningAnswersH.register(api, mw)
 	marketPulseH.register(api, mw)
 	experienceH.register(api, mw)
 	talentNetworkH.register(api, mw)
