@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -135,12 +136,14 @@ func nextFlightTextRows(flight string) map[string]string {
 	for _, m := range nextFlightTextRowMarker.FindAllSubmatchIndex(b, -1) {
 		id := string(b[m[2]:m[3]])
 		n, err := strconv.ParseInt(string(b[m[4]:m[5]]), 16, 64)
-		if err != nil {
+		// Bounding n against math.MaxInt before narrowing keeps int(n) from wrapping on
+		// a 32-bit build; end < start below catches start+int(n) itself overflowing.
+		if err != nil || n < 0 || n > math.MaxInt {
 			continue
 		}
 		start := m[1] // end of the full match = first content byte after the comma
 		end := start + int(n)
-		if end > len(b) {
+		if end < start || end > len(b) {
 			end = len(b)
 		}
 		rows[id] = string(b[start:end])
