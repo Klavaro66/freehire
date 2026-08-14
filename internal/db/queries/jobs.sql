@@ -56,6 +56,10 @@ UPDATE jobs
 SET company      = sqlc.arg(company),
     company_slug = sqlc.arg(company_slug),
     content_hash = sqlc.arg(content_hash),
+    -- The company correction invalidates any precomputed similar-jobs list this job
+    -- already has: it was computed excluding the OLD company's postings, so it may
+    -- now wrongly include a same-company match. Force cmd/similar-backfill to redo it.
+    similar_computed_at = NULL,
     updated_at   = now()
 WHERE id = sqlc.arg(id);
 
@@ -91,30 +95,6 @@ LIMIT sqlc.arg(batch_size);
 SELECT id
 FROM jobs
 WHERE id > sqlc.arg(after_id) AND updated_at >= sqlc.arg(since)
-ORDER BY id
-LIMIT sqlc.arg(batch_size);
-
--- name: ListOpenJobsPostedAfter :many
--- Freshness-scoped keyset scan for `reindex --semantic --posted-within`: open jobs
--- whose effective posting date (COALESCE(posted_at, created_at) — the same date
--- jobview derives and the search doc's posted_ts encodes) is at or after the cutoff.
--- The in-engine embedder cannot embed the whole open catalogue in reasonable time, so
--- the semantic index covers only this fresh window; being a swap rebuild it also drops
--- jobs that have since aged out. Open-only (closed_at IS NULL): a swap rebuild never
--- holds closed jobs, so unlike ListJobsUpdatedAfter there is nothing to delete. Served
--- by jobs_open_enrich_freshness_idx (COALESCE(posted_at, created_at) DESC WHERE open).
-SELECT *
-FROM jobs
-WHERE id > sqlc.arg(after_id) AND closed_at IS NULL AND COALESCE(posted_at, created_at) >= sqlc.arg(posted_since)
-ORDER BY id
-LIMIT sqlc.arg(batch_size);
-
--- name: ListOpenJobIDsPostedAfter :many
--- Id-only projection of ListOpenJobsPostedAfter — the corruption-degrade path for the
--- freshness-scoped semantic scan, mirroring ListJobIDsAfter.
-SELECT id
-FROM jobs
-WHERE id > sqlc.arg(after_id) AND closed_at IS NULL AND COALESCE(posted_at, created_at) >= sqlc.arg(posted_since)
 ORDER BY id
 LIMIT sqlc.arg(batch_size);
 
@@ -181,6 +161,21 @@ WHERE public_slug = $1;
 SELECT id, description
 FROM jobs
 WHERE id = ANY(sqlc.arg(ids)::bigint[]);
+
+-- name: GetSimilarJobIDs :one
+-- Narrow read for GET /jobs/:slug/similar (internal/handler/similar.go): only the
+-- precomputed neighbour-id list (jobs.similar_job_ids, populated by
+-- cmd/similar-backfill — see semantic.sql's job_semantic_chunks section), not the
+-- whole wide job row. Mirrors GetJobDescriptionsByIDs's "narrow projection for a
+-- hot read path" precedent above. The list is nearest-first and, as of writing,
+-- capped at cmd/similar-backfill's -similar flag (default 20, matching the API's
+-- maxSimilarLimit) — the handler still re-filters it to open jobs at read time,
+-- since a neighbour can close after it was computed. A job with no precomputed
+-- list yet (never backfilled) comes back with a NULL/nil similar_job_ids, not an
+-- error — the handler treats "not backfilled yet" and "computed empty" the same.
+SELECT similar_job_ids
+FROM jobs
+WHERE id = sqlc.arg(id)::bigint;
 
 -- name: EstimateOpenJobs :one
 -- Fast approximate open-job total for the DB-backed /jobs list's meta.total. An
@@ -316,6 +311,14 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     closed_at    = NULL,
     closed_reason = '',
     liveness_strikes = CASE WHEN jobs.closed_at IS NOT NULL THEN 0 ELSE jobs.liveness_strikes END,
+    -- A company correction (rare, but real — e.g. a slug fix on re-ingest) invalidates
+    -- this job's already-precomputed similar-jobs list: it may have been computed
+    -- excluding the OLD company and so now wrongly includes a same-company match.
+    -- Force cmd/similar-backfill to redo it. Unconditional company_slug writes far
+    -- outnumber actual changes (every re-crawl runs this branch), so this must be
+    -- conditional or every re-ingest would invalidate the list for nothing.
+    similar_computed_at = CASE WHEN jobs.company_slug IS DISTINCT FROM EXCLUDED.company_slug
+                               THEN NULL ELSE jobs.similar_computed_at END,
     updated_at   = now()
 RETURNING sqlc.embed(jobs),
     NOT COALESCE((SELECT existed FROM existing), false) AS inserted,
@@ -860,6 +863,12 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     closed_at    = NULL,
     closed_reason = '',
     liveness_strikes = CASE WHEN jobs.closed_at IS NOT NULL THEN 0 ELSE jobs.liveness_strikes END,
+    -- Same reasoning as UpsertJob: a moderator company correction invalidates this
+    -- job's already-precomputed similar-jobs list (it may have been computed
+    -- excluding the OLD company), so force cmd/similar-backfill to redo it —
+    -- conditionally, since every re-create runs this branch, not just company edits.
+    similar_computed_at = CASE WHEN jobs.company_slug IS DISTINCT FROM EXCLUDED.company_slug
+                               THEN NULL ELSE jobs.similar_computed_at END,
     updated_at   = now()
 RETURNING *;
 
@@ -951,6 +960,12 @@ SET title        = sqlc.arg(title),
     content_hash     = sqlc.arg(content_hash),
     role_fingerprint = sqlc.arg(role_fingerprint),
     updated_by   = sqlc.arg(updated_by)::bigint,
+    -- Same reasoning as UpsertJob: a company correction invalidates this job's
+    -- already-precomputed similar-jobs list (it may have been computed excluding the
+    -- OLD company), so force cmd/similar-backfill to redo it — conditionally, since
+    -- most edits leave the company untouched.
+    similar_computed_at = CASE WHEN jobs.company_slug IS DISTINCT FROM sqlc.arg(company_slug)
+                               THEN NULL ELSE jobs.similar_computed_at END,
     updated_at   = now()
 WHERE public_slug = sqlc.arg(public_slug) AND created_by IS NOT NULL
 RETURNING *;

@@ -43,8 +43,8 @@ type ClaimSemanticBatchRow struct {
 
 // Claim a batch of live, unleased entries, freshest job first, by stamping claimed_at.
 // Unlike ClaimEnrichmentBatch this does NOT filter unindexable jobs out: a closed OR
-// non-canonical (duplicate_of) entry is the removal signal, so the worker must receive
-// it and branch on `closed` (true = remove the document).
+// non-canonical (duplicate_of) entry is the clear-state signal, so the worker must
+// receive it and branch on `closed` (true = clear its embed state instead of embedding).
 //
 // Orders by the outbox's OWN job_posted_at (denormalized at enqueue time from
 // COALESCE(jobs.posted_at, jobs.created_at) — see EnqueuePendingSemanticJobs) rather
@@ -92,12 +92,75 @@ SET semantic_embedded_model = NULL,
 WHERE id = ANY($1::bigint[])
 `
 
-// Clear a batch of jobs' embed provenance AND their durable vector after their documents
-// are removed from jobs_semantic (closed-job path). Run in the same transaction as
-// DeleteSemanticEntriesBatch. Dropping semantic_embedding keeps Postgres consistent with
-// the index: a closed job has no vector in either place.
+// Clear a batch of jobs' embed provenance AND null the legacy jobs.semantic_embedding
+// column (closed-job path). Run in the same transaction as DeleteSemanticEntriesBatch
+// and DeleteJobSemanticChunks (see that query). Nothing writes semantic_embedding on
+// the open-job path anymore — job_semantic_chunks is the queryable representation now
+// (see openspec/changes/drop-hybrid-search-pgvector-similar) — but this still nulls it
+// on close: cheap, and it keeps a closed job's row free of a stale value from before
+// that write was removed, without needing a one-off backfill to clean up the column.
+// The column itself stays (dropping it is a separate, later change).
 func (q *Queries) ClearSemanticEmbeddedBatch(ctx context.Context, ids []int64) error {
 	_, err := q.db.Exec(ctx, clearSemanticEmbeddedBatch, ids)
+	return err
+}
+
+const clearSimilarComputedAtBatch = `-- name: ClearSimilarComputedAtBatch :exec
+UPDATE jobs
+SET similar_computed_at = NULL
+WHERE id = ANY($1::bigint[])
+`
+
+// Null a batch of jobs' precomputed-similarity staleness stamp. Run in the SAME
+// transaction as the open-job embed stamp / chunk replace (cmd/embed) — a job whose
+// chunks were just replaced has a stale (or absent) jobs.similar_job_ids, so this
+// clears similar_computed_at unconditionally for the whole open batch, letting
+// cmd/similar-backfill's incremental predicate ("similar_computed_at IS NULL, or a job
+// with no chunk rows at all is simply never selected") pick the job back up. Cheap and
+// idempotent — nulling an already-NULL column is a no-op write, not worth a
+// conditional guard.
+func (q *Queries) ClearSimilarComputedAtBatch(ctx context.Context, ids []int64) error {
+	_, err := q.db.Exec(ctx, clearSimilarComputedAtBatch, ids)
+	return err
+}
+
+const deleteJobSemanticChunks = `-- name: DeleteJobSemanticChunks :exec
+
+DELETE FROM job_semantic_chunks
+WHERE job_id = ANY($1::bigint[])
+`
+
+// ---------------------------------------------------------------------------
+// job_semantic_chunks: pgvector-backed per-chunk embeddings (see migration 0092
+// and openspec/changes/drop-hybrid-search-pgvector-similar/design.md Decisions 1/5).
+// A job's description is HTML-stripped and split into one or more chunks, each with
+// its own vector(768) row here — replacing the single, doubly-truncated
+// jobs.semantic_embedding vector as the queryable representation. Consumers:
+// cmd/embed (writes, via DeleteJobSemanticChunks + InsertJobSemanticChunks or
+// DeleteJobSemanticChunks alone for a closed job) and cmd/similar-backfill (reads,
+// via NearestJobsToJob). GET /me/recommendations was removed rather than migrated
+// to pgvector (see drop-hybrid-search-pgvector-similar's Context: "Mid-implementation
+// reversal"); it never got a caller.
+// ---------------------------------------------------------------------------
+// Remove every chunk row for a BATCH of jobs in one round trip — mirrors every other
+// batch mutation in this file (StampSemanticEmbeddedBatch, ClearSemanticEmbeddedBatch,
+// ClearSimilarComputedAtBatch, DeleteSemanticEntriesBatch), all one `WHERE id = ANY($1)`
+// call rather than one call per job: this pipeline was historically bottlenecked by
+// per-row Postgres round trips during a bulk backfill, not by GPU/TEI throughput, and
+// the upcoming full-catalogue re-embed (openspec/changes/
+// drop-hybrid-search-pgvector-similar, ~1.6-2M jobs) would reintroduce exactly that
+// regression at EMBED_BATCH_SIZE (default 500) deletes per transaction if this looped
+// per job instead. Two callers, both batched: the open-job re-embed path issues ONE
+// call for the whole wave's job ids immediately before the per-job
+// InsertJobSemanticChunks loop, in the same transaction (a job's chunk COUNT can change
+// between embeds — the source text was re-chunked — so there is no stable
+// per-chunk_index UPDATE target, "replace" has to be delete-then-insert, not an
+// upsert); the closed-job path issues ONE call for its whole batch alone, actually
+// mirroring ClearSemanticEmbeddedBatch's own batched round-trip shape, not just its
+// clear semantics. ON DELETE CASCADE from jobs already covers a hard delete
+// (cmd/prune) — this query is for the two soft paths cascade doesn't reach.
+func (q *Queries) DeleteJobSemanticChunks(ctx context.Context, jobIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteJobSemanticChunks, jobIds)
 	return err
 }
 
@@ -135,17 +198,15 @@ ON CONFLICT (job_id, target_model) DO NOTHING
 //     never surface via keyword/category search either (see search.CategoryUnresolved,
 //     internal/search/document.go). Before this the gate was category-based
 //     (category <> ALL(NonTechCategories)), a deliberate "category-gated, not
-//     tech-only" design — measured 2026-07-22 at only 35% of jobs_semantic's ~2.05M
-//     docs carrying an is_tech tag, i.e. the same undifferentiated bulk the facet-index
-//     and enrichment gates were tightened against. This enqueue change does not purge
-//     the existing non-tech vectors already stamped in jobs_semantic — that needs a
-//     one-time surgical Meili delete-batch (expensive: re-merges the whole index), not
-//     a code change; this only stops the incremental gate from re-adding them.
+//     tech-only" design — measured 2026-07-22 at only 35% of the (now-removed)
+//     jobs_semantic Meili index's ~2.05M docs carrying an is_tech tag, i.e. the same
+//     undifferentiated bulk the facet-index and enrichment gates were tightened
+//     against.
 //  2. UNINDEXABLE jobs that still carry an embed stamp (were embedded while open and
 //     canonical) — a job now closed OR a non-canonical repost (duplicate_of set) — so
-//     the worker removes their document from jobs_semantic and clears the stamp. This
-//     mirrors the facet index: the full reindex --semantic also drops reposts (shared
-//     splitJobs), so the incremental path must not re-add them.
+//     the worker clears their stamp, legacy vector, and job_semantic_chunks rows
+//     (Store.CompleteClosed; there is no search index left to remove a document from —
+//     see openspec/changes/drop-hybrid-search-pgvector-similar).
 //
 // ON CONFLICT keeps exactly one entry per (job_id, target_model), so running this every
 // command invocation never duplicates work. job_posted_at denormalizes
@@ -159,15 +220,40 @@ func (q *Queries) EnqueuePendingSemanticJobs(ctx context.Context, targetModel st
 	return result.RowsAffected(), nil
 }
 
+const getJobSemanticGeneration = `-- name: GetJobSemanticGeneration :one
+SELECT semantic_embedded_hash
+FROM jobs
+WHERE id = $1::bigint
+`
+
+// The source job's chunk-generation marker (design.md's NearestJobsToJob rollup has no
+// row to carry this on when a job's every candidate gets excluded, so it is its own
+// query, read in the same round trip as NearestJobsToJob rather than folded into it).
+// semantic_embedded_hash is stamped from content_hash by StampSemanticEmbeddedBatch in
+// the same transaction that writes a job's current job_semantic_chunks rows, so it
+// changes exactly when cmd/embed replaces those rows. cmd/similar-backfill passes the
+// value read here back to SetSimilarJobIDs as a conditional-write guard: if cmd/embed
+// re-embeds this job between this read and that write, the source's chunks (and the
+// NearestJobsToJob result computed from them) are already stale, and the guard drops
+// the write instead of stamping similar_computed_at over data the concurrent re-embed
+// already invalidated.
+func (q *Queries) GetJobSemanticGeneration(ctx context.Context, jobID int64) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getJobSemanticGeneration, jobID)
+	var semantic_embedded_hash pgtype.Text
+	err := row.Scan(&semantic_embedded_hash)
+	return semantic_embedded_hash, err
+}
+
 const getJobsByIDs = `-- name: GetJobsByIDs :many
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, salary_min_source, salary_max_source, salary_currency_source, salary_period_source
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source
 FROM jobs
 WHERE id = ANY($1::bigint[])
 `
 
-// Batch-load the persisted rows the embed worker builds documents from. A corrupted
-// row (SQLSTATE XX001) aborts the whole scan; the worker then retries the batch one id
-// at a time to isolate and dead-letter the bad row.
+// Batch-load persisted rows by id. Two callers: the embed worker builds documents
+// from them (a corrupted row, SQLSTATE XX001, aborts the whole scan there; the
+// worker then retries the batch one id at a time to isolate and dead-letter the bad
+// row), and the /similar handler projects them to the public job wire shape.
 func (q *Queries) GetJobsByIDs(ctx context.Context, ids []int64) ([]Job, error) {
 	rows, err := q.db.Query(ctx, getJobsByIDs, ids)
 	if err != nil {
@@ -231,11 +317,102 @@ func (q *Queries) GetJobsByIDs(ctx context.Context, ids []int64) ([]Job, error) 
 			&i.AtsAbsentAt,
 			&i.ClosedReason,
 			&i.IsPrivate,
+			&i.SimilarJobIds,
+			&i.SimilarComputedAt,
 			&i.SalaryMinSource,
 			&i.SalaryMaxSource,
 			&i.SalaryCurrencySource,
 			&i.SalaryPeriodSource,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertJobSemanticChunks = `-- name: InsertJobSemanticChunks :exec
+INSERT INTO job_semantic_chunks (job_id, chunk_index, embedding)
+SELECT $1::bigint, idx.chunk_index, emb.embedding::vector(768)
+FROM unnest($2::smallint[]) WITH ORDINALITY AS idx(chunk_index, n)
+JOIN unnest($3::text[]) WITH ORDINALITY AS emb(embedding, n) USING (n)
+`
+
+type InsertJobSemanticChunksParams struct {
+	JobID        int64    `json:"job_id"`
+	ChunkIndices []int16  `json:"chunk_indices"`
+	Embeddings   []string `json:"embeddings"`
+}
+
+// Batch-insert one job's freshly-embedded chunks. chunk_indices and embeddings are
+// positionally paired parallel arrays (element i of one belongs with element i of the
+// other) — unnested separately and rejoined WITH ORDINALITY because sqlc cannot infer
+// the types of a multi-argument unnest over query parameters (same pattern as
+// pruning.sql's bulk job delete/archive). embeddings travels as vector literal TEXT
+// (e.g. "[0.1,0.2,...]"), not a native vector(768)[] array: pgx's driver.Valuer/
+// sql.Scanner fallback for pgvector.Vector (this repo registers no custom OID codec
+// for it) only covers a single scalar column value, not an array of them, so each
+// element casts to vector(768) individually in the SELECT instead. Always run
+// immediately after DeleteJobSemanticChunks in the same transaction as the embed
+// stamp — see that query's comment.
+func (q *Queries) InsertJobSemanticChunks(ctx context.Context, arg InsertJobSemanticChunksParams) error {
+	_, err := q.db.Exec(ctx, insertJobSemanticChunks, arg.JobID, arg.ChunkIndices, arg.Embeddings)
+	return err
+}
+
+const nearestJobsToJob = `-- name: NearestJobsToJob :many
+SELECT j2.id AS job_id, MIN(c2.embedding <=> c1.embedding)::float8 AS distance
+FROM job_semantic_chunks c1
+JOIN jobs j1 ON j1.id = c1.job_id
+JOIN job_semantic_chunks c2 ON c2.job_id <> c1.job_id
+JOIN jobs j2 ON j2.id = c2.job_id AND j2.closed_at IS NULL
+WHERE c1.job_id = $1::bigint
+  AND (j1.company_slug = '' OR j2.company_slug IS DISTINCT FROM j1.company_slug)
+GROUP BY j2.id
+ORDER BY distance
+LIMIT $2::int
+`
+
+type NearestJobsToJobParams struct {
+	JobID      int64 `json:"job_id"`
+	LimitCount int32 `json:"limit_count"`
+}
+
+type NearestJobsToJobRow struct {
+	JobID    int64   `json:"job_id"`
+	Distance float64 `json:"distance"`
+}
+
+// The similar-jobs rollup for one source job (design.md Decision 5), consumed by
+// cmd/similar-backfill to populate jobs.similar_job_ids. A candidate job's distance to
+// the source is the MINIMUM cosine distance across every (source chunk, candidate
+// chunk) pair — the single nearest passage wins, not an average — so a long job with
+// one perfectly-matching paragraph outranks a job that is merely "somewhat close"
+// everywhere; this mirrors the chunking branch's own Meili-side scoring rule ("nearest
+// of a multi-vector document's vectors"), kept intentionally the same across the
+// storage-engine change. j1 (the source job) is joined once, not re-looked-up per c1
+// row via a correlated subquery, to read its company_slug for the exclusion below —
+// functionally identical to design.md's draft (which used
+// `company_slug IS DISTINCT FROM (SELECT company_slug FROM jobs WHERE id = c1.job_id)`)
+// but avoids re-executing a subquery per source-chunk row. Excludes: the source job
+// itself (c2.job_id <> c1.job_id), closed candidates, and — unless the source job has
+// no resolved company (company_slug = ”, this repo's "unknown company" sentinel, see
+// jobs.company_slug NOT NULL DEFAULT ”) — any candidate sharing the source's exact
+// company_slug, so two different companies that both merely lack a resolved slug don't
+// spuriously exclude each other.
+func (q *Queries) NearestJobsToJob(ctx context.Context, arg NearestJobsToJobParams) ([]NearestJobsToJobRow, error) {
+	rows, err := q.db.Query(ctx, nearestJobsToJob, arg.JobID, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NearestJobsToJobRow{}
+	for rows.Next() {
+		var i NearestJobsToJobRow
+		if err := rows.Scan(&i.JobID, &i.Distance); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -281,26 +458,100 @@ func (q *Queries) RecordSemanticFailure(ctx context.Context, arg RecordSemanticF
 	return i, err
 }
 
-const setSemanticEmbedding = `-- name: SetSemanticEmbedding :exec
-UPDATE jobs
-SET semantic_embedding = $1::real[]
-WHERE id = $2
+const selectJobsNeedingSimilarBackfill = `-- name: SelectJobsNeedingSimilarBackfill :many
+
+SELECT j.id AS job_id
+FROM jobs j
+WHERE j.similar_computed_at IS NULL
+  AND EXISTS (SELECT 1 FROM job_semantic_chunks c WHERE c.job_id = j.id)
+ORDER BY COALESCE(j.posted_at, j.created_at) DESC, j.id DESC
+LIMIT $1::int
 `
 
-type SetSemanticEmbeddingParams struct {
-	Embedding []float32 `json:"embedding"`
-	ID        int64     `json:"id"`
+// ---------------------------------------------------------------------------
+// cmd/similar-backfill: the run-once-and-exit worker that populates
+// jobs.similar_job_ids/similar_computed_at from NearestJobsToJob above. Finds
+// outstanding work by direct query, not a claimed/leased outbox table (design.md
+// Decision 4 — telagon's cmd/similar-backfill, the original inspiration, has no
+// outbox table either: the predicate below is idempotent and re-orderable, so a
+// batched full-table scan needs no lease/dead-letter machinery to stay safe under a
+// re-run or an overlapping manual invocation).
+// ---------------------------------------------------------------------------
+// Jobs needing a (re)computed precomputed similar-jobs list: at least one
+// job_semantic_chunks row (so NearestJobsToJob has something to search from) but no
+// current list (similar_computed_at IS NULL). A plain IS NULL check, not "IS NULL OR
+// older than the newest chunk" — cmd/embed's CompleteOpen already nulls
+// similar_computed_at on EVERY chunk replace (ClearSimilarComputedAtBatch, called
+// unconditionally for the whole re-embedded batch, even when the new chunk count
+// happens to match the old one), so "missing" and "stale" already collapse to the same
+// NULL check; there is no case where a job's chunks changed but its
+// similar_computed_at stayed non-NULL. A job with zero chunk rows (never embedded, or
+// its description was too short/empty to chunk) is simply never selected — the EXISTS
+// clause already requires at least one row, no separate guard needed. A closed source
+// job is NOT excluded here (only closed CANDIDATES are, inside NearestJobsToJob) —
+// cmd/embed's own closed-job path deletes a job's chunk rows once its outbox entry
+// drains, which removes it from this predicate on its own; excluding closed_at here
+// too would just duplicate that cleanup with a narrower race window, not add safety.
+// Ordered freshest-job-first (mirrors ClaimSemanticBatch's ordering) so newly-posted
+// jobs get a similar-jobs list before older backlog on a still-draining catalogue.
+func (q *Queries) SelectJobsNeedingSimilarBackfill(ctx context.Context, limitCount int32) ([]int64, error) {
+	rows, err := q.db.Query(ctx, selectJobsNeedingSimilarBackfill, limitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var job_id int64
+		if err := rows.Scan(&job_id); err != nil {
+			return nil, err
+		}
+		items = append(items, job_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-// Persist one job's semantic vector — the durable copy of what was just upserted into
-// the jobs_semantic index. Called once per embedded job inside the SAME transaction as
-// StampSemanticEmbeddedBatch on the open-job success path, so the stamp and the vector
-// commit together (a job is never marked embedded without its vector reaching Postgres).
-// Postgres thus becomes the source of truth for the vector: the nightly pg_dump backs it
-// up and reindex can rehydrate Meili from it without re-embedding. Idempotent by primary key.
-func (q *Queries) SetSemanticEmbedding(ctx context.Context, arg SetSemanticEmbeddingParams) error {
-	_, err := q.db.Exec(ctx, setSemanticEmbedding, arg.Embedding, arg.ID)
-	return err
+const setSimilarJobIDs = `-- name: SetSimilarJobIDs :execrows
+UPDATE jobs
+SET similar_job_ids = $1::bigint[],
+    similar_computed_at = now()
+WHERE id = $2::bigint
+  AND semantic_embedded_hash IS NOT DISTINCT FROM $3
+`
+
+type SetSimilarJobIDsParams struct {
+	SimilarJobIds      []int64     `json:"similar_job_ids"`
+	ID                 int64       `json:"id"`
+	ExpectedGeneration pgtype.Text `json:"expected_generation"`
+}
+
+// Write one job's precomputed similar-jobs list and stamp similar_computed_at
+// together, so a job is never marked computed without its list landing. A nil/empty
+// similar_job_ids is a valid, intentional write (a job whose only close matches were
+// excluded by NearestJobsToJob's same-company rule ends up with a short or empty
+// list, not an error) — it still stamps the job so
+// SelectJobsNeedingSimilarBackfill's incremental predicate does not pick it up again
+// every run. One row at a time, not batched like cmd/embed's writes: each job's array
+// value is unique per row, so there is no shared payload to amortize across a wave the
+// way a single Meili task amortizes cmd/embed's batch upsert.
+//
+// The generation guard (IS NOT DISTINCT FROM, since a job with zero chunk rows would
+// never reach here but the comparison stays NULL-safe) makes this write a no-op — zero
+// rows affected, reported to the caller via :execrows — if cmd/embed replaced this
+// job's chunks (and cleared similar_computed_at itself, ClearSimilarComputedAtBatch)
+// after GetJobSemanticGeneration/NearestJobsToJob read it but before this write lands.
+// Without the guard this UPDATE would stamp similar_computed_at over a list computed
+// from chunks that no longer exist, and the job's now-current chunks would never be
+// backfilled until their NEXT content change.
+func (q *Queries) SetSimilarJobIDs(ctx context.Context, arg SetSimilarJobIDsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setSimilarJobIDs, arg.SimilarJobIds, arg.ID, arg.ExpectedGeneration)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const stampSemanticEmbeddedBatch = `-- name: StampSemanticEmbeddedBatch :exec

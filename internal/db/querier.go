@@ -229,8 +229,8 @@ type Querier interface {
 	ClaimSearchOutboxBatch(ctx context.Context, arg ClaimSearchOutboxBatchParams) ([]ClaimSearchOutboxBatchRow, error)
 	// Claim a batch of live, unleased entries, freshest job first, by stamping claimed_at.
 	// Unlike ClaimEnrichmentBatch this does NOT filter unindexable jobs out: a closed OR
-	// non-canonical (duplicate_of) entry is the removal signal, so the worker must receive
-	// it and branch on `closed` (true = remove the document).
+	// non-canonical (duplicate_of) entry is the clear-state signal, so the worker must
+	// receive it and branch on `closed` (true = clear its embed state instead of embedding).
 	//
 	// Orders by the outbox's OWN job_posted_at (denormalized at enqueue time from
 	// COALESCE(jobs.posted_at, jobs.created_at) — see EnqueuePendingSemanticJobs) rather
@@ -296,11 +296,24 @@ type Querier interface {
 	// affected row count: 1 for an owned row (whether or not it was shared — unshare is an
 	// idempotent no-op when already private), 0 when missing or not the caller's (→ 404).
 	ClearSavedSearchPublicSlug(ctx context.Context, arg ClearSavedSearchPublicSlugParams) (int64, error)
-	// Clear a batch of jobs' embed provenance AND their durable vector after their documents
-	// are removed from jobs_semantic (closed-job path). Run in the same transaction as
-	// DeleteSemanticEntriesBatch. Dropping semantic_embedding keeps Postgres consistent with
-	// the index: a closed job has no vector in either place.
+	// Clear a batch of jobs' embed provenance AND null the legacy jobs.semantic_embedding
+	// column (closed-job path). Run in the same transaction as DeleteSemanticEntriesBatch
+	// and DeleteJobSemanticChunks (see that query). Nothing writes semantic_embedding on
+	// the open-job path anymore — job_semantic_chunks is the queryable representation now
+	// (see openspec/changes/drop-hybrid-search-pgvector-similar) — but this still nulls it
+	// on close: cheap, and it keeps a closed job's row free of a stale value from before
+	// that write was removed, without needing a one-off backfill to clean up the column.
+	// The column itself stays (dropping it is a separate, later change).
 	ClearSemanticEmbeddedBatch(ctx context.Context, ids []int64) error
+	// Null a batch of jobs' precomputed-similarity staleness stamp. Run in the SAME
+	// transaction as the open-job embed stamp / chunk replace (cmd/embed) — a job whose
+	// chunks were just replaced has a stale (or absent) jobs.similar_job_ids, so this
+	// clears similar_computed_at unconditionally for the whole open batch, letting
+	// cmd/similar-backfill's incremental predicate ("similar_computed_at IS NULL, or a job
+	// with no chunk rows at all is simply never selected") pick the job back up. Cheap and
+	// idempotent — nulling an already-NULL column is a no-op write, not worth a
+	// conditional guard.
+	ClearSimilarComputedAtBatch(ctx context.Context, ids []int64) error
 	// Forget a credential the gateway no longer recognises, so the next call mints a
 	// replacement. Conditional on the value we believe is stored: a concurrent call may have
 	// already re-minted, and clearing unconditionally would throw away that good credential
@@ -721,6 +734,36 @@ type Querier interface {
 	// aged out.
 	DeleteExpiredTracerClicks(ctx context.Context, maxAge pgtype.Interval) (int64, error)
 	DeleteGmailConnection(ctx context.Context, userID int64) error
+	// ---------------------------------------------------------------------------
+	// job_semantic_chunks: pgvector-backed per-chunk embeddings (see migration 0092
+	// and openspec/changes/drop-hybrid-search-pgvector-similar/design.md Decisions 1/5).
+	// A job's description is HTML-stripped and split into one or more chunks, each with
+	// its own vector(768) row here — replacing the single, doubly-truncated
+	// jobs.semantic_embedding vector as the queryable representation. Consumers:
+	// cmd/embed (writes, via DeleteJobSemanticChunks + InsertJobSemanticChunks or
+	// DeleteJobSemanticChunks alone for a closed job) and cmd/similar-backfill (reads,
+	// via NearestJobsToJob). GET /me/recommendations was removed rather than migrated
+	// to pgvector (see drop-hybrid-search-pgvector-similar's Context: "Mid-implementation
+	// reversal"); it never got a caller.
+	// ---------------------------------------------------------------------------
+	// Remove every chunk row for a BATCH of jobs in one round trip — mirrors every other
+	// batch mutation in this file (StampSemanticEmbeddedBatch, ClearSemanticEmbeddedBatch,
+	// ClearSimilarComputedAtBatch, DeleteSemanticEntriesBatch), all one `WHERE id = ANY($1)`
+	// call rather than one call per job: this pipeline was historically bottlenecked by
+	// per-row Postgres round trips during a bulk backfill, not by GPU/TEI throughput, and
+	// the upcoming full-catalogue re-embed (openspec/changes/
+	// drop-hybrid-search-pgvector-similar, ~1.6-2M jobs) would reintroduce exactly that
+	// regression at EMBED_BATCH_SIZE (default 500) deletes per transaction if this looped
+	// per job instead. Two callers, both batched: the open-job re-embed path issues ONE
+	// call for the whole wave's job ids immediately before the per-job
+	// InsertJobSemanticChunks loop, in the same transaction (a job's chunk COUNT can change
+	// between embeds — the source text was re-chunked — so there is no stable
+	// per-chunk_index UPDATE target, "replace" has to be delete-then-insert, not an
+	// upsert); the closed-job path issues ONE call for its whole batch alone, actually
+	// mirroring ClearSemanticEmbeddedBatch's own batched round-trip shape, not just its
+	// clear semantics. ON DELETE CASCADE from jobs already covers a hard delete
+	// (cmd/prune) — this query is for the two soft paths cascade doesn't reach.
+	DeleteJobSemanticChunks(ctx context.Context, jobIds []int64) error
 	DeleteMailbox(ctx context.Context, userID int64) error
 	// Drop companies no longer referenced by any job — the stale rows left behind
 	// when a slug-builder change re-keys jobs onto new slugs. Reference rows imported
@@ -859,17 +902,15 @@ type Querier interface {
 	//      never surface via keyword/category search either (see search.CategoryUnresolved,
 	//      internal/search/document.go). Before this the gate was category-based
 	//      (category <> ALL(NonTechCategories)), a deliberate "category-gated, not
-	//      tech-only" design — measured 2026-07-22 at only 35% of jobs_semantic's ~2.05M
-	//      docs carrying an is_tech tag, i.e. the same undifferentiated bulk the facet-index
-	//      and enrichment gates were tightened against. This enqueue change does not purge
-	//      the existing non-tech vectors already stamped in jobs_semantic — that needs a
-	//      one-time surgical Meili delete-batch (expensive: re-merges the whole index), not
-	//      a code change; this only stops the incremental gate from re-adding them.
+	//      tech-only" design — measured 2026-07-22 at only 35% of the (now-removed)
+	//      jobs_semantic Meili index's ~2.05M docs carrying an is_tech tag, i.e. the same
+	//      undifferentiated bulk the facet-index and enrichment gates were tightened
+	//      against.
 	//   2. UNINDEXABLE jobs that still carry an embed stamp (were embedded while open and
 	//      canonical) — a job now closed OR a non-canonical repost (duplicate_of set) — so
-	//      the worker removes their document from jobs_semantic and clears the stamp. This
-	//      mirrors the facet index: the full reindex --semantic also drops reposts (shared
-	//      splitJobs), so the incremental path must not re-add them.
+	//      the worker clears their stamp, legacy vector, and job_semantic_chunks rows
+	//      (Store.CompleteClosed; there is no search index left to remove a document from —
+	//      see openspec/changes/drop-hybrid-search-pgvector-similar).
 	// ON CONFLICT keeps exactly one entry per (job_id, target_model), so running this every
 	// command invocation never duplicates work. job_posted_at denormalizes
 	// COALESCE(posted_at, created_at) onto the outbox row so ClaimSemanticBatch can sort by
@@ -1126,12 +1167,25 @@ type Querier interface {
 	// columns over the wire on every silent view. GetJobBySlug (SELECT *) stays for the
 	// public detail handler that renders the whole row.
 	GetJobIDBySlug(ctx context.Context, publicSlug string) (int64, error)
+	// The source job's chunk-generation marker (design.md's NearestJobsToJob rollup has no
+	// row to carry this on when a job's every candidate gets excluded, so it is its own
+	// query, read in the same round trip as NearestJobsToJob rather than folded into it).
+	// semantic_embedded_hash is stamped from content_hash by StampSemanticEmbeddedBatch in
+	// the same transaction that writes a job's current job_semantic_chunks rows, so it
+	// changes exactly when cmd/embed replaces those rows. cmd/similar-backfill passes the
+	// value read here back to SetSimilarJobIDs as a conditional-write guard: if cmd/embed
+	// re-embeds this job between this read and that write, the source's chunks (and the
+	// NearestJobsToJob result computed from them) are already stale, and the guard drops
+	// the write instead of stamping similar_computed_at over data the concurrent re-embed
+	// already invalidated.
+	GetJobSemanticGeneration(ctx context.Context, jobID int64) (pgtype.Text, error)
 	// The caller's current vote for a job (0 when none), for my_vote on auth-aware
 	// detail reads. Always returns one row via the COALESCE'd scalar subquery.
 	GetJobVote(ctx context.Context, arg GetJobVoteParams) (int16, error)
-	// Batch-load the persisted rows the embed worker builds documents from. A corrupted
-	// row (SQLSTATE XX001) aborts the whole scan; the worker then retries the batch one id
-	// at a time to isolate and dead-letter the bad row.
+	// Batch-load persisted rows by id. Two callers: the embed worker builds documents
+	// from them (a corrupted row, SQLSTATE XX001, aborts the whole scan there; the
+	// worker then retries the batch one id at a time to isolate and dead-letter the bad
+	// row), and the /similar handler projects them to the public job wire shape.
 	GetJobsByIDs(ctx context.Context, ids []int64) ([]Job, error)
 	// The display fields for the jobs in a digest, freshest first. Salary fields are
 	// projected out of the enrichment JSONB (absent keys → NULL) so a card can render
@@ -1200,6 +1254,17 @@ type Querier interface {
 	// The caller's single screening-answers record, keyed by user_id. No matching row means
 	// the candidate has not stated any screening answer yet.
 	GetScreeningAnswers(ctx context.Context, userID int64) (ScreeningAnswer, error)
+	// Narrow read for GET /jobs/:slug/similar (internal/handler/similar.go): only the
+	// precomputed neighbour-id list (jobs.similar_job_ids, populated by
+	// cmd/similar-backfill — see semantic.sql's job_semantic_chunks section), not the
+	// whole wide job row. Mirrors GetJobDescriptionsByIDs's "narrow projection for a
+	// hot read path" precedent above. The list is nearest-first and, as of writing,
+	// capped at cmd/similar-backfill's -similar flag (default 20, matching the API's
+	// maxSimilarLimit) — the handler still re-filters it to open jobs at read time,
+	// since a neighbour can close after it was computed. A job with no precomputed
+	// list yet (never backfilled) comes back with a NULL/nil similar_job_ids, not an
+	// error — the handler treats "not backfilled yet" and "computed empty" the same.
+	GetSimilarJobIDs(ctx context.Context, id int64) ([]int64, error)
 	// Load a single submission by id for the review path. The approve/reject flow guards the
 	// status in the service; the Mark* queries are additionally scoped to status='pending' as
 	// defense-in-depth against a concurrent second decision.
@@ -1295,10 +1360,6 @@ type Querier interface {
 	// The authenticated user's résumé pointer (object key + upload time), or NULLs when
 	// no résumé is stored. The blob lives in S3 under the key; this is just the pointer.
 	GetUserResume(ctx context.Context, id int64) (GetUserResumeRow, error)
-	// The user's persisted CV embedding and the embedder identity that produced it, or
-	// NULLs when none is stored. The caller ignores a vector whose model no longer matches
-	// the current embedder (stale) — see the cv-recommendations change.
-	GetUserResumeEmbedding(ctx context.Context, id int64) (GetUserResumeEmbeddingRow, error)
 	// The geography derived from the user's structured résumé, alongside the two stamps the
 	// caller needs to judge freshness (the derivation's own stamp and the current résumé
 	// upload time) — the same stamp-and-compare the structure read uses, so a geography
@@ -1371,6 +1432,18 @@ type Querier interface {
 	// Store a message received at a hosted mailbox, idempotent by
 	// (user_id, source, external_id) with source fixed to 'hosted'.
 	InsertHostedMessage(ctx context.Context, arg InsertHostedMessageParams) error
+	// Batch-insert one job's freshly-embedded chunks. chunk_indices and embeddings are
+	// positionally paired parallel arrays (element i of one belongs with element i of the
+	// other) — unnested separately and rejoined WITH ORDINALITY because sqlc cannot infer
+	// the types of a multi-argument unnest over query parameters (same pattern as
+	// pruning.sql's bulk job delete/archive). embeddings travels as vector literal TEXT
+	// (e.g. "[0.1,0.2,...]"), not a native vector(768)[] array: pgx's driver.Valuer/
+	// sql.Scanner fallback for pgvector.Vector (this repo registers no custom OID codec
+	// for it) only covers a single scalar column value, not an array of them, so each
+	// element casts to vector(768) individually in the SELECT instead. Always run
+	// immediately after DeleteJobSemanticChunks in the same transaction as the embed
+	// stamp — see that query's comment.
+	InsertJobSemanticChunks(ctx context.Context, arg InsertJobSemanticChunksParams) error
 	// Claim an address for a user. May raise a unique violation on user_id (already
 	// has a mailbox) or address (taken) — the allocation service handles both: it
 	// reads-back on a user conflict and retries the next suffix on an address conflict.
@@ -1861,18 +1934,6 @@ type Querier interface {
 	// index current without re-pushing the whole table. Returns closed rows too, so
 	// the caller deletes a freshly-closed job from the index.
 	ListJobsUpdatedAfter(ctx context.Context, arg ListJobsUpdatedAfterParams) ([]Job, error)
-	// Id-only projection of ListOpenJobsPostedAfter — the corruption-degrade path for the
-	// freshness-scoped semantic scan, mirroring ListJobIDsAfter.
-	ListOpenJobIDsPostedAfter(ctx context.Context, arg ListOpenJobIDsPostedAfterParams) ([]int64, error)
-	// Freshness-scoped keyset scan for `reindex --semantic --posted-within`: open jobs
-	// whose effective posting date (COALESCE(posted_at, created_at) — the same date
-	// jobview derives and the search doc's posted_ts encodes) is at or after the cutoff.
-	// The in-engine embedder cannot embed the whole open catalogue in reasonable time, so
-	// the semantic index covers only this fresh window; being a swap rebuild it also drops
-	// jobs that have since aged out. Open-only (closed_at IS NULL): a swap rebuild never
-	// holds closed jobs, so unlike ListJobsUpdatedAfter there is nothing to delete. Served
-	// by jobs_open_enrich_freshness_idx (COALESCE(posted_at, created_at) DESC WHERE open).
-	ListOpenJobsPostedAfter(ctx context.Context, arg ListOpenJobsPostedAfterParams) ([]Job, error)
 	// Keyset continuation: rows strictly older than the cursor (created_at, id). No
 	// OFFSET, so deep pages never scan skipped rows.
 	ListOpenThreadsAfter(ctx context.Context, arg ListOpenThreadsAfterParams) ([]ListOpenThreadsAfterRow, error)
@@ -2194,6 +2255,24 @@ type Querier interface {
 	// yields no row exactly like a concurrent delete already did, and the caller reports both
 	// the same way — reload and retry — rather than pretending a still-present row vanished.
 	MergeExperienceAtoms(ctx context.Context, arg MergeExperienceAtomsParams) (MergeExperienceAtomsRow, error)
+	// The similar-jobs rollup for one source job (design.md Decision 5), consumed by
+	// cmd/similar-backfill to populate jobs.similar_job_ids. A candidate job's distance to
+	// the source is the MINIMUM cosine distance across every (source chunk, candidate
+	// chunk) pair — the single nearest passage wins, not an average — so a long job with
+	// one perfectly-matching paragraph outranks a job that is merely "somewhat close"
+	// everywhere; this mirrors the chunking branch's own Meili-side scoring rule ("nearest
+	// of a multi-vector document's vectors"), kept intentionally the same across the
+	// storage-engine change. j1 (the source job) is joined once, not re-looked-up per c1
+	// row via a correlated subquery, to read its company_slug for the exclusion below —
+	// functionally identical to design.md's draft (which used
+	// `company_slug IS DISTINCT FROM (SELECT company_slug FROM jobs WHERE id = c1.job_id)`)
+	// but avoids re-executing a subquery per source-chunk row. Excludes: the source job
+	// itself (c2.job_id <> c1.job_id), closed candidates, and — unless the source job has
+	// no resolved company (company_slug = '', this repo's "unknown company" sentinel, see
+	// jobs.company_slug NOT NULL DEFAULT '') — any candidate sharing the source's exact
+	// company_slug, so two different companies that both merely lack a resolved slug don't
+	// spuriously exclude each other.
+	NearestJobsToJob(ctx context.Context, arg NearestJobsToJobParams) ([]NearestJobsToJobRow, error)
 	// The revision a follow-on edit might be folded into. Only the newest is a candidate:
 	// coalescing into anything older would reorder the log.
 	NewestCVRevision(ctx context.Context, arg NewestCVRevisionParams) (CvRevision, error)
@@ -2812,6 +2891,33 @@ type Querier interface {
 	// ResetUserPassword — the revocation cannot be separated from the seizure.
 	// Returns the new generation for the session the sign-in is about to mint.
 	SeizeUnverifiedAccount(ctx context.Context, id int64) (int32, error)
+	// ---------------------------------------------------------------------------
+	// cmd/similar-backfill: the run-once-and-exit worker that populates
+	// jobs.similar_job_ids/similar_computed_at from NearestJobsToJob above. Finds
+	// outstanding work by direct query, not a claimed/leased outbox table (design.md
+	// Decision 4 — telagon's cmd/similar-backfill, the original inspiration, has no
+	// outbox table either: the predicate below is idempotent and re-orderable, so a
+	// batched full-table scan needs no lease/dead-letter machinery to stay safe under a
+	// re-run or an overlapping manual invocation).
+	// ---------------------------------------------------------------------------
+	// Jobs needing a (re)computed precomputed similar-jobs list: at least one
+	// job_semantic_chunks row (so NearestJobsToJob has something to search from) but no
+	// current list (similar_computed_at IS NULL). A plain IS NULL check, not "IS NULL OR
+	// older than the newest chunk" — cmd/embed's CompleteOpen already nulls
+	// similar_computed_at on EVERY chunk replace (ClearSimilarComputedAtBatch, called
+	// unconditionally for the whole re-embedded batch, even when the new chunk count
+	// happens to match the old one), so "missing" and "stale" already collapse to the same
+	// NULL check; there is no case where a job's chunks changed but its
+	// similar_computed_at stayed non-NULL. A job with zero chunk rows (never embedded, or
+	// its description was too short/empty to chunk) is simply never selected — the EXISTS
+	// clause already requires at least one row, no separate guard needed. A closed source
+	// job is NOT excluded here (only closed CANDIDATES are, inside NearestJobsToJob) —
+	// cmd/embed's own closed-job path deletes a job's chunk rows once its outbox entry
+	// drains, which removes it from this predicate on its own; excluding closed_at here
+	// too would just duplicate that cleanup with a narrower race window, not add safety.
+	// Ordered freshest-job-first (mirrors ClaimSemanticBatch's ordering) so newly-posted
+	// jobs get a similar-jobs list before older backlog on a still-draining catalogue.
+	SelectJobsNeedingSimilarBackfill(ctx context.Context, limitCount int32) ([]int64, error)
 	// Orphan-job liveness (probe-orphan-job-liveness): open jobs whose source is NOT a
 	// registered ATS board provider — the sources no ingest run re-crawls and the sweep
 	// therefore never closes (telegram, habr_career, geekjob, …). The caller passes the
@@ -2880,13 +2986,25 @@ type Querier interface {
 	// author_label is set verbatim (NULL clears it → anonymous). No matching owner-scoped
 	// row returns no row (→ ErrNotFound).
 	SetSavedSearchPublicSlug(ctx context.Context, arg SetSavedSearchPublicSlugParams) (SavedSearch, error)
-	// Persist one job's semantic vector — the durable copy of what was just upserted into
-	// the jobs_semantic index. Called once per embedded job inside the SAME transaction as
-	// StampSemanticEmbeddedBatch on the open-job success path, so the stamp and the vector
-	// commit together (a job is never marked embedded without its vector reaching Postgres).
-	// Postgres thus becomes the source of truth for the vector: the nightly pg_dump backs it
-	// up and reindex can rehydrate Meili from it without re-embedding. Idempotent by primary key.
-	SetSemanticEmbedding(ctx context.Context, arg SetSemanticEmbeddingParams) error
+	// Write one job's precomputed similar-jobs list and stamp similar_computed_at
+	// together, so a job is never marked computed without its list landing. A nil/empty
+	// similar_job_ids is a valid, intentional write (a job whose only close matches were
+	// excluded by NearestJobsToJob's same-company rule ends up with a short or empty
+	// list, not an error) — it still stamps the job so
+	// SelectJobsNeedingSimilarBackfill's incremental predicate does not pick it up again
+	// every run. One row at a time, not batched like cmd/embed's writes: each job's array
+	// value is unique per row, so there is no shared payload to amortize across a wave the
+	// way a single Meili task amortizes cmd/embed's batch upsert.
+	//
+	// The generation guard (IS NOT DISTINCT FROM, since a job with zero chunk rows would
+	// never reach here but the comparison stays NULL-safe) makes this write a no-op — zero
+	// rows affected, reported to the caller via :execrows — if cmd/embed replaced this
+	// job's chunks (and cleared similar_computed_at itself, ClearSimilarComputedAtBatch)
+	// after GetJobSemanticGeneration/NearestJobsToJob read it but before this write lands.
+	// Without the guard this UPDATE would stamp similar_computed_at over a list computed
+	// from chunks that no longer exist, and the job's now-current chunks would never be
+	// backfilled until their NEXT content change.
+	SetSimilarJobIDs(ctx context.Context, arg SetSimilarJobIDsParams) (int64, error)
 	// Pause/resume a subscription, scoped to its owner. No matching owner-scoped row
 	// returns no row (the handler maps that to 404).
 	SetSubscriptionActive(ctx context.Context, arg SetSubscriptionActiveParams) (Subscription, error)
@@ -2916,9 +3034,6 @@ type Querier interface {
 	// Also clears any cached ATS review so a new CV is never scored with a stale one,
 	// and marks structured extract pending for this upload (background work must catch up).
 	SetUserResume(ctx context.Context, arg SetUserResumeParams) error
-	// Persist the user's derived CV embedding vector plus the identity of the embedder
-	// that produced it (so a model change can mark the vector stale). Never the raw CV text.
-	SetUserResumeEmbedding(ctx context.Context, arg SetUserResumeEmbeddingParams) error
 	// Record that structured extract failed for the current upload. The for-stamp guard
 	// drops the write when a newer upload already superseded this attempt.
 	SetUserResumeExtractFailed(ctx context.Context, arg SetUserResumeExtractFailedParams) error

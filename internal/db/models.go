@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 type AdzunaDescriptionHydrated struct {
@@ -555,6 +556,8 @@ type Job struct {
 	AtsAbsentAt           pgtype.Timestamptz `json:"ats_absent_at"`
 	ClosedReason          string             `json:"closed_reason"`
 	IsPrivate             bool               `json:"is_private"`
+	SimilarJobIds         []int64            `json:"similar_job_ids"`
+	SimilarComputedAt     pgtype.Timestamptz `json:"similar_computed_at"`
 	SalaryMinSource       pgtype.Int4        `json:"salary_min_source"`
 	SalaryMaxSource       pgtype.Int4        `json:"salary_max_source"`
 	SalaryCurrencySource  string             `json:"salary_currency_source"`
@@ -601,6 +604,12 @@ type JobReport struct {
 	ReviewedBy      pgtype.Int8        `json:"reviewed_by"`
 	ReviewedAt      pgtype.Timestamptz `json:"reviewed_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type JobSemanticChunk struct {
+	JobID      int64           `json:"job_id"`
+	ChunkIndex int16           `json:"chunk_index"`
+	Embedding  pgvector.Vector `json:"embedding"`
 }
 
 type JobSubmission struct {

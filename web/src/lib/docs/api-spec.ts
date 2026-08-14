@@ -231,7 +231,6 @@ export const GROUPS: Group[] = [
           { name: 'q', type: 'string', description: 'Full-text query over title, company, and description.', example: 'golang' },
           { name: 'sort', type: 'string', description: 'One of `created_at`, `posted_at`, `salary_min`, `salary_max`. Omit for relevance/newest.', example: 'posted_at' },
           { name: 'order', type: 'string', description: '`asc` or `desc` (default `desc`).', example: 'desc' },
-          { name: 'semantic_ratio', type: 'number', description: 'Opt-in hybrid search, 0–1 (default 0 = pure keyword). Needs the optional semantic index.', example: '0' },
           { name: 'limit', type: 'integer', description: 'Page size, 1–100.', example: '20' },
           { name: 'offset', type: 'integer', description: 'Rows to skip; `offset + limit` ≤ 10000.', example: '0' },
         ],
@@ -256,7 +255,6 @@ export const GROUPS: Group[] = [
           { name: 'description_format', type: 'string', description: 'One of `html` (default, verbatim), `text` (tags stripped), `markdown` (HTML converted to Markdown). Unknown values fall back to `html`.', example: 'markdown' },
           { name: 'sort', type: 'string', description: 'One of `created_at`, `posted_at`, `salary_min`, `salary_max`. Omit for relevance/newest.', example: 'posted_at' },
           { name: 'order', type: 'string', description: '`asc` or `desc` (default `desc`).', example: 'desc' },
-          { name: 'semantic_ratio', type: 'number', description: 'Opt-in hybrid search, 0–1 (default 0 = pure keyword). Needs the optional semantic index.', example: '0' },
           { name: 'limit', type: 'integer', description: 'Page size, 1–100.', example: '20' },
           { name: 'offset', type: 'integer', description: 'Rows to skip; `offset + limit` ≤ 10000.', example: '0' },
         ],
@@ -446,25 +444,6 @@ export const GROUPS: Group[] = [
 data: {"kind":"requirements","requirements":[ { "...": "..." } ]}
 
 data: {"kind":"final","analysis":{"overall_score":82,"verdict":"Strong Fit","...":"..."}}`,
-      },
-      {
-        method: 'GET',
-        path: '/me/recommendations',
-        auth: 'cookie-or-key',
-        summary: 'Open jobs ranked by semantic similarity to your CV.',
-        description:
-          'Ranks jobs by your persisted CV embedding, constrained by the same facet ' +
-          'filter params as search. Degrades to a successful empty list (never an ' +
-          'error) when you have no usable CV vector or the semantic index is off.',
-        query: [
-          { name: 'limit', type: 'integer', description: 'Page size, 1–100.', example: '20' },
-          { name: 'offset', type: 'integer', description: 'Rows to skip; `offset + limit` ≤ 10000.', example: '0' },
-        ],
-        curl: `curl "${BASE_URL}/me/recommendations" -H "Authorization: Bearer $FREEHIRE_API_KEY"`,
-        responseExample: `{
-  "data": [ { "public_slug": "...", "title": "...", "...": "..." } ],
-  "meta": { "total": 40, "limit": 20, "offset": 0 }
-}`,
       },
       {
         method: 'POST',

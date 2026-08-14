@@ -23,11 +23,11 @@ type fakeStore struct {
 
 	indexErr map[int64]error // CompleteOpen error for a job id (single-item path)
 
-	openBatches   [][]int64           // job ids per CompleteOpen call (len>1 = a real batch)
-	openVectors   map[int64][]float32 // vectors handed to CompleteOpen, keyed by job id
-	closedBatches [][]int64           // job ids per CompleteClosed call
-	openDone      []int64             // all job ids CompleteOpen'd
-	closedDone    []int64             // all job ids CompleteClosed'd
+	openBatches   [][]int64                  // job ids per CompleteOpen call (len>1 = a real batch)
+	openChunks    map[int64][]ChunkEmbedding // chunks handed to CompleteOpen, keyed by job id
+	closedBatches [][]int64                  // job ids per CompleteClosed call
+	openDone      []int64                    // all job ids CompleteOpen'd
+	closedDone    []int64                    // all job ids CompleteClosed'd
 	failCalls     []failCall
 	attempts      map[int64]int // outbox id -> attempts so far
 }
@@ -80,7 +80,7 @@ func (s *fakeStore) Jobs(_ context.Context, ids []int64) ([]db.Job, error) {
 	return out, nil
 }
 
-func (s *fakeStore) CompleteOpen(_ context.Context, entries []Claimed, _ string, vectors map[int64][]float32) error {
+func (s *fakeStore) CompleteOpen(_ context.Context, entries []Claimed, _ string, chunks map[int64][]ChunkEmbedding) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var ids []int64
@@ -92,11 +92,17 @@ func (s *fakeStore) CompleteOpen(_ context.Context, entries []Claimed, _ string,
 	}
 	s.openBatches = append(s.openBatches, ids)
 	s.openDone = append(s.openDone, ids...)
-	if s.openVectors == nil {
-		s.openVectors = map[int64][]float32{}
+	if s.openChunks == nil {
+		s.openChunks = map[int64][]ChunkEmbedding{}
 	}
-	for id, v := range vectors {
-		s.openVectors[id] = v
+	// "Replace" semantics: a job absent from this call's chunks map (no chunk-worthy
+	// description) must end up with NO entry, even if a prior call left one — every
+	// entry in this batch clears any stale chunk set before a fresh one (if any) lands.
+	for _, e := range entries {
+		delete(s.openChunks, e.JobID)
+	}
+	for id, c := range chunks {
+		s.openChunks[id] = c
 	}
 	return nil
 }
@@ -121,14 +127,12 @@ func (s *fakeStore) Fail(_ context.Context, outboxID int64, msg string, maxAttem
 	return s.attempts[outboxID] >= maxAttempts, nil
 }
 
-// fakeIndexer records IndexOpen/RemoveClosed calls. batchFails makes any multi-job
-// IndexOpen fail (to exercise the per-item fallback); indexErr fails a specific job.
+// fakeIndexer records IndexOpen calls. batchFails makes any multi-job IndexOpen fail
+// (to exercise the per-item fallback); indexErr fails a specific job.
 type fakeIndexer struct {
 	mu         sync.Mutex
 	indexCalls [][]int64 // job ids per IndexOpen call
-	removeCall [][]int64 // ids per RemoveClosed call
 	indexed    []int64
-	removed    []int64
 	batchFails bool
 	indexErr   map[int64]error
 	// blockUntilCtxDone makes IndexOpen hang until the call context expires and return
@@ -139,7 +143,7 @@ type fakeIndexer struct {
 
 func newFakeIndexer() *fakeIndexer { return &fakeIndexer{indexErr: map[int64]error{}} }
 
-func (ix *fakeIndexer) IndexOpen(ctx context.Context, jobs []db.Job) (map[int64][]float32, error) {
+func (ix *fakeIndexer) IndexOpen(ctx context.Context, jobs []db.Job) (map[int64][]ChunkEmbedding, error) {
 	ix.mu.Lock()
 	ids := make([]int64, len(jobs))
 	for i, j := range jobs {
@@ -156,9 +160,14 @@ func (ix *fakeIndexer) IndexOpen(ctx context.Context, jobs []db.Job) (map[int64]
 
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
-	vecs := make(map[int64][]float32, len(jobs))
+	chunks := make(map[int64][]ChunkEmbedding, len(jobs))
 	for _, j := range jobs {
-		vecs[j.ID] = []float32{float32(j.ID)} // deterministic per-job vector
+		// A deterministic 2-chunk set per job, so tests can assert chunks reach
+		// CompleteOpen and are keyed correctly, without a real embedder.
+		chunks[j.ID] = []ChunkEmbedding{
+			{ChunkIndex: 0, Vector: []float32{float32(j.ID), 0}},
+			{ChunkIndex: 1, Vector: []float32{float32(j.ID), 1}},
+		}
 	}
 	if ix.batchFails && len(jobs) > 1 {
 		return nil, errors.New("batch embed failed")
@@ -169,15 +178,7 @@ func (ix *fakeIndexer) IndexOpen(ctx context.Context, jobs []db.Job) (map[int64]
 		}
 	}
 	ix.indexed = append(ix.indexed, ids...)
-	return vecs, nil
-}
-
-func (ix *fakeIndexer) RemoveClosed(_ context.Context, ids []int64) error {
-	ix.mu.Lock()
-	defer ix.mu.Unlock()
-	ix.removeCall = append(ix.removeCall, ids)
-	ix.removed = append(ix.removed, ids...)
-	return nil
+	return chunks, nil
 }
 
 func opt() RunOptions {
@@ -222,9 +223,8 @@ func TestRunnerBatchesOpenAndClosed(t *testing.T) {
 	if len(store.openBatches) != 1 || len(store.openBatches[0]) != 3 {
 		t.Errorf("CompleteOpen batches = %v, want a single 3-entry batch", store.openBatches)
 	}
-	if len(ix.removeCall) != 1 || len(ix.removeCall[0]) != 2 {
-		t.Errorf("RemoveClosed calls = %v, want a single 2-id batch", ix.removeCall)
-	}
+	// Closed jobs have nothing left to compute or embed — CompleteClosed alone (Store)
+	// is the whole closed-job side effect, in ONE batch call.
 	if len(store.closedBatches) != 1 || len(store.closedBatches[0]) != 2 {
 		t.Errorf("CompleteClosed batches = %v, want a single 2-entry batch", store.closedBatches)
 	}
@@ -357,7 +357,10 @@ func TestRunnerMissingJobDeadLettersInFallback(t *testing.T) {
 	}
 }
 
-func TestRunnerPersistsVectorsToStore(t *testing.T) {
+// The Indexer's chunk embeddings (job_semantic_chunks' source data) must reach
+// CompleteOpen so they commit to Postgres alongside the provenance stamp, sharing
+// its transaction and its batch-then-per-item-fallback behavior.
+func TestRunnerPersistsChunksToStore(t *testing.T) {
 	store := newFakeStore()
 	ix := newFakeIndexer()
 	for _, id := range []int64{1, 2} {
@@ -371,15 +374,46 @@ func TestRunnerPersistsVectorsToStore(t *testing.T) {
 	if _, err := (Runner{Store: store, Indexer: ix}).Run(context.Background(), opt()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	// The vectors IndexOpen produced must reach CompleteOpen so they commit to Postgres
-	// alongside the provenance stamp (the fake indexer returns [float32(id)] per job).
-	if len(store.openVectors) != 2 {
-		t.Fatalf("openVectors = %v; want 2 entries", store.openVectors)
+	if len(store.openChunks) != 2 {
+		t.Fatalf("openChunks = %v; want 2 entries", store.openChunks)
 	}
-	if got := store.openVectors[1]; len(got) != 1 || got[0] != 1 {
-		t.Fatalf("vector for job 1 = %v; want [1]", got)
+	for _, id := range []int64{1, 2} {
+		got := store.openChunks[id]
+		if len(got) != 2 {
+			t.Fatalf("chunks for job %d = %v; want 2 (fakeIndexer's fixed set)", id, got)
+		}
+		if got[0].ChunkIndex != 0 || got[1].ChunkIndex != 1 {
+			t.Errorf("chunk indices for job %d = %d,%d; want 0,1", id, got[0].ChunkIndex, got[1].ChunkIndex)
+		}
 	}
-	if got := store.openVectors[2]; len(got) != 1 || got[0] != 2 {
-		t.Fatalf("vector for job 2 = %v; want [2]", got)
+}
+
+// A job re-embedded with NO chunks this time (an empty/very short description now)
+// must end up with none in the store — CompleteOpen replaces, it never appends, so a
+// job can't accumulate a mix of a stale chunk set and nothing new.
+func TestRunnerReplacesChunksWithEmptySetWhenIndexerReturnsNone(t *testing.T) {
+	store := newFakeStore()
+	store.jobs[1] = db.Job{ID: 1}
+	store.openChunks = map[int64][]ChunkEmbedding{
+		1: {{ChunkIndex: 0, Vector: []float32{9}}}, // simulates a stale chunk from a prior embed
 	}
+	// Drive processOpenOne directly through the runner's normal per-item path with an
+	// indexer stub that returns no chunks for job 1 — bypasses fakeIndexer's fixed
+	// 2-chunk fixture entirely.
+	store.pending = []Claimed{{OutboxID: 10, JobID: 1, Closed: false}}
+
+	rn := &run{store: store, indexer: emptyChunksIndexer{}, opt: opt()}
+	rn.processOpenOne(context.Background(), Claimed{OutboxID: 10, JobID: 1, Closed: false})
+
+	if got, ok := store.openChunks[1]; ok {
+		t.Fatalf("openChunks[1] = %v, want no entry (replaced with nothing)", got)
+	}
+}
+
+// emptyChunksIndexer is a minimal Indexer that never returns any chunks — used to
+// exercise CompleteOpen's replace-with-nothing path.
+type emptyChunksIndexer struct{}
+
+func (emptyChunksIndexer) IndexOpen(_ context.Context, jobs []db.Job) (map[int64][]ChunkEmbedding, error) {
+	return nil, nil
 }

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/strelov1/freehire/internal/db"
 )
 
 // teiMaxBatch caps how many inputs go in one TEI /embed call. TEI rejects a
@@ -32,33 +34,101 @@ const embedAttemptTimeout = 60 * time.Second
 // 4s, …). A package var, not a const, so tests can shrink it to keep them fast.
 var embedRetryBase = time.Second
 
-// jobPassage renders a job document into the text embedded for semantic retrieval.
-// e5 is asymmetric: the corpus side carries the "passage:" prefix and the query side
-// carries "query:" (see EmbedText), so they must be embedded the same way to be
-// comparable.
-//
-// It prefers the enrichment summary over the raw description: the summary is a short,
-// model-written synopsis (capped well under e5's 512-token window) that captures the
-// whole role — including requirements a long description buries past the truncation
-// point — so it embeds the job more faithfully than the head-truncated description, and
-// its distilled form is closer to a CV query. Unenriched jobs fall back to the
-// description (already capped at maxIndexedDescriptionRunes).
-func jobPassage(d JobDocument) string {
-	body := d.Description
-	if s := d.Enrichment.Summary; s != "" {
-		body = s
+// JobChunkEmbedding is one embedding vector for one 0-indexed chunk of a job's
+// description, backing the pgvector job_semantic_chunks table (see openspec/changes/
+// drop-hybrid-search-pgvector-similar/design.md Decisions 1/1a). ChunkIndex matches
+// job_semantic_chunks.chunk_index.
+type JobChunkEmbedding struct {
+	ChunkIndex int16
+	Vector     []float32
+}
+
+// jobChunkPassages renders a job's FULL, HTML-stripped description into the texts
+// embedded for the pgvector-backed job_semantic_chunks table — one passage per chunk of
+// stripToPlainText(job.Description) (see chunkText). Every chunk carries the same
+// "passage: {title} at {company}. " prefix — e5 is asymmetric (the corpus side carries
+// "passage:", the query side "query:"; this codebase has no query-side embed call left,
+// since the CV-query path that needed one was removed alongside /me/recommendations) —
+// since each chunk becomes an independently-scored vector. A job with no description
+// text (or one that strips to nothing) yields no passages at all, not one passage of
+// just the prefix.
+// maxJobChunks caps how many chunks a single job contributes: ChunkIndex is stored as
+// int16 (see JobChunkEmbedding), so a description pathological enough to chunk past
+// math.MaxInt16 would wrap the index negative and collide with the primary key. No real
+// job description approaches this — chunkBudgetRunes is 2000, so the cap alone implies
+// a ~65M-rune description — this exists purely so a well-under-limit description never
+// silently produces corrupt indices.
+const maxJobChunks = 32768
+
+func jobChunkPassages(job db.Job) []string {
+	chunks := chunkText(stripToPlainText(job.Description))
+	if len(chunks) == 0 {
+		return nil
 	}
-	return "passage: " + d.Title + " at " + d.Company + ". " + body
+	if len(chunks) > maxJobChunks {
+		chunks = chunks[:maxJobChunks]
+	}
+	prefix := "passage: " + job.Title + " at " + job.Company + ". "
+	out := make([]string, len(chunks))
+	for i, c := range chunks {
+		out[i] = prefix + c
+	}
+	return out
+}
+
+// EmbedJobChunks computes one embedding vector per chunk of each job's full,
+// HTML-stripped description, keyed by job id. It never touches Meilisearch — it feeds
+// only the pgvector-backed job_semantic_chunks table (see internal/embed's open-job
+// path), the sole remaining effect of cmd/embed's TEI calls (the legacy
+// single-vector jobs.semantic_embedding write was removed — nothing reads that
+// column, see openspec/changes/drop-hybrid-search-pgvector-similar). Every job's
+// passages are flattened into ONE embedBatch call and regrouped by job afterwards. A
+// job whose description yields no chunks (jobChunkPassages returns nil — an empty or
+// markup-only description) is simply absent from the result map, not an error.
+func (c *Client) EmbedJobChunks(ctx context.Context, jobs []db.Job) (map[int64][]JobChunkEmbedding, error) {
+	if len(jobs) == 0 {
+		return nil, nil
+	}
+	type span struct {
+		jobID      int64
+		start, end int
+	}
+	var inputs []string
+	spans := make([]span, 0, len(jobs))
+	for _, job := range jobs {
+		passages := jobChunkPassages(job)
+		if len(passages) == 0 {
+			continue
+		}
+		start := len(inputs)
+		inputs = append(inputs, passages...)
+		spans = append(spans, span{jobID: job.ID, start: start, end: len(inputs)})
+	}
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+	vecs, err := c.embedBatch(ctx, inputs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64][]JobChunkEmbedding, len(spans))
+	for _, sp := range spans {
+		chunks := make([]JobChunkEmbedding, 0, sp.end-sp.start)
+		for i, v := range vecs[sp.start:sp.end] {
+			chunks = append(chunks, JobChunkEmbedding{ChunkIndex: int16(i), Vector: toFloat32(v)})
+		}
+		out[sp.jobID] = chunks
+	}
+	return out, nil
 }
 
 // embedBatch turns texts into vectors, in input order, by calling the embedding backend
-// (see embedChunk). We embed here and store the result as a userProvided Meilisearch
-// embedder (see jobEmbedder) rather than letting Meili's rest embedder reach the server
-// itself: the engine rejects the loopback TEI URI, and embedding in one place keeps the
-// job corpus and the CV query on an identical path (one model, one server → one vector
-// space). Inputs are chunked to the backend's per-call batch limit, and up to
-// embedConcurrency chunks run in flight — a remote GPU endpoint needs the concurrency to
-// hide per-call latency (the CPU-bound host2 TEI runs it at 1).
+// (see embedChunk) directly rather than through Meilisearch's engine-side embedder
+// integration — the loopback TEI URI the production topology uses is not reachable from
+// inside the Meili engine, and embedding here keeps every caller on one identical path:
+// one model, one server, one vector space. Inputs are chunked to the backend's per-call
+// batch limit, and up to embedConcurrency chunks run in flight — a remote GPU endpoint
+// needs the concurrency to hide per-call latency (the CPU-bound host2 TEI runs it at 1).
 func (c *Client) embedBatch(ctx context.Context, inputs []string) ([][]float64, error) {
 	type span struct{ start, end int }
 	var chunks []span
@@ -219,33 +289,8 @@ func parseEmbeddings(raw []byte) ([][]float64, error) {
 	return nil, fmt.Errorf("search: embed: unrecognized response shape")
 }
 
-// semanticDocument is a JobDocument carrying its precomputed embedding for the
-// userProvided embedder. The embedded JobDocument flattens its own fields into the
-// document; _vectors adds the vector Meilisearch stores and searches by.
-type semanticDocument struct {
-	JobDocument
-	Vectors map[string][]float32 `json:"_vectors"`
-}
-
-// embedDocs embeds each job's passage text and wraps it with its vector, ready to push
-// into the semantic index.
-func (c *Client) embedDocs(ctx context.Context, docs []JobDocument) ([]semanticDocument, error) {
-	inputs := make([]string, len(docs))
-	for i, d := range docs {
-		inputs[i] = jobPassage(d)
-	}
-	vecs, err := c.embedBatch(ctx, inputs)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]semanticDocument, len(docs))
-	for i, d := range docs {
-		out[i] = semanticDocument{JobDocument: d, Vectors: map[string][]float32{embedderName: toFloat32(vecs[i])}}
-	}
-	return out, nil
-}
-
-// toFloat32 narrows a float64 vector to the float32 Meilisearch stores.
+// toFloat32 narrows a float64 vector to the float32 the pgvector/Postgres columns
+// store.
 func toFloat32(v []float64) []float32 {
 	f := make([]float32, len(v))
 	for i, x := range v {
