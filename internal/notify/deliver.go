@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/deliverywindow"
+	"github.com/strelov1/freehire/internal/pgconv"
 )
 
 // deliver leases a batch of pending matches, groups them by subscription, and
@@ -46,6 +48,24 @@ func (r *Runner) deliverOne(ctx context.Context, subID int64, jobIDs []int64, st
 	if err != nil {
 		log.Printf("notify: load subscription %d for delivery: %v", subID, err)
 		r.release(ctx, subID, jobIDs)
+		return
+	}
+
+	// Delivery timing: an `instant` subscription (the default — anything other
+	// than exactly "daily" reads as instant) defers to quiet hours; a `daily`
+	// one waits for its own configured time instead and is exempt from quiet
+	// hours — a chosen digest time is itself the user's preference.
+	daily := info.DigestFrequency == "daily"
+	tz := info.Timezone.String
+	if daily {
+		if !deliverywindow.DigestDue(r.now(), tz, pgconv.DurationPtr(info.DigestTime), pgconv.TimePtr(info.LastDigestSentAt)) {
+			r.release(ctx, subID, jobIDs)
+			stats.Deferred++
+			return
+		}
+	} else if deliverywindow.InQuietHours(r.now(), tz, pgconv.DurationPtr(info.QuietHoursStart), pgconv.DurationPtr(info.QuietHoursEnd)) {
+		r.release(ctx, subID, jobIDs)
+		stats.Deferred++
 		return
 	}
 
@@ -96,6 +116,14 @@ func (r *Runner) deliverOne(ctx context.Context, subID int64, jobIDs []int64, st
 		// Delivered but not stamped: the lease expiry will re-deliver (a rare
 		// duplicate), which is preferable to losing the notification.
 		log.Printf("notify: mark notified for subscription %d: %v", subID, err)
+	}
+
+	if daily {
+		if err := r.store.MarkDigestSent(ctx, subID); err != nil {
+			// Delivered but not stamped: DigestDue would deliver again on the next
+			// pass today (a rare duplicate), preferable to skipping tomorrow's digest.
+			log.Printf("notify: mark digest sent for subscription %d: %v", subID, err)
+		}
 	}
 
 	title, body, slug := renderDigest(digest)

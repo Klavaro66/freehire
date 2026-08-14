@@ -83,11 +83,14 @@ SELECT n.id, n.user_id, n.job_id, n.kind,
        (j.closed_at IS NULL)::bool AS job_open,
        COALESCE(ns.enabled, false)::bool AS notifications_enabled,
        COALESCE(ns.channels, '{}'::text[]) AS channels,
+       ns.quiet_hours_start AS quiet_hours_start,
+       ns.quiet_hours_end AS quiet_hours_end,
        a.stage,
        (a.user_id IS NOT NULL)::bool AS application_exists,
        GREATEST(a.applied_at, mail.newest_mail_at)::timestamptz AS last_activity_at,
        COALESCE(mail.suggestion_pending, false)::boolean AS has_pending_suggestion,
        u.email AS account_email,
+       u.timezone AS timezone,
        tl.chat_id AS telegram_chat_id,
        EXISTS(SELECT 1 FROM user_push_tokens upt WHERE upt.user_id = n.user_id) AS has_push_device
 FROM application_nudges n
@@ -119,11 +122,14 @@ type GetNudgeForDeliveryRow struct {
 	JobOpen              bool               `json:"job_open"`
 	NotificationsEnabled bool               `json:"notifications_enabled"`
 	Channels             []string           `json:"channels"`
+	QuietHoursStart      pgtype.Time        `json:"quiet_hours_start"`
+	QuietHoursEnd        pgtype.Time        `json:"quiet_hours_end"`
 	Stage                pgtype.Text        `json:"stage"`
 	ApplicationExists    bool               `json:"application_exists"`
 	LastActivityAt       pgtype.Timestamptz `json:"last_activity_at"`
 	HasPendingSuggestion bool               `json:"has_pending_suggestion"`
 	AccountEmail         string             `json:"account_email"`
+	Timezone             pgtype.Text        `json:"timezone"`
 	TelegramChatID       pgtype.Int8        `json:"telegram_chat_id"`
 	HasPushDevice        bool               `json:"has_push_device"`
 }
@@ -131,13 +137,16 @@ type GetNudgeForDeliveryRow struct {
 // The re-check-before-send context for one nudge: the job display fields, the
 // user's live notification rule (enabled + channels — re-read live, not
 // snapshotted, so a change between MATCH and DELIVER takes effect immediately),
-// live destinations, and the application's CURRENT stage/last-activity/pending-
-// suggestion so the worker can recompute the triggering condition rather than
-// trust what MATCH saw. job_open lets the worker cancel a nudge for a job that
-// has since closed. application_exists distinguishes "no applications row at
-// all" (untracked since MATCH) from "row exists with a NULL stage" — the LEFT
-// JOIN alone leaves stage NULL in both cases, which would otherwise be judged
-// as the active `applied` stage by userjob.SilenceThresholdDays.
+// live destinations, the account's live quiet-hours window (timezone +
+// notification_settings' quiet_hours_start/end, checked by
+// internal/deliverywindow before send), and the application's CURRENT
+// stage/last-activity/pending-suggestion so the worker can recompute the
+// triggering condition rather than trust what MATCH saw. job_open lets the
+// worker cancel a nudge for a job that has since closed. application_exists
+// distinguishes "no applications row at all" (untracked since MATCH) from "row
+// exists with a NULL stage" — the LEFT JOIN alone leaves stage NULL in both
+// cases, which would otherwise be judged as the active `applied` stage by
+// userjob.SilenceThresholdDays.
 func (q *Queries) GetNudgeForDelivery(ctx context.Context, id int64) (GetNudgeForDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getNudgeForDelivery, id)
 	var i GetNudgeForDeliveryRow
@@ -153,11 +162,14 @@ func (q *Queries) GetNudgeForDelivery(ctx context.Context, id int64) (GetNudgeFo
 		&i.JobOpen,
 		&i.NotificationsEnabled,
 		&i.Channels,
+		&i.QuietHoursStart,
+		&i.QuietHoursEnd,
 		&i.Stage,
 		&i.ApplicationExists,
 		&i.LastActivityAt,
 		&i.HasPendingSuggestion,
 		&i.AccountEmail,
+		&i.Timezone,
 		&i.TelegramChatID,
 		&i.HasPushDevice,
 	)
