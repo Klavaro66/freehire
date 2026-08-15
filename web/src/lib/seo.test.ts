@@ -5,6 +5,7 @@ import {
   collectionPageJsonLd,
   companyListItems,
   companyMetaDescription,
+  companyPageTitle,
   datasetJsonLd,
   jobListItems,
   jobPostingJsonLd,
@@ -329,6 +330,53 @@ describe('jobPostingJsonLd', () => {
     expect(ld).not.toHaveProperty('jobLocation');
   });
 
+  // Google accepts Country and State under applicantLocationRequirements and
+  // geocodes the name; a supranational bloc is neither, so "North America" or
+  // "APAC" is a value it cannot resolve — which leaves TELECOMMUTE without the
+  // companion it requires. Every emitted name must be a real country.
+  it('states applicantLocationRequirements as countries, never a region bloc', () => {
+    const ld = jobPostingJsonLd(
+      postingJob({ work_mode: 'remote', regions: ['north_america'] }),
+      ORIGIN
+    );
+    // Sorted by name so the emitted order is stable across runs (the map this
+    // expands is keyed by ISO code, whose iteration order is an implementation
+    // detail we don't want a golden test to pin).
+    expect(ld.applicantLocationRequirements).toEqual([
+      { '@type': 'Country', name: 'Canada' },
+      { '@type': 'Country', name: 'United States' },
+    ]);
+  });
+
+  it('prefers the posting\'s own countries over expanding its region', () => {
+    // countries is the precise fact (this posting is US-only); the region is the
+    // coarse facet it rolls up to. Expanding north_america would wrongly claim
+    // Canada is in scope.
+    const ld = jobPostingJsonLd(
+      postingJob({ work_mode: 'remote', regions: ['north_america'], countries: ['us'] }),
+      ORIGIN
+    );
+    expect(ld.jobLocationType).toBe('TELECOMMUTE');
+    expect(ld.applicantLocationRequirements).toEqual({ '@type': 'Country', name: 'United States' });
+  });
+
+  it('emits a single object, not an array, for a one-country requirement', () => {
+    const ld = jobPostingJsonLd(postingJob({ work_mode: 'remote', regions: ['uk'] }), ORIGIN);
+    expect(ld.applicantLocationRequirements).toEqual({
+      '@type': 'Country',
+      name: 'United Kingdom',
+    });
+  });
+
+  it('ignores a worldwide reach, which names no country to require', () => {
+    const ld = jobPostingJsonLd(
+      postingJob({ work_mode: 'remote', regions: ['global'], location: 'Anywhere' }),
+      ORIGIN
+    );
+    expect(ld).not.toHaveProperty('jobLocationType');
+    expect(ld).not.toHaveProperty('applicantLocationRequirements');
+  });
+
   it('falls back to a plain jobLocation when a remote posting has no resolved region but does have a location string', () => {
     // Google requires applicantLocationRequirements whenever jobLocationType is
     // TELECOMMUTE — asserting TELECOMMUTE with no region to back it up would be an
@@ -358,6 +406,23 @@ describe('jobPostingJsonLd', () => {
       '@type': 'Place',
       address: { '@type': 'PostalAddress', addressLocality: 'Berlin', addressCountry: 'DE' },
     });
+  });
+});
+
+describe('companyPageTitle', () => {
+  it('states the open-role count, comma-grouped', () => {
+    expect(companyPageTitle('Amazon', 6531)).toBe('Amazon — 6,531 open jobs · freehire');
+  });
+
+  it('uses the singular for a lone opening', () => {
+    expect(companyPageTitle('Agiliway', 1)).toBe('Agiliway — 1 open job · freehire');
+  });
+
+  // A company with nothing open, or whose count never arrived (the search call
+  // failed), gets the plain title rather than a "0 open jobs" boast.
+  it('falls back to the bare name without a usable count', () => {
+    expect(companyPageTitle('Acme', 0)).toBe('Acme · freehire');
+    expect(companyPageTitle('Acme', undefined)).toBe('Acme · freehire');
   });
 });
 
