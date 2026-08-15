@@ -36,10 +36,8 @@ func writeRunMetrics(runDuration time.Duration, exitCode int) {
 	instance := runInstance(os.Args[1:])
 
 	labels := fmt.Sprintf(`job=%q`, job)
-	name := job
 	if instance != "" {
 		labels = fmt.Sprintf(`job=%q,instance=%q`, job, instance)
-		name += "_" + instance
 	}
 
 	success := 0
@@ -58,20 +56,49 @@ freehire_worker_last_run_duration_seconds{%[1]s} %[3]f
 freehire_worker_last_run_success{%[1]s} %[4]d
 `, labels, time.Now().Unix(), runDuration.Seconds(), success)
 
-	// Write-then-rename: the textfile collector polls the directory on its own
-	// schedule and skips a file it fails to fully parse, but a half-written file
-	// (this worker killed mid-write) could still be picked up mid-write and read
-	// as garbage. Renaming into place is atomic on the same filesystem, so it
-	// only ever sees the old file or the complete new one.
-	path := filepath.Join(dir, name+".prom")
+	if err := WriteTextfile(dir, RunMetricsFilename(), content); err != nil {
+		log.Printf("worker: %v", err)
+	}
+}
+
+// RunMetricsFilename reports the textfile-collector file this process's run
+// outcome lands in: the binary's name, plus any board instance, plus ".prom".
+//
+// Exported because Main writes that file AFTER run() returns (main.go:29-30), so
+// a worker that ALSO publishes a textfile of its own would have its payload
+// silently overwritten on every single run if it picked the same name. A worker
+// in that position must own a distinct filename and assert it — see
+// cmd/queue-metrics.
+func RunMetricsFilename() string {
+	name := filepath.Base(os.Args[0])
+	if instance := runInstance(os.Args[1:]); instance != "" {
+		name += "_" + instance
+	}
+	return name + ".prom"
+}
+
+// WriteTextfile publishes body as the textfile-collector file dir/name, the
+// mechanism a run-once worker uses to expose Prometheus metrics it has no
+// listener to serve (see PromTextfileDirEnv). Callers own the decision to
+// publish at all — this writes unconditionally, so a worker gated on an unset
+// PROM_TEXTFILE_DIR must return before calling it.
+//
+// Write-then-rename: the textfile collector polls the directory on its own
+// schedule and skips a file it fails to fully parse, but a half-written file
+// (the worker killed mid-write) could still be picked up mid-write and read as
+// garbage. Renaming into place is atomic on the same filesystem, so the
+// collector only ever sees the old file or the complete new one — and a failed
+// write leaves the last good file untouched rather than truncating it.
+func WriteTextfile(dir, name, body string) error {
+	path := filepath.Join(dir, name)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
-		log.Printf("worker: write metrics file %s: %v", tmp, err)
-		return
+	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write metrics file %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		log.Printf("worker: rename metrics file %s: %v", tmp, err)
+		return fmt.Errorf("rename metrics file %s: %w", tmp, err)
 	}
+	return nil
 }
 
 // runInstance derives a metric instance label from a worker's command-line
