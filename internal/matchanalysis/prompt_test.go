@@ -7,6 +7,48 @@ import (
 	"github.com/strelov1/freehire/internal/resumeextract"
 )
 
+// freehire#1837: the fit analysis is the candidate's own reading of their match, not
+// text that goes onto a CV, so every free-text field follows their profile language.
+func TestStageSystemPrompts_CarryTheLanguageDirective(t *testing.T) {
+	for name, sp := range map[string]string{
+		"stage1": stage1SystemPrompt("ru"),
+		"stage2": stage2SystemPrompt("ru"),
+		"stage3": stage3SystemPrompt("ru"),
+	} {
+		if !strings.Contains(sp, "Write every free-text value in Russian") {
+			t.Errorf("%s system prompt does not name the requested language:\n%s", name, sp)
+		}
+	}
+}
+
+// Stage 1's "quote" field is defined as "a short verbatim excerpt from the job
+// description" — a blanket translation instruction would break that contract, so the
+// directive must carve it out explicitly rather than leave the model to notice the
+// conflict on its own.
+func TestStage1SystemPrompt_LanguageDirectiveExemptsQuote(t *testing.T) {
+	sp := stage1SystemPrompt("ru")
+	if !strings.Contains(sp, `Exception: "quote" must stay a verbatim excerpt`) {
+		t.Errorf("stage1 system prompt does not exempt \"quote\" from the language directive:\n%s", sp)
+	}
+	if !strings.Contains(sp, "never translate it") {
+		t.Errorf("stage1 system prompt does not explicitly forbid translating \"quote\":\n%s", sp)
+	}
+}
+
+// Stage 2 and Stage 3 have no verbatim-excerpt field to protect — every value they
+// return is the model's own prose — so their directive must stay the plain one rather
+// than carrying stage1's exception where it names nothing that exists in their output.
+func TestStage2And3SystemPrompt_LanguageDirectiveHasNoQuoteException(t *testing.T) {
+	for name, sp := range map[string]string{
+		"stage2": stage2SystemPrompt("ru"),
+		"stage3": stage3SystemPrompt("ru"),
+	} {
+		if strings.Contains(sp, "Exception:") {
+			t.Errorf("%s system prompt carries stage1's quote exception, which names a field it does not return:\n%s", name, sp)
+		}
+	}
+}
+
 func TestStage1Prompt_SendsDeIdentifiedStructured(t *testing.T) {
 	// The caller projects; the chain cannot be handed the contact-bearing structure at all.
 	structured := resumeextract.Structured{
@@ -95,7 +137,7 @@ func TestWriteLocation_RemoteWithinReachByCountryAddsNote(t *testing.T) {
 }
 
 func TestStage2SystemPrompt_RemoteLocationRule(t *testing.T) {
-	sp := stage2SystemPrompt()
+	sp := stage2SystemPrompt("en")
 	if !strings.Contains(sp, "remote reach") || !strings.Contains(sp, "Relocation matters only for onsite") {
 		t.Errorf("stage2 system prompt must instruct remote-only location scoring:\n%s", sp)
 	}
@@ -105,8 +147,8 @@ func TestStage2And3SystemPrompt_RecommendationBudget(t *testing.T) {
 	// Both stages rewrite recommendation; each must state the same length/shape contract so
 	// the model's target and the sanitizer ceiling describe the same thing.
 	for name, sp := range map[string]string{
-		"stage2": stage2SystemPrompt(),
-		"stage3": stage3SystemPrompt(),
+		"stage2": stage2SystemPrompt("en"),
+		"stage3": stage3SystemPrompt("en"),
 	} {
 		for _, want := range []string{
 			"two or three short prose paragraphs",
@@ -125,7 +167,7 @@ func TestStage3SystemPrompt_SynonymOnlyRequiredDiscipline(t *testing.T) {
 	// skills_coverage — an adjacent-exposure "synonym-only" match, or a "covered" match
 	// backed only by a bare "keyword" mention, is not direct ownership. Guards against the
 	// hard-negative the audit pass exists to catch (deploying Helm ≠ owning the skill).
-	sp := stage3SystemPrompt()
+	sp := stage3SystemPrompt("en")
 	for _, want := range []string{"synonym-only", "keyword", "adjacent"} {
 		if !strings.Contains(sp, want) {
 			t.Errorf("stage3 system prompt must demote weak matches on required items (missing %q):\n%s", want, sp)
@@ -136,7 +178,7 @@ func TestStage3SystemPrompt_SynonymOnlyRequiredDiscipline(t *testing.T) {
 func TestStage1SystemPrompt_GradesEvidenceStrength(t *testing.T) {
 	// Stage 1 must ask for evidence_strength on positive statuses and name the four tiers,
 	// so the audit and served verdict can tell a metric-backed match from a bare keyword.
-	sp := stage1SystemPrompt()
+	sp := stage1SystemPrompt("en")
 	for _, want := range []string{"evidence_strength", "metric", "scope", "responsibility", "keyword"} {
 		if !strings.Contains(sp, want) {
 			t.Errorf("stage1 system prompt must request graded evidence (missing %q):\n%s", want, sp)
@@ -147,7 +189,7 @@ func TestStage1SystemPrompt_GradesEvidenceStrength(t *testing.T) {
 func TestStage1SystemPrompt_RequestsHiddenSignals(t *testing.T) {
 	// Stage 1 must ask for hidden_signals (quote + insight, max 5) alongside the requirement
 	// table, and must not force one on a generic posting.
-	sp := stage1SystemPrompt()
+	sp := stage1SystemPrompt("en")
 	for _, want := range []string{"hidden_signals", "quote", "insight"} {
 		if !strings.Contains(sp, want) {
 			t.Errorf("stage1 system prompt must request hidden signals (missing %q):\n%s", want, sp)

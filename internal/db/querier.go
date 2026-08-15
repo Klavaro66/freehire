@@ -1337,10 +1337,11 @@ type Querier interface {
 	// Reverse lookup: the user linked to an inbound chat, for contribution-from-Telegram. If a
 	// chat somehow linked more than once, the most recently linked user wins.
 	GetUserIDByTelegramChat(ctx context.Context, chatID int64) (int64, error)
-	// The caller's cached fit analysis for one job, with the staleness stamps it was
-	// computed against. No row means the pair was never analyzed (the handler serves a
-	// null analysis, no LLM call). The handler compares cv_uploaded_at / job_content_hash
-	// to the live CV upload time and job content_hash to decide the stale flag.
+	// The caller's cached fit analysis for one job, with the four staleness stamps it was
+	// computed against: model, cv_uploaded_at, job_content_hash, language. No row means the
+	// pair was never analyzed (the handler serves a null analysis, no LLM call). The handler
+	// compares all four against the live model, CV upload time, job content_hash and profile
+	// language to decide the stale flag.
 	GetUserJobAnalysis(ctx context.Context, arg GetUserJobAnalysisParams) (GetUserJobAnalysisRow, error)
 	// The caller's current stage for one application (empty string when unset), so the
 	// worker can decide a monotonic-forward advancement.
@@ -1349,6 +1350,11 @@ type Querier interface {
 	// coalesce keeps the empty string as the single "not minted" signal, so callers test a
 	// string rather than unwrapping a nullable through pgtype on every model call.
 	GetUserLLMKey(ctx context.Context, id int64) (string, error)
+	// The account's preferred interface language on its own, for a caller that needs
+	// nothing else about the user — the assistant's turn loop and the fit-analysis
+	// chain both build a language directive from just this column. Never NULL (NOT
+	// NULL DEFAULT 'en'), so every account answers.
+	GetUserLanguage(ctx context.Context, id int64) (string, error)
 	// The account's stored password hash, for verifying a current password on change.
 	// NULL when the account is passwordless (OAuth-only), which the caller treats the same
 	// as a wrong password: there is nothing to verify against.
@@ -2103,11 +2109,12 @@ type Querier interface {
 	// (min(day) is NULL, so generate_series yields no rows).
 	ListUserGrowth(ctx context.Context) ([]ListUserGrowthRow, error)
 	// Jobs the caller has analyzed, newest first, joined to the job for display. Powers
-	// the Tracking → AI fit tab. Includes closed jobs (surfaced with a badge). The stored
-	// staleness stamps ride along so the handler can flag rows whose CV/job/model has since
-	// changed, and the analysis blob carries the overall score + verdict the list shows.
-	// Capped at 500 — the quota window (see CountRecentUserJobAnalyses) keeps real usage
-	// far below that, and each row drags a full analysis JSONB over the wire.
+	// the Tracking → AI fit tab. Includes closed jobs (surfaced with a badge). The four
+	// stored staleness stamps (model, cv_uploaded_at, job_content_hash, language) ride
+	// along so the handler can flag rows whose CV, job, model, or profile language has
+	// since changed, and the analysis blob carries the overall score + verdict the list
+	// shows. Capped at 500 — the quota window (see CountRecentUserJobAnalyses) keeps real
+	// usage far below that, and each row drags a full analysis JSONB over the wire.
 	ListUserJobAnalyses(ctx context.Context, userID int64) ([]ListUserJobAnalysesRow, error)
 	// A user's job interactions joined with a CARD of the job — what a list row draws, and no
 	// more. Each subset is ordered by when the job entered *that* list, not by last touch: saved
@@ -3537,10 +3544,11 @@ type Querier interface {
 	// INSERT writes nothing rather than minting a token against a stranger's CV.
 	UpsertTracerLink(ctx context.Context, arg UpsertTracerLinkParams) (string, error)
 	// Create-or-replace the cached analysis for a (user, job). The composite PRIMARY KEY
-	// makes it idempotent: a recompute overwrites the analysis, model, and both staleness
-	// stamps. created_at is deliberately NOT re-bumped on conflict, so it records the
-	// FIRST-analysis time — the fit-analysis quota counts distinct jobs a user first
-	// analyzed within a rolling window, and a recompute must not re-age its row into it.
+	// makes it idempotent: a recompute overwrites the analysis and all four staleness stamps
+	// (model, cv_uploaded_at, job_content_hash, language). created_at is deliberately NOT
+	// re-bumped on conflict, so it records the FIRST-analysis time — the fit-analysis quota
+	// counts distinct jobs a user first analyzed within a rolling window, and a recompute
+	// must not re-age its row into it.
 	// analysis is the sanitized matchanalysis.Analysis JSON.
 	UpsertUserJobAnalysis(ctx context.Context, arg UpsertUserJobAnalysisParams) error
 	// Create-or-replace the user's one profile. The PRIMARY KEY (user_id) makes this an
