@@ -17,21 +17,40 @@ type fakeWidgets struct {
 	offers  map[string][]string // label -> the options the widget reveals once open
 	opens   map[string]string   // label -> combobox.open status, default "opened"
 	commits map[string]string   // label -> what the widget commits, default the selected option
+	// errs fails the named "tool label" call outright (a transport-level error, not
+	// a status reply), so a test can exercise a widget that fails partway through.
+	errs map[string]error
 
 	calls     []string
+	requested []autofillagent.Fill // what fill_simple was actually asked to write
+	frames    map[string]int       // "tool label" -> the frame arg that call carried
 	selected  map[string]string
 	committed map[string]string
 }
 
 func (f *fakeWidgets) Call(_ context.Context, tool string, args any) (json.RawMessage, error) {
-	label, value := readArgs(args)
+	label, value, frame := readArgs(args)
 	f.calls = append(f.calls, tool+" "+label)
+	if f.frames == nil {
+		f.frames = map[string]int{}
+	}
+	f.frames[tool+" "+label] = frame
+
+	if err, ok := f.errs[tool+" "+label]; ok {
+		return nil, err
+	}
 
 	switch tool {
 	case "read_form":
 		return json.Marshal(map[string]any{"fields": f.fields})
 
 	case "fill_simple":
+		raw, _ := json.Marshal(args)
+		var call struct {
+			Fills []autofillagent.Fill `json:"fills"`
+		}
+		_ = json.Unmarshal(raw, &call)
+		f.requested = call.Fills
 		return json.Marshal(map[string]any{"outcomes": fillOutcomes(args)})
 
 	case "combobox.open":
@@ -76,14 +95,15 @@ func (f *fakeWidgets) Call(_ context.Context, tool string, args any) (json.RawMe
 	}
 }
 
-func readArgs(args any) (label, value string) {
+func readArgs(args any) (label, value string, frame int) {
 	raw, _ := json.Marshal(args)
 	var call struct {
 		Label string `json:"label"`
 		Value string `json:"value"`
+		Frame int    `json:"frame"`
 	}
 	_ = json.Unmarshal(raw, &call)
-	return call.Label, call.Value
+	return call.Label, call.Value, call.Frame
 }
 
 func fillOutcomes(args any) []map[string]string {
@@ -340,5 +360,94 @@ func TestRunNamesAGroupedQuestionOnceInTheReport(t *testing.T) {
 	}
 	if len(rep.Unmapped) != 1 || rep.Unmapped[0] != "Which countries do you anticipate working in?" {
 		t.Fatalf("unmapped = %v, want the question named once", rep.Unmapped)
+	}
+}
+
+// Run must not discard a widget loop's earlier successes when a later widget's
+// tool call fails outright: fillSimple's write and the first widget's commit
+// already happened for real in the browser, and the caller needs to know that
+// even though the run as a whole reports an error.
+func TestRunReturnsThePartialReportWhenAWidgetFails(t *testing.T) {
+	tools := &fakeWidgets{
+		fields: []autofillagent.Field{
+			{Label: "Email", Type: "email"},
+			{Label: "Country", Type: "text", Combo: true},
+			{Label: "Degree", Type: "text", Combo: true},
+		},
+		offers: map[string][]string{"Country": {"Germany"}, "Degree": {"BSc"}},
+		errs:   map[string]error{"combobox.open Degree": errors.New("browser-tool socket hiccup")},
+	}
+	planner := &widgetPlanner{
+		fills: []autofillagent.Fill{
+			{Label: "Email", Value: profile()["email"]},
+			{Label: "Country"},
+			{Label: "Degree"},
+		},
+		choices: map[string]string{"Country": "Germany", "Degree": "BSc"},
+	}
+
+	rep, err := autofillagent.Run(context.Background(), tools, planner, profile())
+	if err == nil {
+		t.Fatal("Run succeeded despite the widget failure")
+	}
+	if !contains(rep.Filled, "Email") {
+		t.Errorf("Filled = %v, want the already-written Email field kept despite the later failure", rep.Filled)
+	}
+	if !contains(rep.Filled, "Country") {
+		t.Errorf("Filled = %v, want the widget driven before the failure kept", rep.Filled)
+	}
+	if contains(rep.Filled, "Degree") {
+		t.Errorf("Filled = %v, the widget whose tool call failed must not be reported as filled", rep.Filled)
+	}
+}
+
+// A plain field and a combobox sharing a label — e.g. the same "City" in the top
+// frame and inside an ATS iframe — must be routed and reported independently by
+// Field.Frame rather than collapsed onto whichever field happened to be last in
+// the form. Before this fix, byLabel's single-field map meant the LAST field's
+// Combo-ness decided the whole plan entry's routing, so the plain frame-0 field
+// was silently dropped from fill_simple entirely and left unmapped despite the
+// widget having been driven successfully.
+func TestRunRoutesSameLabeledFieldsInDifferentFramesIndependently(t *testing.T) {
+	tools := &fakeWidgets{
+		fields: []autofillagent.Field{
+			{Label: "City", Type: "text", Frame: 0},              // plain field, top frame
+			{Label: "City", Type: "text", Combo: true, Frame: 3}, // widget, an ATS iframe
+		},
+		offers: map[string][]string{"City": {"Berlin"}},
+	}
+	planner := &widgetPlanner{
+		fills:   []autofillagent.Fill{{Label: "City", Value: "Berlin"}},
+		choices: map[string]string{"City": "Berlin"},
+	}
+	p := profile()
+	p["location"] = "Berlin, Germany"
+
+	rep, err := autofillagent.Run(context.Background(), tools, planner, p)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The plain frame-0 field was actually written, carrying its own frame.
+	if len(tools.requested) != 1 || tools.requested[0].Label != "City" || tools.requested[0].Frame != 0 {
+		t.Fatalf("fill_simple requested %+v, want one City fill tagged frame 0", tools.requested)
+	}
+	// The widget was driven scoped to its own frame, not the plain field's.
+	if got := tools.frames["combobox.open City"]; got != 3 {
+		t.Errorf("combobox.open frame = %d, want 3 (the widget's own frame)", got)
+	}
+	// Both physical fields ended up correctly reported as filled — neither the
+	// widget's success masked the plain field's write, nor the reverse.
+	filled := 0
+	for _, label := range rep.Filled {
+		if label == "City" {
+			filled++
+		}
+	}
+	if filled != 2 {
+		t.Fatalf("Filled = %v, want City reported filled for both fields", rep.Filled)
+	}
+	if len(rep.Unmapped) != 0 {
+		t.Fatalf("Unmapped = %v, want nothing left over", rep.Unmapped)
 	}
 }
