@@ -118,6 +118,14 @@ func (r *fakeRepo) InBatch(_ context.Context, batchID uuid.UUID) ([]Revision, er
 	return out, nil
 }
 
+func (r *fakeRepo) Feed(_ context.Context, limit int32) ([]Revision, error) {
+	out := make([]Revision, 0, len(r.revisions))
+	for i := len(r.revisions) - 1; i >= 0 && len(out) < int(limit); i-- {
+		out = append(out, r.revisions[i])
+	}
+	return out, nil
+}
+
 func (r *fakeRepo) Trim(_ context.Context, keep int32) error {
 	if extra := len(r.revisions) - int(keep); extra > 0 {
 		r.revisions = r.revisions[extra:]
@@ -317,6 +325,27 @@ func TestCommitDocumentDerivesTheOperations(t *testing.T) {
 	}
 	if repo.state.Summary != "Distributed systems" || repo.state.Experience[0].Bullets[1] != "Twice over" {
 		t.Fatalf("document not changed: %+v", repo.state)
+	}
+}
+
+// CommitDocument authorizes INSIDE the locked transaction, unlike Commit — it needs Diff's
+// output to know what it is authorizing, and Diff needs the locked row's own state. That
+// ordering is only safe because requireEvidence's bank read never runs for anything but
+// ActorAgent, and every real caller passes ActorCandidate or ActorSystem; refusing the agent
+// actor here makes that a guarantee instead of a convention no signature enforces.
+func TestCommitDocumentRefusesTheAgentActor(t *testing.T) {
+	repo := newFakeRepo()
+	e, _ := newEditor(repo, nil)
+
+	next := sample()
+	next.Summary = "Distributed systems"
+
+	_, _, err := e.CommitDocument(context.Background(), repo.cvID, 1, ActorAgent, OriginTailorAgent, next)
+	if !errors.Is(err, ErrCommitDocumentAgentUnsupported) {
+		t.Fatalf("CommitDocument(agent) = %v, want ErrCommitDocumentAgentUnsupported", err)
+	}
+	if repo.saves != 0 || len(repo.revisions) != 0 {
+		t.Fatal("a refused whole-document save wrote something")
 	}
 }
 

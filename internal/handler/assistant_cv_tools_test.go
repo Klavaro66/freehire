@@ -92,6 +92,43 @@ func (r *cvRepo) SetAutopilotReport(_ context.Context, id uuid.UUID, userID int6
 	return 1, nil
 }
 
+func (r *cvRepo) MergeAutopilotEntry(_ context.Context, id uuid.UUID, userID int64, entry []byte) (int64, error) {
+	if r.autopilotErr != nil {
+		return 0, r.autopilotErr
+	}
+	if id != r.id || userID != r.userID {
+		return 0, nil
+	}
+	var incoming cv.AutopilotEntry
+	if err := json.Unmarshal(entry, &incoming); err != nil {
+		return 0, err
+	}
+	var entries []cv.AutopilotEntry
+	if len(r.report) > 0 {
+		if err := json.Unmarshal(r.report, &entries); err != nil {
+			return 0, err
+		}
+	}
+	target := strings.ToLower(strings.TrimSpace(incoming.Requirement))
+	replaced := false
+	for i, e := range entries {
+		if strings.ToLower(strings.TrimSpace(e.Requirement)) == target {
+			entries[i] = incoming
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		entries = append(entries, incoming)
+	}
+	blob, err := json.Marshal(entries)
+	if err != nil {
+		return 0, err
+	}
+	r.report = blob
+	return 1, nil
+}
+
 // testCVID is the CV every case in this file addresses. Fixed so a failure names a
 // stable value rather than a fresh random one.
 var testCVID = uuid.MustParse("55555555-5555-4555-8555-555555555555")
@@ -224,6 +261,14 @@ func (m *memRevisions) InBatch(_ context.Context, batchID uuid.UUID) ([]cvedit.R
 		if m.revisions[i].BatchID == batchID && m.revisions[i].RevertedAt == nil {
 			out = append(out, m.revisions[i])
 		}
+	}
+	return out, nil
+}
+
+func (m *memRevisions) Feed(_ context.Context, limit int32) ([]cvedit.Revision, error) {
+	out := make([]cvedit.Revision, 0, len(m.revisions))
+	for i := len(m.revisions) - 1; i >= 0 && len(out) < int(limit); i-- {
+		out = append(out, m.revisions[i])
 	}
 	return out, nil
 }
