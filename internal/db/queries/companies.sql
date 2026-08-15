@@ -25,6 +25,10 @@ WHERE job_count > 0
   AND (coalesce(cardinality(sqlc.arg('regions')::text[]), 0) = 0 OR regions && sqlc.arg('regions')::text[])
   AND (coalesce(cardinality(sqlc.arg('countries')::text[]), 0) = 0 OR countries && sqlc.arg('countries')::text[])
   AND (coalesce(cardinality(sqlc.arg('domains')::text[]), 0) = 0 OR domains && sqlc.arg('domains')::text[])
+  -- industries is the finer level beneath domains, filtered the same way. It must
+  -- exist on THIS path too: when only industries is set the request never reaches
+  -- Meili, and a facet the fallback does not know is silently ignored.
+  AND (coalesce(cardinality(sqlc.arg('industries')::text[]), 0) = 0 OR industries && sqlc.arg('industries')::text[])
   AND (coalesce(cardinality(sqlc.arg('company_types')::text[]), 0) = 0 OR company_types && sqlc.arg('company_types')::text[])
   AND (coalesce(cardinality(sqlc.arg('company_sizes')::text[]), 0) = 0 OR company_sizes && sqlc.arg('company_sizes')::text[])
   AND (coalesce(cardinality(sqlc.arg('remote_regions')::text[]), 0) = 0 OR remote_regions && sqlc.arg('remote_regions')::text[])
@@ -62,6 +66,10 @@ WHERE job_count > 0
   AND (coalesce(cardinality(sqlc.arg('regions')::text[]), 0) = 0 OR regions && sqlc.arg('regions')::text[])
   AND (coalesce(cardinality(sqlc.arg('countries')::text[]), 0) = 0 OR countries && sqlc.arg('countries')::text[])
   AND (coalesce(cardinality(sqlc.arg('domains')::text[]), 0) = 0 OR domains && sqlc.arg('domains')::text[])
+  -- industries is the finer level beneath domains, filtered the same way. It must
+  -- exist on THIS path too: when only industries is set the request never reaches
+  -- Meili, and a facet the fallback does not know is silently ignored.
+  AND (coalesce(cardinality(sqlc.arg('industries')::text[]), 0) = 0 OR industries && sqlc.arg('industries')::text[])
   AND (coalesce(cardinality(sqlc.arg('company_types')::text[]), 0) = 0 OR company_types && sqlc.arg('company_types')::text[])
   AND (coalesce(cardinality(sqlc.arg('company_sizes')::text[]), 0) = 0 OR company_sizes && sqlc.arg('company_sizes')::text[])
   AND (coalesce(cardinality(sqlc.arg('remote_regions')::text[]), 0) = 0 OR remote_regions && sqlc.arg('remote_regions')::text[])
@@ -236,13 +244,36 @@ SELECT EXISTS(SELECT 1 FROM companies WHERE slug = $1);
 -- candidate per entry (the dataset runs several thousand entries deep).
 SELECT slug FROM companies;
 
+-- name: ListCompanyIndustriesPage :many
+-- Keyset page over every company, ordered by slug so a run resumes from the last
+-- slug it saw. Deliberately unfiltered: the normalization pass only cares about
+-- rows that already hold industries, but the merge pass must also reach companies
+-- with none, and one query serving both keeps the two walks identical.
+SELECT slug, industries
+FROM companies
+WHERE slug > sqlc.arg(after_slug)
+ORDER BY slug
+LIMIT sqlc.arg(page_limit);
+
+-- name: SetCompanyIndustries :execrows
+-- Replace one company's industries. The IS DISTINCT FROM guard keeps updated_at
+-- honest — a row already holding the wanted value is not rewritten — and makes the
+-- affected-row count real churn, so a second run reports zero.
+UPDATE companies
+SET industries = sqlc.arg(industries), updated_at = now()
+WHERE slug = sqlc.arg(slug) AND industries IS DISTINCT FROM sqlc.arg(industries);
+
 -- name: UpsertYCCompany :exec
 -- Apply one yc-oss directory entry, matched by slug. A new slug is inserted as a
 -- reference row (is_reference = true) with no jobs; an existing slug (job-backed or a
--- prior reference) has its company-info columns plus the curated yc_batch/yc_status
--- facets refreshed — name, job_count, collections, is_reference, and the job-derived
--- facet arrays (regions/remote_regions/countries/domains/company_types/company_sizes)
--- are left untouched. Idempotent: re-running the same entry rewrites the same values.
+-- prior reference) has the YC-owned columns refreshed — name, job_count, collections,
+-- is_reference, and the job-derived facet arrays (regions/remote_regions/countries/
+-- domains/company_types/company_sizes) are left untouched. Idempotent: re-running
+-- the same entry rewrites the same values.
+--
+-- Three columns are NOT YC-owned, because this is no longer their only writer, and
+-- replacing them would erase another source's work on the importer's next run:
+-- tagline fills only a blank, company_info merges key-wise, and industries union.
 INSERT INTO companies (
     slug, name, industries, subindustry, year_founded, employee_count, hq_country,
     tagline, company_info, yc_batch, yc_status, yc_stage, yc_flags,
@@ -254,13 +285,25 @@ INSERT INTO companies (
     sqlc.arg(yc_stage), sqlc.arg(yc_flags), true, now()
 )
 ON CONFLICT (slug) DO UPDATE SET
-    industries      = EXCLUDED.industries,
+    -- Union, sorted and de-duplicated, so two sources accumulate instead of
+    -- overwriting. Sorted because the stored order is compared for equality by the
+    -- normalization worker's no-op guard.
+    industries      = ARRAY(
+        SELECT DISTINCT x
+        FROM unnest(companies.industries || EXCLUDED.industries) AS x
+        WHERE x <> ''
+        ORDER BY x
+    ),
     subindustry     = EXCLUDED.subindustry,
     year_founded    = EXCLUDED.year_founded,
     employee_count  = EXCLUDED.employee_count,
     hq_country      = EXCLUDED.hq_country,
-    tagline         = EXCLUDED.tagline,
-    company_info    = EXCLUDED.company_info,
+    -- NULLIF folds '' into NULL so an empty string counts as absent, not as a value
+    -- worth protecting.
+    tagline         = COALESCE(NULLIF(companies.tagline, ''), EXCLUDED.tagline),
+    -- Operand order is load-bearing: a || b keeps b on key collision, so the YC keys
+    -- fill gaps while anything already stored wins. Reversed, this is the bug above.
+    company_info    = EXCLUDED.company_info || companies.company_info,
     yc_batch        = EXCLUDED.yc_batch,
     yc_status       = EXCLUDED.yc_status,
     yc_stage        = EXCLUDED.yc_stage,

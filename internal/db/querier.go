@@ -504,11 +504,11 @@ type Querier interface {
 	// cmd/prune cascades away for a pruned posting, so it never counts these; this is added
 	// to its "all"/"applied"/"board" totals by the caller.
 	CountOrphanedApplications(ctx context.Context, userID int64) (int64, error)
-	// How many companies this user has newly reviewed since `since` — the rate-limit
-	// check backing companyfeedback.Service.checkRate (mirrors
-	// community.CountRecentThreads). An edit-by-resubmit never inserts a new row
-	// (the ON CONFLICT DO UPDATE branch leaves created_at untouched), so this only
-	// grows on genuine new-company writes.
+	// How many new reviews (new company, or a new category on an already-reviewed
+	// company) this user has left since `since` — the rate-limit check backing
+	// companyfeedback.Service.checkRate (mirrors community.CountRecentThreads). An
+	// edit-by-resubmit never inserts a new row (the ON CONFLICT DO UPDATE branch
+	// leaves created_at untouched), so this only grows on genuinely new rows.
 	CountRecentCompanyFeedback(ctx context.Context, arg CountRecentCompanyFeedbackParams) (int64, error)
 	CountRecentRepliesByUser(ctx context.Context, arg CountRecentRepliesByUserParams) (int64, error)
 	// Rate-limit count: threads a user opened since a cutoff. Served by
@@ -699,7 +699,7 @@ type Querier interface {
 	// Delete a CV owned by the user. Returns the affected-row count so the handler can 404
 	// when nothing was deleted (foreign or missing id).
 	DeleteCV(ctx context.Context, arg DeleteCVParams) (int64, error)
-	// Remove the caller's own feedback (no-op when absent).
+	// Remove the caller's own feedback in one category on a company (no-op when absent).
 	DeleteCompanyFeedback(ctx context.Context, arg DeleteCompanyFeedbackParams) error
 	// Remove a user's company vote (toggle-clear or the DELETE endpoint). No-op when
 	// absent.
@@ -1192,9 +1192,10 @@ type Querier interface {
 	// Recipient resolution for the inbound ingest worker.
 	GetMailboxByAddress(ctx context.Context, address string) (Mailbox, error)
 	GetMailboxByUser(ctx context.Context, userID int64) (Mailbox, error)
-	// The caller's own feedback on a company, for the edit form's prefill. No row
-	// when they have not left one yet. Not filtered by status: the owner can still
-	// see and edit their own review after a moderator hides it.
+	// The caller's own feedback in one category on a company, for the edit form's
+	// prefill and for Upsert to tell an edit from a genuinely new review. No row
+	// when they have not left one in that category yet. Not filtered by status:
+	// the owner can still see and edit their own review after a moderator hides it.
 	GetMyCompanyFeedback(ctx context.Context, arg GetMyCompanyFeedbackParams) (CompanyFeedback, error)
 	// One notification, owner-scoped (no row for another user's id, mapped to 404
 	// by the handler) — the direct-link/detail read a bookmarked or freshly
@@ -1697,6 +1698,11 @@ type Querier interface {
 	// does not need keyset paging. Hidden rows (a moderator's lever) are excluded,
 	// same as an open thread listing excludes closed ones.
 	ListCompanyFeedback(ctx context.Context, arg ListCompanyFeedbackParams) ([]ListCompanyFeedbackRow, error)
+	// Keyset page over every company, ordered by slug so a run resumes from the last
+	// slug it saw. Deliberately unfiltered: the normalization pass only cares about
+	// rows that already hold industries, but the merge pass must also reach companies
+	// with none, and one query serving both keeps the two walks identical.
+	ListCompanyIndustriesPage(ctx context.Context, arg ListCompanyIndustriesPageParams) ([]ListCompanyIndustriesPageRow, error)
 	// Slim keyset page of companies for the sitemap, cursored by the slug primary key
 	// (first chunk keyed by the empty string, which sorts before every slug).
 	//
@@ -1962,6 +1968,10 @@ type Querier interface {
 	// index current without re-pushing the whole table. Returns closed rows too, so
 	// the caller deletes a freshly-closed job from the index.
 	ListJobsUpdatedAfter(ctx context.Context, arg ListJobsUpdatedAfterParams) ([]Job, error)
+	// All of the caller's own feedback on a company, across every category they've
+	// reviewed it under — the write dialog's "which categories have I already
+	// used" read. Not filtered by status, same reasoning as GetMyCompanyFeedback.
+	ListMyCompanyFeedback(ctx context.Context, arg ListMyCompanyFeedbackParams) ([]CompanyFeedback, error)
 	// Keyset continuation: rows strictly older than the cursor (created_at, id). No
 	// OFFSET, so deep pages never scan skipped rows.
 	ListOpenThreadsAfter(ctx context.Context, arg ListOpenThreadsAfterParams) ([]ListOpenThreadsAfterRow, error)
@@ -3037,6 +3047,10 @@ type Querier interface {
 	// (preserving unmanaged tags) and writes it here; updated_at is bumped for parity
 	// with the other write paths.
 	SetCompanyCollections(ctx context.Context, arg SetCompanyCollectionsParams) error
+	// Replace one company's industries. The IS DISTINCT FROM guard keeps updated_at
+	// honest — a row already holding the wanted value is not rewritten — and makes the
+	// affected-row count real churn, so a second run reports zero.
+	SetCompanyIndustries(ctx context.Context, arg SetCompanyIndustriesParams) (int64, error)
 	// Persist the resolved link + classification and stamp classified_at + model in one
 	// write. job_id/suggested_job_id/link_source/match_confidence are nullable — an
 	// unlinked or suggestion-only email leaves job_id NULL.
@@ -3426,13 +3440,17 @@ type Querier interface {
 	// this person has granted us their calendar.
 	UpsertCalendarGrant(ctx context.Context, arg UpsertCalendarGrantParams) error
 	// Company feedback: one signed-in user's star rating + category + text per
-	// company, upserted in place (edit-by-resubmit). LEFT JOIN community_personas
-	// exactly like the community.sql read paths — content outlives its author (a
-	// deleted account leaves user_id NULL), so a null handle means "no live author",
-	// which the API renders as a deleted-member marker.
-	// Insert or overwrite the caller's feedback on a company in place — the same
-	// upsert-in-place shape as UpsertCompanyVote, but ON CONFLICT names the target
-	// partial index directly since the unique index excludes NULL user_id.
+	// (company, category) — a user may hold one review per category per company,
+	// upserted in place (edit-by-resubmit) within that category, but may leave a
+	// second review on the same company under a different category. LEFT JOIN
+	// community_personas exactly like the community.sql read paths — content
+	// outlives its author (a deleted account leaves user_id NULL), so a null
+	// handle means "no live author", which the API renders as a deleted-member
+	// marker.
+	// Insert or overwrite the caller's feedback in one category on a company in
+	// place — the same upsert-in-place shape as UpsertCompanyVote, but ON
+	// CONFLICT names the target partial index directly since the unique index
+	// excludes NULL user_id.
 	UpsertCompanyFeedback(ctx context.Context, arg UpsertCompanyFeedbackParams) (CompanyFeedback, error)
 	// Set a user's company vote to $3 (-1 or 1), inserting or overwriting in place.
 	// Toggle-to-clear is handled by DeleteCompanyVote, chosen by the domain layer.
@@ -3566,10 +3584,14 @@ type Querier interface {
 	UpsertUserProfileIfUnchanged(ctx context.Context, arg UpsertUserProfileIfUnchangedParams) (UserProfile, error)
 	// Apply one yc-oss directory entry, matched by slug. A new slug is inserted as a
 	// reference row (is_reference = true) with no jobs; an existing slug (job-backed or a
-	// prior reference) has its company-info columns plus the curated yc_batch/yc_status
-	// facets refreshed — name, job_count, collections, is_reference, and the job-derived
-	// facet arrays (regions/remote_regions/countries/domains/company_types/company_sizes)
-	// are left untouched. Idempotent: re-running the same entry rewrites the same values.
+	// prior reference) has the YC-owned columns refreshed — name, job_count, collections,
+	// is_reference, and the job-derived facet arrays (regions/remote_regions/countries/
+	// domains/company_types/company_sizes) are left untouched. Idempotent: re-running
+	// the same entry rewrites the same values.
+	//
+	// Three columns are NOT YC-owned, because this is no longer their only writer, and
+	// replacing them would erase another source's work on the importer's next run:
+	// tagline fills only a blank, company_info merges key-wise, and industries union.
 	UpsertYCCompany(ctx context.Context, arg UpsertYCCompanyParams) error
 	// Slim email lookup for the delete-account confirmation, which compares the typed
 	// address against the caller's own. A primitive so the handler needs no full user row

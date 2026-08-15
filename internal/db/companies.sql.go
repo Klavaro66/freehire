@@ -127,15 +127,19 @@ WHERE job_count > 0
   AND (coalesce(cardinality($3::text[]), 0) = 0 OR regions && $3::text[])
   AND (coalesce(cardinality($4::text[]), 0) = 0 OR countries && $4::text[])
   AND (coalesce(cardinality($5::text[]), 0) = 0 OR domains && $5::text[])
-  AND (coalesce(cardinality($6::text[]), 0) = 0 OR company_types && $6::text[])
-  AND (coalesce(cardinality($7::text[]), 0) = 0 OR company_sizes && $7::text[])
-  AND (coalesce(cardinality($8::text[]), 0) = 0 OR remote_regions && $8::text[])
-  AND (coalesce(cardinality($9::text[]), 0) = 0 OR yc_batch && $9::text[])
-  AND (coalesce(cardinality($10::text[]), 0) = 0 OR yc_status && $10::text[])
-  AND (coalesce(cardinality($11::text[]), 0) = 0 OR yc_stage && $11::text[])
-  AND (coalesce(cardinality($12::text[]), 0) = 0 OR yc_flags && $12::text[])
-  AND (coalesce(cardinality($13::text[]), 0) = 0 OR maturity = ANY($13::text[]))
-  AND (coalesce(cardinality($14::text[]), 0) = 0 OR subindustry = ANY($14::text[]))
+  -- industries is the finer level beneath domains, filtered the same way. It must
+  -- exist on THIS path too: when only industries is set the request never reaches
+  -- Meili, and a facet the fallback does not know is silently ignored.
+  AND (coalesce(cardinality($6::text[]), 0) = 0 OR industries && $6::text[])
+  AND (coalesce(cardinality($7::text[]), 0) = 0 OR company_types && $7::text[])
+  AND (coalesce(cardinality($8::text[]), 0) = 0 OR company_sizes && $8::text[])
+  AND (coalesce(cardinality($9::text[]), 0) = 0 OR remote_regions && $9::text[])
+  AND (coalesce(cardinality($10::text[]), 0) = 0 OR yc_batch && $10::text[])
+  AND (coalesce(cardinality($11::text[]), 0) = 0 OR yc_status && $11::text[])
+  AND (coalesce(cardinality($12::text[]), 0) = 0 OR yc_stage && $12::text[])
+  AND (coalesce(cardinality($13::text[]), 0) = 0 OR yc_flags && $13::text[])
+  AND (coalesce(cardinality($14::text[]), 0) = 0 OR maturity = ANY($14::text[]))
+  AND (coalesce(cardinality($15::text[]), 0) = 0 OR subindustry = ANY($15::text[]))
 `
 
 type CountCompaniesParams struct {
@@ -144,6 +148,7 @@ type CountCompaniesParams struct {
 	Regions       []string `json:"regions"`
 	Countries     []string `json:"countries"`
 	Domains       []string `json:"domains"`
+	Industries    []string `json:"industries"`
 	CompanyTypes  []string `json:"company_types"`
 	CompanySizes  []string `json:"company_sizes"`
 	RemoteRegions []string `json:"remote_regions"`
@@ -165,6 +170,7 @@ func (q *Queries) CountCompanies(ctx context.Context, arg CountCompaniesParams) 
 		arg.Regions,
 		arg.Countries,
 		arg.Domains,
+		arg.Industries,
 		arg.CompanyTypes,
 		arg.CompanySizes,
 		arg.RemoteRegions,
@@ -272,22 +278,26 @@ WHERE job_count > 0
   AND (coalesce(cardinality($3::text[]), 0) = 0 OR regions && $3::text[])
   AND (coalesce(cardinality($4::text[]), 0) = 0 OR countries && $4::text[])
   AND (coalesce(cardinality($5::text[]), 0) = 0 OR domains && $5::text[])
-  AND (coalesce(cardinality($6::text[]), 0) = 0 OR company_types && $6::text[])
-  AND (coalesce(cardinality($7::text[]), 0) = 0 OR company_sizes && $7::text[])
-  AND (coalesce(cardinality($8::text[]), 0) = 0 OR remote_regions && $8::text[])
-  AND (coalesce(cardinality($9::text[]), 0) = 0 OR yc_batch && $9::text[])
-  AND (coalesce(cardinality($10::text[]), 0) = 0 OR yc_status && $10::text[])
-  AND (coalesce(cardinality($11::text[]), 0) = 0 OR yc_stage && $11::text[])
-  AND (coalesce(cardinality($12::text[]), 0) = 0 OR yc_flags && $12::text[])
+  -- industries is the finer level beneath domains, filtered the same way. It must
+  -- exist on THIS path too: when only industries is set the request never reaches
+  -- Meili, and a facet the fallback does not know is silently ignored.
+  AND (coalesce(cardinality($6::text[]), 0) = 0 OR industries && $6::text[])
+  AND (coalesce(cardinality($7::text[]), 0) = 0 OR company_types && $7::text[])
+  AND (coalesce(cardinality($8::text[]), 0) = 0 OR company_sizes && $8::text[])
+  AND (coalesce(cardinality($9::text[]), 0) = 0 OR remote_regions && $9::text[])
+  AND (coalesce(cardinality($10::text[]), 0) = 0 OR yc_batch && $10::text[])
+  AND (coalesce(cardinality($11::text[]), 0) = 0 OR yc_status && $11::text[])
+  AND (coalesce(cardinality($12::text[]), 0) = 0 OR yc_stage && $12::text[])
+  AND (coalesce(cardinality($13::text[]), 0) = 0 OR yc_flags && $13::text[])
   -- maturity is a SCALAR column (not an array): membership, not overlap. A NULL
   -- (unknown) maturity matches no requested value, so ` + "`" + `NULL = ANY(...)` + "`" + ` excludes it.
-  AND (coalesce(cardinality($13::text[]), 0) = 0 OR maturity = ANY($13::text[]))
+  AND (coalesce(cardinality($14::text[]), 0) = 0 OR maturity = ANY($14::text[]))
   -- subindustry is likewise a NULLABLE SCALAR: membership, not overlap; NULL matches none.
-  AND (coalesce(cardinality($14::text[]), 0) = 0 OR subindustry = ANY($14::text[]))
+  AND (coalesce(cardinality($15::text[]), 0) = 0 OR subindustry = ANY($15::text[]))
 ORDER BY
-  CASE WHEN $15::text = 'rating' THEN feedback_rating_avg END DESC NULLS LAST,
+  CASE WHEN $16::text = 'rating' THEN feedback_rating_avg END DESC NULLS LAST,
   job_count DESC, name
-LIMIT $17 OFFSET $16
+LIMIT $18 OFFSET $17
 `
 
 type ListCompaniesParams struct {
@@ -296,6 +306,7 @@ type ListCompaniesParams struct {
 	Regions       []string `json:"regions"`
 	Countries     []string `json:"countries"`
 	Domains       []string `json:"domains"`
+	Industries    []string `json:"industries"`
 	CompanyTypes  []string `json:"company_types"`
 	CompanySizes  []string `json:"company_sizes"`
 	RemoteRegions []string `json:"remote_regions"`
@@ -354,6 +365,7 @@ func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([
 		arg.Regions,
 		arg.Countries,
 		arg.Domains,
+		arg.Industries,
 		arg.CompanyTypes,
 		arg.CompanySizes,
 		arg.RemoteRegions,
@@ -504,6 +516,48 @@ func (q *Queries) ListCompanyCollections(ctx context.Context) ([]ListCompanyColl
 			&i.Countries,
 			&i.HqCountry,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCompanyIndustriesPage = `-- name: ListCompanyIndustriesPage :many
+SELECT slug, industries
+FROM companies
+WHERE slug > $1
+ORDER BY slug
+LIMIT $2
+`
+
+type ListCompanyIndustriesPageParams struct {
+	AfterSlug string `json:"after_slug"`
+	PageLimit int32  `json:"page_limit"`
+}
+
+type ListCompanyIndustriesPageRow struct {
+	Slug       string   `json:"slug"`
+	Industries []string `json:"industries"`
+}
+
+// Keyset page over every company, ordered by slug so a run resumes from the last
+// slug it saw. Deliberately unfiltered: the normalization pass only cares about
+// rows that already hold industries, but the merge pass must also reach companies
+// with none, and one query serving both keeps the two walks identical.
+func (q *Queries) ListCompanyIndustriesPage(ctx context.Context, arg ListCompanyIndustriesPageParams) ([]ListCompanyIndustriesPageRow, error) {
+	rows, err := q.db.Query(ctx, listCompanyIndustriesPage, arg.AfterSlug, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCompanyIndustriesPageRow{}
+	for rows.Next() {
+		var i ListCompanyIndustriesPageRow
+		if err := rows.Scan(&i.Slug, &i.Industries); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -833,6 +887,28 @@ func (q *Queries) SetCompanyCollections(ctx context.Context, arg SetCompanyColle
 	return err
 }
 
+const setCompanyIndustries = `-- name: SetCompanyIndustries :execrows
+UPDATE companies
+SET industries = $1, updated_at = now()
+WHERE slug = $2 AND industries IS DISTINCT FROM $1
+`
+
+type SetCompanyIndustriesParams struct {
+	Industries []string `json:"industries"`
+	Slug       string   `json:"slug"`
+}
+
+// Replace one company's industries. The IS DISTINCT FROM guard keeps updated_at
+// honest — a row already holding the wanted value is not rewritten — and makes the
+// affected-row count real churn, so a second run reports zero.
+func (q *Queries) SetCompanyIndustries(ctx context.Context, arg SetCompanyIndustriesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setCompanyIndustries, arg.Industries, arg.Slug)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const syncCompaniesFromJobs = `-- name: SyncCompaniesFromJobs :exec
 INSERT INTO companies (slug, name)
 SELECT DISTINCT ON (company_slug) company_slug, company
@@ -865,13 +941,25 @@ INSERT INTO companies (
     $12, $13, true, now()
 )
 ON CONFLICT (slug) DO UPDATE SET
-    industries      = EXCLUDED.industries,
+    -- Union, sorted and de-duplicated, so two sources accumulate instead of
+    -- overwriting. Sorted because the stored order is compared for equality by the
+    -- normalization worker's no-op guard.
+    industries      = ARRAY(
+        SELECT DISTINCT x
+        FROM unnest(companies.industries || EXCLUDED.industries) AS x
+        WHERE x <> ''
+        ORDER BY x
+    ),
     subindustry     = EXCLUDED.subindustry,
     year_founded    = EXCLUDED.year_founded,
     employee_count  = EXCLUDED.employee_count,
     hq_country      = EXCLUDED.hq_country,
-    tagline         = EXCLUDED.tagline,
-    company_info    = EXCLUDED.company_info,
+    -- NULLIF folds '' into NULL so an empty string counts as absent, not as a value
+    -- worth protecting.
+    tagline         = COALESCE(NULLIF(companies.tagline, ''), EXCLUDED.tagline),
+    -- Operand order is load-bearing: a || b keeps b on key collision, so the YC keys
+    -- fill gaps while anything already stored wins. Reversed, this is the bug above.
+    company_info    = EXCLUDED.company_info || companies.company_info,
     yc_batch        = EXCLUDED.yc_batch,
     yc_status       = EXCLUDED.yc_status,
     yc_stage        = EXCLUDED.yc_stage,
@@ -898,10 +986,14 @@ type UpsertYCCompanyParams struct {
 
 // Apply one yc-oss directory entry, matched by slug. A new slug is inserted as a
 // reference row (is_reference = true) with no jobs; an existing slug (job-backed or a
-// prior reference) has its company-info columns plus the curated yc_batch/yc_status
-// facets refreshed — name, job_count, collections, is_reference, and the job-derived
-// facet arrays (regions/remote_regions/countries/domains/company_types/company_sizes)
-// are left untouched. Idempotent: re-running the same entry rewrites the same values.
+// prior reference) has the YC-owned columns refreshed — name, job_count, collections,
+// is_reference, and the job-derived facet arrays (regions/remote_regions/countries/
+// domains/company_types/company_sizes) are left untouched. Idempotent: re-running
+// the same entry rewrites the same values.
+//
+// Three columns are NOT YC-owned, because this is no longer their only writer, and
+// replacing them would erase another source's work on the importer's next run:
+// tagline fills only a blank, company_info merges key-wise, and industries union.
 func (q *Queries) UpsertYCCompany(ctx context.Context, arg UpsertYCCompanyParams) error {
 	_, err := q.db.Exec(ctx, upsertYCCompany,
 		arg.Slug,
