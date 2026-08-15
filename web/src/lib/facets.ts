@@ -17,7 +17,7 @@ import {
   WORK_MODE_VALUES, SENIORITY_VALUES, CATEGORY_VALUES,
   EMPLOYMENT_TYPE_VALUES, RELOCATION_VALUES, ENGLISH_LEVEL_VALUES,
   COMPANY_TYPE_VALUES, DOMAIN_VALUES, ROLE_LABELS, ROLE_ALIASES,
-  AI_ARCHETYPE_VALUES,
+  AI_ARCHETYPE_VALUES, SKILL_LABELS,
 } from './generated/contracts';
 import { fuzzyMatch } from './fuzzy';
 import {
@@ -229,6 +229,15 @@ export async function searchCities(query: string, country?: string): Promise<Fac
 // back to a title-cased slug for a value the catalog somehow lacks.
 export function roleLabel(slug: string): string {
   return (ROLE_LABELS as Record<string, string>)[slug] ?? titleCase(slug);
+}
+
+// Skill facet values are canonical slugs (postgresql, ci-cd, nodejs); the live
+// distribution carries no display name, so map them through the generated SKILL_LABELS
+// catalog (the skilltag dictionary is the source of truth). The fallback title-cases the
+// slug the way companyLabel does, so a value that outlived a dictionary edit still reads
+// as words rather than as data.
+export function skillLabel(slug: string): string {
+  return (SKILL_LABELS as Record<string, string>)[slug] ?? titleCase(slug.replace(/-/g, '_'));
 }
 
 /** Display label for a dynamic facet value: country code → name, company slug →
