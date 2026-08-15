@@ -1105,6 +1105,11 @@ type Querier interface {
 	// the table grows columns (e.g. collections); an explicit subset makes sqlc emit a
 	// distinct row type and breaks the company-detail handler on every new column.
 	GetCompany(ctx context.Context, slug string) (Company, error)
+	// The company_slug for a review id, read (unlocked) BEFORE HideCompanyFeedback so
+	// Service.Hide can take LockCompanyForVote before it touches the feedback row —
+	// the same company-then-feedback lock order Upsert/Delete already use, needed to
+	// avoid a lock-order deadlock with those paths. pgx.ErrNoRows on an unknown id.
+	GetCompanyFeedbackSlug(ctx context.Context, id int64) (string, error)
 	// The observable application counts for one company. A company with no row has no
 	// observable applications at all, which the caller must treat as "not enough data"
 	// rather than as a zero response rate.
@@ -1515,7 +1520,11 @@ type Querier interface {
 	// Open a thread. The author's handle is filled by the service from the minted
 	// persona, so no join is needed here.
 	InsertThread(ctx context.Context, arg InsertThreadParams) (Thread, error)
-	// parent_reply_id is NULL for a top-level reply, or another reply's id to nest under it.
+	// parent_reply_id is NULL for a top-level reply, or another reply's id to nest under it
+	// — constrained to a reply that belongs to the SAME thread_id, since the FK alone only
+	// requires the parent row to exist somewhere in thread_replies, not in this thread. No
+	// row is inserted (pgx.ErrNoRows) when parent_reply_id is set but names a reply outside
+	// this thread.
 	InsertThreadReply(ctx context.Context, arg InsertThreadReplyParams) (ThreadReply, error)
 	// Cursor read: has this rotated file (by content signature) been applied? The
 	// signature is stable across rename and gzip, so a re-run recognizes the same file.
@@ -2652,11 +2661,19 @@ type Querier interface {
 	// so a failed entry is never reprocessed within the same run. Mirrors
 	// RecordEnrichmentFailure.
 	RecordSemanticFailure(ctx context.Context, arg RecordSemanticFailureParams) (RecordSemanticFailureRow, error)
-	// Record that a job matched a subscription. The PK (subscription_id, job_id) makes
-	// this idempotent — re-scanning an already-recorded match is a no-op — so the
-	// worker can re-scan recent jobs freely without ever delivering twice. Returns the
-	// affected row count (1 = newly recorded, 0 = already known).
-	RecordSubscriptionMatch(ctx context.Context, arg RecordSubscriptionMatchParams) (int64, error)
+	// Record that a batch of (subscription, job) pairs matched, one round trip for
+	// however many pairs one query's search hits produced across every subscription that
+	// shares it — a popular query with many subscribers no longer costs one sequential
+	// INSERT per (hit, subscription) pair. The PK (subscription_id, job_id) makes this
+	// idempotent — re-scanning an already-recorded match is a no-op — so the worker can
+	// re-scan recent jobs freely without ever delivering twice. Returns the affected row
+	// count (newly recorded pairs; already-known pairs are silently skipped).
+	//
+	// Two same-length unnest calls in the SELECT list, not a two-argument unnest(a, b): the
+	// query analyzer cannot type the latter (see jobs.sql's MarkFuzzyDuplicatesForCompany,
+	// same pattern for the same reason); Postgres runs same-length SELECT-list set-returning
+	// functions in lockstep, pairing subscription_ids[i] with job_ids[i].
+	RecordSubscriptionMatches(ctx context.Context, arg RecordSubscriptionMatchesParams) (int64, error)
 	// Count a failed attempt: bump attempts, record the error, and dead-letter (set
 	// failed_at) once attempts reach the max. The lease (claimed_at) is intentionally
 	// left in place — its expiry gates the retry to a later run and doubles as the
@@ -3558,6 +3575,13 @@ type Querier interface {
 	// normalized by the service; excluded_skills may be empty; location_preferences is a
 	// validated JSONB block or NULL (no preferences).
 	UpsertUserProfile(ctx context.Context, arg UpsertUserProfileParams) (UserProfile, error)
+	// Same write as UpsertUserProfile, guarded on the row's updated_at still matching what the
+	// caller read. Used by MergeSkills, whose merge (which fields to keep, which skills to add)
+	// is computed in Go from a prior Get, outside any transaction: a Save() landing in that gap
+	// must not be silently clobbered by a write built from a now-stale snapshot. No matching row
+	// (updated_at moved, or the profile was deleted) returns zero rows; the caller re-reads and
+	// retries rather than overwriting blind.
+	UpsertUserProfileIfUnchanged(ctx context.Context, arg UpsertUserProfileIfUnchangedParams) (UserProfile, error)
 	// Apply one yc-oss directory entry, matched by slug. A new slug is inserted as a
 	// reference row (is_reference = true) with no jobs; an existing slug (job-backed or a
 	// prior reference) has its company-info columns plus the curated yc_batch/yc_status
