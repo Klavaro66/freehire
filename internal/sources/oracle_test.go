@@ -102,6 +102,98 @@ func TestOracleFetchListsAndFetchesDetail(t *testing.T) {
 	}
 }
 
+// TestOracleFallsBackToCorporateDescriptionWhenExternalIsBlank covers the Campus/Summer-
+// Analyst template seen live on Goldman Sachs' board: the External* fields carry only a
+// lone "<br>" with nothing else, so detail must fall back to Corporate/OrganizationDescriptionStr
+// rather than yielding a description with no usable text for downstream skill extraction.
+func TestOracleFallsBackToCorporateDescriptionWhenExternalIsBlank(t *testing.T) {
+	fake := (&routedHTTP{}).
+		route("findReqs", `{"items": [{
+			"TotalJobsCount": 1,
+			"requisitionList": [
+				{"Id": "170159", "Title": "Summer Analyst", "PostedDate": "2026-08-15",
+				 "PrimaryLocation": "Warsaw, Poland", "WorkplaceTypeCode": "ORA_ON_SITE"}
+			]
+		}]}`).
+		route("170159", `{"items": [{
+			"Id": "170159",
+			"ExternalDescriptionStr": "<br>",
+			"ExternalResponsibilitiesStr": "",
+			"ExternalQualificationsStr": "",
+			"CorporateDescriptionStr": "<p>About the program.</p>",
+			"OrganizationDescriptionStr": "<p>About the division.</p>"
+		}]}`)
+
+	jobs, err := NewOracle(fake).Fetch(context.Background(), CompanyEntry{
+		Company: "Goldman Sachs", Provider: "oracle",
+		Board: "hdpc.fa.us2.oraclecloud.com/LateralHiring",
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("len(jobs) = %d, want 1", len(jobs))
+	}
+	for _, want := range []string{"About the program.", "About the division."} {
+		if !strings.Contains(jobs[0].Description, want) {
+			t.Errorf("Description missing %q: %q", want, jobs[0].Description)
+		}
+	}
+	if strings.Contains(jobs[0].Description, "<br>") {
+		t.Errorf("Description = %q, should not fall back to the blank External* markup", jobs[0].Description)
+	}
+}
+
+// TestOracleHasVisibleTextIgnoresEscapedTagLookalikes guards against stripping tags after
+// unescaping: a field whose only content is an HTML-escaped tag-shaped string (e.g. someone
+// wrote "<tag>" as literal text) must still count as visible text, not be swallowed by the
+// tag stripper once unescaping turns it into something that looks like a real tag.
+func TestOracleHasVisibleTextIgnoresEscapedTagLookalikes(t *testing.T) {
+	if !oracleHasVisibleText("<p>&lt;tag&gt;</p>") {
+		t.Error("oracleHasVisibleText(`<p>&lt;tag&gt;</p>`) = false, want true")
+	}
+}
+
+// TestOracleDetailKeepsEscapedTagLookalikeOverFallback exercises the same case through the
+// full detail path: an ExternalDescriptionStr whose only content is an HTML-escaped
+// tag-shaped string must count as visible text, so detail keeps it and does not fall back
+// to Corporate/OrganizationDescriptionStr.
+func TestOracleDetailKeepsEscapedTagLookalikeOverFallback(t *testing.T) {
+	fake := (&routedHTTP{}).
+		route("findReqs", `{"items": [{
+			"TotalJobsCount": 1,
+			"requisitionList": [
+				{"Id": "170200", "Title": "Support Engineer", "PostedDate": "2026-08-15",
+				 "PrimaryLocation": "Warsaw, Poland", "WorkplaceTypeCode": "ORA_ON_SITE"}
+			]
+		}]}`).
+		route("170200", `{"items": [{
+			"Id": "170200",
+			"ExternalDescriptionStr": "<p>&lt;tag&gt;</p>",
+			"ExternalResponsibilitiesStr": "",
+			"ExternalQualificationsStr": "",
+			"CorporateDescriptionStr": "<p>Fallback text that should not be used.</p>",
+			"OrganizationDescriptionStr": ""
+		}]}`)
+
+	jobs, err := NewOracle(fake).Fetch(context.Background(), CompanyEntry{
+		Company: "Acme", Provider: "oracle",
+		Board: "fa-test.fa.ocs.oraclecloud.com/CX_1",
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("len(jobs) = %d, want 1", len(jobs))
+	}
+	if !strings.Contains(jobs[0].Description, "&lt;tag&gt;") {
+		t.Errorf("Description = %q, want it to keep the escaped literal <tag> text", jobs[0].Description)
+	}
+	if strings.Contains(jobs[0].Description, "Fallback text") {
+		t.Errorf("Description = %q, should not have fallen back to CorporateDescriptionStr", jobs[0].Description)
+	}
+}
+
 // TestOracleOffsetIsInsideFinder guards the pagination fix: Oracle ignores a top-level
 // &offset= query param (it only honors offset INSIDE the finder clause, alongside limit),
 // so a top-level offset silently re-fetches the first page forever. The fake routes each
