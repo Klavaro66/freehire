@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -27,6 +28,9 @@ type fakeQueries struct {
 	gotUserID int64
 	labelSet  string
 	touched   uuid.UUID
+
+	touchedUserID int64
+	labelUserID   int64
 }
 
 func (f *fakeQueries) CreateAssistantSession(_ context.Context, arg db.CreateAssistantSessionParams) (db.CreateAssistantSessionRow, error) {
@@ -61,12 +65,25 @@ func (f *fakeQueries) DeleteAssistantSession(_ context.Context, _ db.DeleteAssis
 	return f.deleted, nil
 }
 
-func (f *fakeQueries) TouchAssistantSession(_ context.Context, id uuid.UUID) error {
-	f.touched = id
+// TouchAssistantSession mimics the real query's WHERE id = $1 AND user_id = $2: a
+// mismatched owner affects nothing, silently — an :exec query has no row count to
+// surface, so the store can't tell "touched" from "matched no row" apart, same as
+// production.
+func (f *fakeQueries) TouchAssistantSession(_ context.Context, arg db.TouchAssistantSessionParams) error {
+	f.touchedUserID = arg.UserID
+	if f.session.ID != arg.ID || f.session.UserID != arg.UserID {
+		return nil
+	}
+	f.touched = arg.ID
 	return nil
 }
 
+// SetAssistantSessionLabel mimics the real query's owner scoping the same way.
 func (f *fakeQueries) SetAssistantSessionLabel(_ context.Context, arg db.SetAssistantSessionLabelParams) error {
+	f.labelUserID = arg.UserID
+	if f.session.ID != arg.ID || f.session.UserID != arg.UserID {
+		return nil
+	}
 	f.labelSet = arg.Label.String
 	return nil
 }
@@ -91,6 +108,26 @@ func (f *fakeQueries) ListAssistantMessages(_ context.Context, sessionID uuid.UU
 		if m.SessionID == sessionID {
 			out = append(out, db.AssistantMessage{SessionID: m.SessionID, Seq: m.Seq, Role: m.Role, Content: m.Content})
 		}
+	}
+	return out, nil
+}
+
+// ListRecentAssistantMessages mimics the real query: newest limit rows first, the
+// caller (Store.RecentTranscript) is the one that reverses back to ascending order.
+func (f *fakeQueries) ListRecentAssistantMessages(_ context.Context, arg db.ListRecentAssistantMessagesParams) ([]db.AssistantMessage, error) {
+	var all []db.AssistantMessage
+	for _, m := range f.messages {
+		if m.SessionID == arg.SessionID {
+			all = append(all, db.AssistantMessage{SessionID: m.SessionID, Seq: m.Seq, Role: m.Role, Content: m.Content})
+		}
+	}
+	limit := int(arg.Limit)
+	if limit > len(all) {
+		limit = len(all)
+	}
+	out := make([]db.AssistantMessage, limit)
+	for i := 0; i < limit; i++ {
+		out[i] = all[len(all)-1-i]
 	}
 	return out, nil
 }
@@ -177,14 +214,92 @@ func TestAppendAndReadTranscript(t *testing.T) {
 	}
 }
 
-func TestLabelSessionUsesTheFirstMessage(t *testing.T) {
+// RecentTranscript is the bounded counterpart of Transcript used to rebuild the model's
+// own history every turn (see Runner.history) — it must return exactly the same tail
+// Transcript's own last-N slice would, in the same ascending seq order, without ever
+// asking the fake for more than `limit` rows.
+func TestRecentTranscriptReturnsTheTailInAscendingOrder(t *testing.T) {
 	f := &fakeQueries{}
 	s := NewStore(f)
-	if err := s.LabelSession(context.Background(), sessionID, "find go jobs"); err != nil {
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		msg, _ := EncodeUser(strings.Repeat("m", i+1))
+		if _, err := s.Append(ctx, sessionID, msg); err != nil {
+			t.Fatalf("seed message %d: %v", i, err)
+		}
+	}
+
+	got, err := s.RecentTranscript(ctx, sessionID, 3)
+	if err != nil {
+		t.Fatalf("RecentTranscript: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d messages, want 3", len(got))
+	}
+	wantSeqs := []int32{3, 4, 5}
+	for i, seq := range wantSeqs {
+		if got[i].Seq != seq {
+			t.Errorf("got[%d].Seq = %d, want %d — the tail in ascending order", i, got[i].Seq, seq)
+		}
+	}
+
+	// A limit at or above the transcript's whole length is the same as reading it all.
+	all, err := s.RecentTranscript(ctx, sessionID, 100)
+	if err != nil {
+		t.Fatalf("RecentTranscript(100): %v", err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("got %d messages, want all 5 when the limit exceeds the transcript length", len(all))
+	}
+}
+
+func TestLabelSessionUsesTheFirstMessage(t *testing.T) {
+	f := &fakeQueries{session: db.AssistantSession{ID: sessionID, UserID: 3, Preset: PresetChat}}
+	s := NewStore(f)
+	if err := s.LabelSession(context.Background(), sessionID, 3, "find go jobs"); err != nil {
 		t.Fatalf("LabelSession: %v", err)
 	}
 	if f.labelSet != "find go jobs" {
 		t.Errorf("label = %q, want the first user message", f.labelSet)
+	}
+}
+
+// TestLabelSessionAndTouchAreOwnerScoped covers the fix for TouchAssistantSession and
+// SetAssistantSessionLabel: both now carry a user_id predicate (mirroring every other
+// write in this file), so calling either with the wrong owner must affect nothing,
+// exactly the way a mismatched id already does.
+func TestLabelSessionAndTouchAreOwnerScoped(t *testing.T) {
+	f := &fakeQueries{session: db.AssistantSession{ID: sessionID, UserID: 3, Preset: PresetChat}}
+	s := NewStore(f)
+	ctx := context.Background()
+
+	if err := s.LabelSession(ctx, sessionID, 99, "someone else's session"); err != nil {
+		t.Fatalf("LabelSession: %v", err)
+	}
+	if f.labelUserID != 99 {
+		t.Errorf("the fake did not see the caller's user id (%d)", f.labelUserID)
+	}
+	if f.labelSet != "" {
+		t.Errorf("label = %q, want unset — session %s is not owned by user 99", f.labelSet, sessionID)
+	}
+
+	if err := s.Touch(ctx, sessionID, 99); err != nil {
+		t.Fatalf("Touch: %v", err)
+	}
+	if f.touchedUserID != 99 {
+		t.Errorf("the fake did not see the caller's user id (%d)", f.touchedUserID)
+	}
+	if f.touched == sessionID {
+		t.Errorf("touched = %s, want untouched — session %s is not owned by user 99", f.touched, sessionID)
+	}
+
+	// The real owner still succeeds.
+	if err := s.Touch(ctx, sessionID, 3); err != nil {
+		t.Fatalf("Touch: %v", err)
+	}
+	if f.touched != sessionID {
+		t.Errorf("touched = %s, want %s for the real owner", f.touched, sessionID)
 	}
 }
 

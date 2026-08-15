@@ -63,10 +63,11 @@ type Queries interface {
 	ListAssistantChatSessions(ctx context.Context, userID int64) ([]db.ListAssistantChatSessionsRow, error)
 	GetAssistantSession(ctx context.Context, arg db.GetAssistantSessionParams) (db.GetAssistantSessionRow, error)
 	DeleteAssistantSession(ctx context.Context, arg db.DeleteAssistantSessionParams) (int64, error)
-	TouchAssistantSession(ctx context.Context, id uuid.UUID) error
+	TouchAssistantSession(ctx context.Context, arg db.TouchAssistantSessionParams) error
 	SetAssistantSessionLabel(ctx context.Context, arg db.SetAssistantSessionLabelParams) error
 	AppendAssistantMessage(ctx context.Context, arg db.AppendAssistantMessageParams) (db.AssistantMessage, error)
 	ListAssistantMessages(ctx context.Context, sessionID uuid.UUID) ([]db.AssistantMessage, error)
+	ListRecentAssistantMessages(ctx context.Context, arg db.ListRecentAssistantMessagesParams) ([]db.AssistantMessage, error)
 }
 
 // Store persists sessions and their transcripts. Every session read and write is
@@ -131,19 +132,23 @@ func (s *Store) DeleteSession(ctx context.Context, id uuid.UUID, userID int64) e
 }
 
 // Touch marks a session as the most recently active, so the rail follows real use.
-func (s *Store) Touch(ctx context.Context, id uuid.UUID) error {
-	if err := s.q.TouchAssistantSession(ctx, id); err != nil {
+// Owner-scoped like every other session write: userID must be the caller who already
+// proved ownership of id (the Session it just read, created, or continued).
+func (s *Store) Touch(ctx context.Context, id uuid.UUID, userID int64) error {
+	if err := s.q.TouchAssistantSession(ctx, db.TouchAssistantSessionParams{ID: id, UserID: userID}); err != nil {
 		return fmt.Errorf("assistant: touch session: %w", err)
 	}
 	return nil
 }
 
 // LabelSession names a session from its first user message. The query applies it
-// only while the label is unset, so this is safe to call on every turn.
-func (s *Store) LabelSession(ctx context.Context, id uuid.UUID, label string) error {
+// only while the label is unset, so this is safe to call on every turn. Owner-scoped
+// like Touch.
+func (s *Store) LabelSession(ctx context.Context, id uuid.UUID, userID int64, label string) error {
 	err := s.q.SetAssistantSessionLabel(ctx, db.SetAssistantSessionLabelParams{
-		ID:    id,
-		Label: pgtype.Text{String: label, Valid: label != ""},
+		ID:     id,
+		UserID: userID,
+		Label:  pgtype.Text{String: label, Valid: label != ""},
 	})
 	if err != nil {
 		return fmt.Errorf("assistant: label session: %w", err)
@@ -182,7 +187,9 @@ func (s *Store) Append(ctx context.Context, sessionID uuid.UUID, m Message) (Mes
 	return Message{}, fmt.Errorf("assistant: append message: %w", err)
 }
 
-// Transcript reads a session's messages in order.
+// Transcript reads a session's WHOLE messages in order. For a client replaying the
+// conversation; the model's own history is rebuilt from RecentTranscript instead, which
+// does not pay for rows that would only be trimmed away.
 func (s *Store) Transcript(ctx context.Context, sessionID uuid.UUID) ([]Message, error) {
 	rows, err := s.q.ListAssistantMessages(ctx, sessionID)
 	if err != nil {
@@ -191,6 +198,27 @@ func (s *Store) Transcript(ctx context.Context, sessionID uuid.UUID) ([]Message,
 	out := make([]Message, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, Message{Seq: r.Seq, Role: r.Role, Content: r.Content})
+	}
+	return out, nil
+}
+
+// RecentTranscript reads a session's most recent limit messages, oldest first — the
+// bounded counterpart of Transcript, for rebuilding the model's own history every turn
+// without fetching and JSON-decoding rows that Runner.trim() would only discard. limit
+// must be positive.
+func (s *Store) RecentTranscript(ctx context.Context, sessionID uuid.UUID, limit int) ([]Message, error) {
+	rows, err := s.q.ListRecentAssistantMessages(ctx, db.ListRecentAssistantMessagesParams{
+		SessionID: sessionID,
+		Limit:     int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("assistant: read recent transcript: %w", err)
+	}
+	// The query orders newest first so LIMIT keeps the tail; reverse back to ascending
+	// seq order, the shape every caller (trim, Conversation) expects.
+	out := make([]Message, len(rows))
+	for i, r := range rows {
+		out[len(rows)-1-i] = Message{Seq: r.Seq, Role: r.Role, Content: r.Content}
 	}
 	return out, nil
 }

@@ -220,12 +220,29 @@ type Querier interface {
 	// separate reaper process is needed.
 	ClaimEnrichmentBatch(ctx context.Context, arg ClaimEnrichmentBatchParams) ([]ClaimEnrichmentBatchRow, error)
 	// Claim a batch of live, unleased entries for OPEN canonical jobs, freshest job
-	// first, by stamping claimed_at. Mirrors ClaimEnrichmentBatch: the jobs join lets the
-	// claim skip a job that closed or became a non-canonical repost after it was queued
-	// (that reconciles on the next full reindex, same as before this queue existed) and
-	// order by posting freshness. FOR UPDATE OF o locks only outbox rows; SKIP LOCKED
-	// lets concurrent workers take disjoint rows; the lease predicate reclaims entries
-	// whose worker died (stale claimed_at), so no separate reaper process is needed.
+	// first, by stamping claimed_at.
+	//
+	// Orders by the outbox's OWN job_posted_at (denormalized at enqueue time from
+	// COALESCE(jobs.posted_at, jobs.created_at) — see EnqueueSearchOutbox) rather than
+	// joining jobs to compute it. A join-for-ordering here means Postgres cannot push the
+	// LIMIT below the sort — it has to nested-loop-join and sort the ENTIRE claimable set
+	// before taking the batch, independent of batch_size. This is the exact pattern
+	// ClaimSemanticBatch was measured at 109s per claim call on ~906k claimable rows and
+	// fixed the same way (see openspec/changes/prod-semantic-embed-steady-state/design.md
+	// Decision 8, which flagged this query as carrying the identical, unaddressed risk).
+	//
+	// The closed/duplicate_of check stays a per-row EXISTS rather than a JOIN: with the
+	// job_posted_at index in place, Postgres can index-scan search_outbox in the exact
+	// claim order and stop as soon as LIMIT rows pass the EXISTS lookup (a cheap jobs PK
+	// probe), instead of materializing and sorting every claimable row up front. A job
+	// that closed or became a non-canonical repost after being queued is simply skipped —
+	// same behavior as before, just reached via an index scan instead of a full join.
+	// NULLS LAST is defensive (EnqueueSearchOutbox always populates the column; this only
+	// guards a row that predates the backfill migration).
+	//
+	// FOR UPDATE OF o locks only outbox rows; SKIP LOCKED lets concurrent workers take
+	// disjoint rows; the lease predicate reclaims entries whose worker died (stale
+	// claimed_at), so no separate reaper process is needed.
 	ClaimSearchOutboxBatch(ctx context.Context, arg ClaimSearchOutboxBatchParams) ([]ClaimSearchOutboxBatchRow, error)
 	// Claim a batch of live, unleased entries, freshest job first, by stamping claimed_at.
 	// Unlike ClaimEnrichmentBatch this does NOT filter unindexable jobs out: a closed OR
@@ -511,6 +528,11 @@ type Querier interface {
 	// Served by the partial index threads_subject_open_created_idx; scoped to a single
 	// subject so it stays cheap (not the cross-subject count the design rules out).
 	CountOpenThreadsBySubject(ctx context.Context, arg CountOpenThreadsBySubjectParams) (int64, error)
+	// How many of the caller's applications have no posting left — see
+	// ListOrphanedApplications. CountUserJobs is driven entirely FROM user_jobs, which
+	// cmd/prune cascades away for a pruned posting, so it never counts these; this is added
+	// to its "all"/"applied"/"board" totals by the caller.
+	CountOrphanedApplications(ctx context.Context, userID int64) (int64, error)
 	// Read-only counterpart to BackfillPreparingStage, for cmd/backfill-preparing-stage's
 	// --dry-run: how many applications the correction below would touch, without touching them.
 	// Kept in exact lockstep with that query's WHERE clause deliberately — see its comment for
@@ -925,7 +947,10 @@ type Querier interface {
 	// transaction as the job's upsert, only when the write inserted or changed indexed
 	// content (mirrors the gate the old inline SubmitJobs push used). ON CONFLICT keeps
 	// exactly one live entry per job, so a job changed again before it drains is not
-	// queued twice.
+	// queued twice. job_posted_at denormalizes COALESCE(posted_at, created_at) onto the
+	// outbox row so ClaimSearchOutboxBatch can sort by it without joining jobs on every
+	// claim (see that query's doc comment); the single-row subquery here costs nothing
+	// beyond the jobs PK lookup this call already implies.
 	EnqueueSearchOutbox(ctx context.Context, jobID int64) error
 	// Seed a balance row for a brand-new user so the subsequent SELECT ... FOR UPDATE
 	// always has a row to lock (this is what serializes concurrent first-ever debits).
@@ -1599,8 +1624,10 @@ type Querier interface {
 	// conversations are excluded for exactly that reason inverted — they belong to the CV that
 	// owns them, are reached through the tailoring workspace, and cannot be continued without it.
 	ListAssistantChatSessions(ctx context.Context, userID int64) ([]ListAssistantChatSessionsRow, error)
-	// A session's whole transcript in order. It is both what the client replays and what the
-	// model's history is rebuilt from, so tool calls and tool results are included.
+	// A session's whole transcript in order, for the client to replay. Tool calls and tool
+	// results are included. Unbounded by design: the client's own message list must show
+	// everything, not a trimmed window — see ListRecentAssistantMessages for the bounded
+	// read the model's own history is rebuilt from.
 	ListAssistantMessages(ctx context.Context, sessionID uuid.UUID) ([]AssistantMessage, error)
 	// The feed, newest first.
 	ListCVRevisions(ctx context.Context, arg ListCVRevisionsParams) ([]CvRevision, error)
@@ -1959,6 +1986,12 @@ type Querier interface {
 	//
 	// The board reads these alongside the posting-backed rows and merges the two; they are
 	// few by nature — one appears only when a posting a candidate applied to is pruned.
+	//
+	// Takes OFFSET as well as LIMIT so a caller paging the merged board (ListInteractions)
+	// can advance past the first page of orphans instead of re-reading the same top-N rows
+	// on every page — the query alone cannot fix that, since ListInteractions decides how
+	// much of the requested (limit, offset) window belongs to the posting-backed rows
+	// versus the orphaned ones.
 	ListOrphanedApplications(ctx context.Context, arg ListOrphanedApplicationsParams) ([]ListOrphanedApplicationsRow, error)
 	// The moderator queue: offers awaiting a decision, oldest first, with display name.
 	// Capped at 500 as a runaway-growth guard — far above any plausible backlog; a
@@ -1976,6 +2009,15 @@ type Querier interface {
 	ListPendingSubmissions(ctx context.Context) ([]ListPendingSubmissionsRow, error)
 	// The caller's own registered devices, for a test send or a future delivery.
 	ListPushTokensForUser(ctx context.Context, userID int64) ([]UserPushToken, error)
+	// The session's most recent messages, newest first — the bounded counterpart of
+	// ListAssistantMessages, for rebuilding the model's own history every turn. Runner.trim()
+	// only ever keeps the tail (HistoryLimit, default 60) of what ListAssistantMessages
+	// returns; fetching and JSON-decoding the WHOLE transcript first, only to discard
+	// everything but the tail, cost time and memory proportional to total session length
+	// (autopilot runs, long-lived chat/tailoring sessions can accumulate hundreds of rows)
+	// instead of the fixed window actually used. The caller reverses these rows back to
+	// ascending seq order before handing them to trim()/Conversation().
+	ListRecentAssistantMessages(ctx context.Context, arg ListRecentAssistantMessagesParams) ([]AssistantMessage, error)
 	// The "my offers" list: one member's offers with moderation status, newest first.
 	// Joins the catalogue for the company's display name (LEFT so an offer survives a
 	// company the catalogue no longer knows — the UI falls back to the slug).
@@ -2891,6 +2933,19 @@ type Querier interface {
 	// JOIN so a geo-less row still counts toward HAVING count(DISTINCT id) > 1 (the true cluster
 	// size); blanks/NULLs are dropped by the FILTER. Mirrors RoleClusterCountsAll's single pass.
 	RoleClusterGeoAll(ctx context.Context) ([]RoleClusterGeoAllRow, error)
+	// Role-cluster geography unions for a SPECIFIC set of (company_slug, role_fingerprint)
+	// pairs, so an incremental index push can widen a whole wave's canons in one query
+	// instead of one RoleClusterGeo call per job — the geography counterpart of
+	// RoleClusterCountsFor, mirrored the same way RoleClusterGeo mirrors RoleClusterCount.
+	//
+	// Same cross-product-narrowed-by-caller shape as RoleClusterCountsFor, for the same
+	// reason (a pair-wise join needs a two-argument unnest the analyzer cannot type). Only
+	// OPEN rows count, matching RoleClusterGeo/RoleClusterGeoAll; the caller is expected to
+	// ask only for clusters it already knows (via RoleClusterCountsFor's mass_count) have
+	// more than one open row, since a singleton's self-union is a documented no-op there —
+	// but this query carries no HAVING of its own, so a caller-supplied singleton pair
+	// still resolves (to its own geography, the same no-op RoleClusterGeo returns for one).
+	RoleClusterGeoFor(ctx context.Context, arg RoleClusterGeoForParams) ([]RoleClusterGeoForRow, error)
 	// Save (bookmark) a job for a user. Idempotent and independent of a prior view:
 	// it inserts the row (viewed_at defaults) or refreshes saved_at in place.
 	SaveJob(ctx context.Context, arg SaveJobParams) (SaveJobRow, error)
@@ -2949,7 +3004,8 @@ type Querier interface {
 	// than by fetching the stored url (echojobs: see cmd/liveness/echojobs.go).
 	SelectStaleRegisteredCandidates(ctx context.Context, arg SelectStaleRegisteredCandidatesParams) ([]SelectStaleRegisteredCandidatesRow, error)
 	// Name a session from its first user message. Applied only while the label is still unset,
-	// so a long conversation keeps the name it was born with.
+	// so a long conversation keeps the name it was born with. Owner-scoped for the same
+	// reason TouchAssistantSession is.
 	SetAssistantSessionLabel(ctx context.Context, arg SetAssistantSessionLabelParams) error
 	// Apply the Go-computed cooldown window to a board (called only when the backoff
 	// policy says to cool down).
@@ -3156,7 +3212,11 @@ type Querier interface {
 	// name variants; ON CONFLICT folds collisions and refreshes existing rows.
 	SyncCompaniesFromJobs(ctx context.Context) error
 	// Mark a session as the most recently active, so the rail's order follows real use.
-	TouchAssistantSession(ctx context.Context, id uuid.UUID) error
+	// Owner-scoped like every other write in this file (Get/Delete both require id AND
+	// user_id): a bare id would let any caller who learns another user's session id touch
+	// it, and every call site already has the owner's id in hand (the Session it just
+	// read, created, or otherwise proved ownership of).
+	TouchAssistantSession(ctx context.Context, arg TouchAssistantSessionParams) error
 	// Stamp the CV a click belongs to, for the tracking board's "CV opened" marker. Issued right after
 	// the click insert, as a separate statement rather than in one transaction with it: both writes are
 	// best-effort behind a redirect that must happen regardless, so there is nothing for a rollback to

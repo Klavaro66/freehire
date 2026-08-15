@@ -42,16 +42,21 @@ WHERE id = $1 AND user_id = $2;
 
 -- name: TouchAssistantSession :exec
 -- Mark a session as the most recently active, so the rail's order follows real use.
+-- Owner-scoped like every other write in this file (Get/Delete both require id AND
+-- user_id): a bare id would let any caller who learns another user's session id touch
+-- it, and every call site already has the owner's id in hand (the Session it just
+-- read, created, or otherwise proved ownership of).
 UPDATE assistant_sessions
 SET updated_at = now()
-WHERE id = $1;
+WHERE id = $1 AND user_id = $2;
 
 -- name: SetAssistantSessionLabel :exec
 -- Name a session from its first user message. Applied only while the label is still unset,
--- so a long conversation keeps the name it was born with.
+-- so a long conversation keeps the name it was born with. Owner-scoped for the same
+-- reason TouchAssistantSession is.
 UPDATE assistant_sessions
-SET label = $2
-WHERE id = $1 AND label IS NULL;
+SET label = $3
+WHERE id = $1 AND user_id = $2 AND label IS NULL;
 
 -- name: AppendAssistantMessage :one
 -- Append one message to a session's transcript, assigning the next sequence number in the
@@ -67,9 +72,26 @@ VALUES (
 RETURNING session_id, seq, role, content, created_at;
 
 -- name: ListAssistantMessages :many
--- A session's whole transcript in order. It is both what the client replays and what the
--- model's history is rebuilt from, so tool calls and tool results are included.
+-- A session's whole transcript in order, for the client to replay. Tool calls and tool
+-- results are included. Unbounded by design: the client's own message list must show
+-- everything, not a trimmed window — see ListRecentAssistantMessages for the bounded
+-- read the model's own history is rebuilt from.
 SELECT session_id, seq, role, content, created_at
 FROM assistant_messages
 WHERE session_id = $1
 ORDER BY seq;
+
+-- name: ListRecentAssistantMessages :many
+-- The session's most recent messages, newest first — the bounded counterpart of
+-- ListAssistantMessages, for rebuilding the model's own history every turn. Runner.trim()
+-- only ever keeps the tail (HistoryLimit, default 60) of what ListAssistantMessages
+-- returns; fetching and JSON-decoding the WHOLE transcript first, only to discard
+-- everything but the tail, cost time and memory proportional to total session length
+-- (autopilot runs, long-lived chat/tailoring sessions can accumulate hundreds of rows)
+-- instead of the fixed window actually used. The caller reverses these rows back to
+-- ascending seq order before handing them to trim()/Conversation().
+SELECT session_id, seq, role, content, created_at
+FROM assistant_messages
+WHERE session_id = $1
+ORDER BY seq DESC
+LIMIT $2;

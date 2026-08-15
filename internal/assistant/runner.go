@@ -186,7 +186,7 @@ func (r *Runner) Continue(ctx context.Context, sess Session, reg *Registry, syst
 	// Activity only — no new prompt, no re-label.
 	writeCtx, cancel := persisting(ctx)
 	defer cancel()
-	if err := r.store.Touch(writeCtx, sess.ID); err != nil {
+	if err := r.store.Touch(writeCtx, sess.ID, sess.UserID); err != nil {
 		log.Printf("assistant: touch session %s: %v", sess.ID, err)
 	}
 	return r.runFromHistory(ctx, sess, reg, system, turn, emit)
@@ -314,10 +314,10 @@ func (r *Runner) recordPrompt(ctx context.Context, sess Session, prompt string, 
 	}
 	// Label and activity stamp are conveniences, not correctness: a failure here
 	// must not cost the user their turn.
-	if err := r.store.LabelSession(writeCtx, sess.ID, prompt); err != nil {
+	if err := r.store.LabelSession(writeCtx, sess.ID, sess.UserID, prompt); err != nil {
 		log.Printf("assistant: label session %s: %v", sess.ID, err)
 	}
-	if err := r.store.Touch(writeCtx, sess.ID); err != nil {
+	if err := r.store.Touch(writeCtx, sess.ID, sess.UserID); err != nil {
 		log.Printf("assistant: touch session %s: %v", sess.ID, err)
 	}
 	emit(Event{Kind: EventUserPrompt, Text: prompt})
@@ -395,8 +395,14 @@ func (r *Runner) persist(ctx context.Context, sessionID uuid.UUID, msg Message) 
 
 // history rebuilds the model's conversation: the session's system prompt followed
 // by its most recent messages.
+//
+// Fetches only the tail via RecentTranscript rather than the whole transcript via
+// Transcript — trim() below only ever keeps the last HistoryLimit messages anyway, so
+// fetching everything first paid a cost proportional to the session's total length
+// (autopilot runs and long-lived chats can accumulate hundreds of rows) on every single
+// turn, for a window whose size never changes.
 func (r *Runner) history(ctx context.Context, sessionID uuid.UUID, system string) ([]llms.MessageContent, error) {
-	stored, err := r.store.Transcript(ctx, sessionID)
+	stored, err := r.store.RecentTranscript(ctx, sessionID, r.cfg.HistoryLimit)
 	if err != nil {
 		return nil, err
 	}
