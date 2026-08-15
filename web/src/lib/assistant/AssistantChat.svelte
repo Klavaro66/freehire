@@ -149,7 +149,6 @@
   // events, so scrolling up mid-turn holds position and scrolling back resumes
   // following with no further ceremony.
   let stickToBottom = $state(true);
-  let textareaEl = $state<HTMLTextAreaElement | null>(null);
 
   // Messages typed while a turn is in flight, drained one by one when it ends.
   let queue = $state<{ id: string; text: string }[]>([]);
@@ -213,16 +212,6 @@
   /** The conversation the host is currently being navigated to, or null. Held until the
    *  `session` prop catches up, so a switch we started is never undone by the stale URL. */
   let navigatingTo = $state<string | null>(null);
-
-  // Auto-grow the composer textarea up to a cap (px).
-  const COMPOSER_CAP = 200;
-  $effect(() => {
-    void draft;
-    const el = textareaEl;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_CAP)}px`;
-  });
 
   // --- Streaming spinner / thinking timers ---------------------------------
   const SPINNER_GLYPHS = ['·', '✢', '✳', '✶', '✻', '✽'] as const;
@@ -403,6 +392,16 @@
   // every later address change, which is Forward appearing to do nothing.
   async function openSession(id: string, fromAddress = false) {
     if (activeId === id && chat.messages.length > 0) return;
+    // A message typed while the current turn was streaming sits in `queue`, waiting
+    // for the turn to finish so endTurn() can drain it — cancelTurn() below stops the
+    // turn but never drains the queue, so switching here would otherwise wipe out
+    // whatever the user just typed with no trace and no way back.
+    if (
+      queue.length > 0 &&
+      !confirm('You have an unsent message waiting in this chat. Switch chats and discard it?')
+    ) {
+      return;
+    }
     switching = true;
     cancelTurn();
     // Navigating away from a session must end its call rather than silently carry it
