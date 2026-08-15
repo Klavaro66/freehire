@@ -9,7 +9,7 @@
  * which a position in the list does.
  */
 
-import type { FieldTag, FormField, LabelFill, FillOutcome, Upload } from './protocol';
+import type { FieldTag, FormField, LabelFill, FillOutcome, RevealRequest, Upload } from './protocol';
 import { countryLabel } from './labels';
 
 type Fillable = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
@@ -530,6 +530,54 @@ export function fillsForFrame(fills: LabelFill[], frame: number): LabelFill[] {
  * absorb a fill meant for the other. A fill naming none matches the first
  * question carrying the label, as `fillByLabel` always has.
  */
+/** How long the borrowed outline stays on a revealed control. Long enough to
+ *  follow by eye, short enough that a walk's next step does not overlap it. */
+const REVEAL_OUTLINE_MS = 600;
+
+/**
+ * Brings one question into view: scrolls its first control to the middle of the
+ * viewport, outlines it briefly, and focuses it when asked. Reports whether the
+ * question was there at all — the panel says so rather than doing nothing.
+ *
+ * The outline is written as inline style and the previous inline style is put
+ * back: this runs on a page freehire does not own, where an injected class could
+ * collide with the ATS's own and a stylesheet would outlive our interest in the
+ * element.
+ */
+export function revealField(
+  doc: Document,
+  { label, form, focus = false, outlineMs = REVEAL_OUTLINE_MS }: RevealRequest,
+): boolean {
+  const question = findQuestion(collectQuestions(doc), Array.from(doc.querySelectorAll('form')), label, form);
+  if (!question) return false;
+
+  const el = question.controls[0];
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+
+  // Revealing the same control twice inside the outline's lifetime must not make
+  // the outline the style we give back: the first reveal's record wins, and its
+  // timer is replaced rather than left to fire against a control the second
+  // reveal is still outlining.
+  const open = outlined.get(el);
+  if (open) clearTimeout(open.timer);
+  const borrowed = open ? open.borrowed : el.getAttribute('style');
+  el.style.outline = '2px solid #4f46e5';
+  el.style.outlineOffset = '2px';
+  const timer = setTimeout(() => {
+    outlined.delete(el);
+    if (borrowed === null) el.removeAttribute('style');
+    else el.setAttribute('style', borrowed);
+  }, outlineMs);
+  outlined.set(el, { borrowed, timer });
+
+  if (focus) el.focus({ preventScroll: true });
+  return true;
+}
+
+/** Controls currently wearing a borrowed outline, and the style each one had
+ *  before it. Weak so a control the page discards is not held alive by it. */
+const outlined = new WeakMap<Element, { borrowed: string | null; timer: ReturnType<typeof setTimeout> }>();
+
 export function fillByLabel(doc: Document, fills: LabelFill[]): FillOutcome[] {
   const questions = collectQuestions(doc);
   const forms = Array.from(doc.querySelectorAll('form'));

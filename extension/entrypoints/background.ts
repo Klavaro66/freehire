@@ -7,6 +7,7 @@ import {
   type FillOutcome,
   type ComboboxStep,
   type ComboboxReply,
+  type RevealRequest,
 } from '../lib/protocol';
 import { mergeComboboxReplies, mergeFrameOutcomes } from '../lib/tools/executor';
 import { fillsForFrame } from '../lib/form';
@@ -32,7 +33,9 @@ export default defineBackground(() => {
       case 'GET_FRAMED_FORM':
         return readFramedForm();
       case 'FILL_BY_LABEL':
-        return fillAcrossFrames(message.fills);
+        return fillAcrossFrames(message.fills, message.reveal);
+      case 'REVEAL_FIELD':
+        return revealAcrossFrames(message.request);
       case 'COMBOBOX_STEP':
         return comboboxAcrossFrames(message.step);
       default:
@@ -84,15 +87,34 @@ async function readFramedForm(): Promise<RuntimeMessage> {
  * broadcast would; a fill naming none — a `fill_simple` tool call — still goes
  * to every frame, and a frame that does not hold it reports `not_found`.
  */
-async function fillAcrossFrames(fills: LabelFill[]): Promise<RuntimeMessage> {
+async function fillAcrossFrames(fills: LabelFill[], reveal?: boolean): Promise<RuntimeMessage> {
   const perFrame: FillOutcome[][] = [];
   await eachFrame(
-    (frame) => ({ kind: 'FILL_BY_LABEL', fills: fillsForFrame(fills, frame) }),
+    (frame) => ({ kind: 'FILL_BY_LABEL', fills: fillsForFrame(fills, frame), reveal }),
     (reply) => {
       if (reply?.kind === 'FILL_OUTCOMES') perFrame.push(reply.outcomes);
     },
   );
   return { kind: 'FILL_OUTCOMES', outcomes: mergeFrameOutcomes(perFrame) };
+}
+
+/**
+ * Reveals one question. A request naming its frame goes to that frame alone —
+ * two frames carrying the same label would otherwise both scroll and both take
+ * the cursor. A request naming none (the agent's report carries labels only) is
+ * offered to every frame, and the answers are folded with "some frame found it"
+ * rather than by whichever replied first.
+ */
+async function revealAcrossFrames(request: RevealRequest): Promise<RuntimeMessage> {
+  let found = false;
+  await eachFrame(
+    { kind: 'REVEAL_FIELD', request },
+    (reply) => {
+      if (reply?.kind === 'REVEAL_RESULT' && reply.found) found = true;
+    },
+    request.frame,
+  );
+  return { kind: 'REVEAL_RESULT', found };
 }
 
 /**
@@ -117,12 +139,16 @@ async function comboboxAcrossFrames(step: ComboboxStep): Promise<RuntimeMessage>
 async function eachFrame(
   message: RuntimeMessage | ((frame: number) => RuntimeMessage),
   take: (reply: RuntimeMessage | undefined, frame: number) => void,
+  /** Restricts the fan-out to one frame, for a request that names the frame it
+   *  belongs to. Everything else still reaches every frame. */
+  onlyFrame?: number,
 ): Promise<void> {
   const tabId = await activeTabId();
   if (tabId == null) return;
   const forFrame = typeof message === 'function' ? message : () => message;
+  const frames = onlyFrame === undefined ? await frameIds(tabId) : [onlyFrame];
   await Promise.all(
-    (await frameIds(tabId)).map(async (frameId) => {
+    frames.map(async (frameId) => {
       try {
         take((await browser.tabs.sendMessage(tabId, forFrame(frameId), { frameId })) as RuntimeMessage, frameId);
       } catch {
