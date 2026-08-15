@@ -1314,12 +1314,16 @@ type Querier interface {
 	// can verify the password (and reject accounts that have none). role feeds the
 	// post-login wire shape. email_verified drives both the "confirm your email" prompt
 	// and the OAuth merge policy (an unverified account is seized, not silently joined).
+	// language is included so a password login's response carries the account's
+	// preference the same as /auth/me, rather than reporting the zero value.
 	GetUserByEmail(ctx context.Context, lower string) (GetUserByEmailRow, error)
 	// Profile lookup for the authenticated user. role is included so /auth/me can tell a
 	// client whether to surface moderator-only UI. The password hash itself never leaves
 	// the database — only whether one exists, which is what lets the SPA offer a password
 	// change to password accounts and explain itself to OAuth-only ones. timezone is NULL
 	// until the user sets one on their profile (internal/deliverywindow reads NULL as UTC).
+	// language is never NULL — it has a NOT NULL DEFAULT, so every account has one from
+	// creation.
 	GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error)
 	// OAuth sign-in fast path: resolve a provider identity straight to its user.
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (GetUserByIdentityRow, error)
@@ -3352,6 +3356,11 @@ type Querier interface {
 	// query string is a real value (not NULL), so "save the unfiltered view" is honored.
 	// No matching owner-scoped row returns no row (the handler maps that to 404).
 	UpdateSavedSearch(ctx context.Context, arg UpdateSavedSearchParams) (SavedSearch, error)
+	// Set the account's preferred interface language. The handler validates the code
+	// against the curated set before this runs (also enforced by the DB CHECK
+	// constraint as a second line of defense) — the query itself trusts its input,
+	// same as every other single-column update in this file.
+	UpdateUserLanguage(ctx context.Context, arg UpdateUserLanguageParams) (UpdateUserLanguageRow, error)
 	// Set (or clear, with NULL) the account's IANA timezone name. The handler validates
 	// the name against time.LoadLocation before this runs — the query itself trusts its
 	// input, same as every other single-column update in this file.
