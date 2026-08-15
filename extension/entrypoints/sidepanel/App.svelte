@@ -27,7 +27,7 @@
     scopeToApplication,
     formatAuthorizedCountries,
   } from '../../lib/form';
-  import { buildPlan, markAnswered, type ApplyPlan, type PlanItem } from '../../lib/applyPlan';
+  import { buildPlan, markAnswered, showsApplicationForm, type ApplyPlan, type PlanItem } from '../../lib/applyPlan';
   import { startWalk, nextStep, applyStep, skipStep, stopWalk, type Walk } from '../../lib/walk';
   import { ToolChannel } from '../../lib/tools/client';
   import { activeTabPage } from '../../lib/tools/page';
@@ -108,12 +108,20 @@
     };
     browser.runtime.onMessage.addListener(onPageMessage);
 
+    // The panel regaining focus is the other moment worth re-reading on: the user
+    // has just been on the page, quite possibly answering a question there.
+    const onFocus = () => {
+      if (user) void refreshPlan();
+    };
+    window.addEventListener('focus', onFocus);
+
     return () => {
       turn?.cancel();
       tools.stop();
       browser.tabs.onActivated.removeListener(refresh);
       browser.tabs.onUpdated.removeListener(onUpdated);
       browser.runtime.onMessage.removeListener(onPageMessage);
+      window.removeEventListener('focus', onFocus);
     };
   });
 
@@ -166,6 +174,7 @@
    */
   async function handlePageChange() {
     const key = await currentPageKey();
+    formFilled = false;
     if (chatPageKey !== null && key !== chatPageKey) {
       resetChat();
       const token = await getToken();
@@ -454,28 +463,71 @@
   let plan = $state<ApplyPlan | null>(null);
   /** The question a walk is filling right now, by label. */
   let fillingLabel = $state<string | null>(null);
-  /** Guards against an older read landing after a newer one — a page change and
-   *  the page's own FORM_CHANGED both start a read, and the slower answer would
-   *  otherwise replace the current form's plan with the previous one's. Same
-   *  pattern as `matchRequestId`. */
-  let planRequestId = 0;
+  // Reads of the form are serialised rather than raced. A request id (the
+  // `matchRequestId` pattern) was the first attempt and it deadlocked on a real
+  // ATS page: the page announces changes continuously, so every read found its id
+  // already superseded by the next one and returned before assigning anything —
+  // the checklist never appeared at all. One read at a time, with a re-read queued
+  // if anything arrived meanwhile, cannot starve and cannot land stale.
+  let planReading = false;
+  let planStale = false;
+  /** How many labelled questions the last read found, whether or not they added
+   *  up to an application. It is what the panel says when it shows no checklist,
+   *  so "nothing appeared" can be told from "nothing was found". */
+  let questionsSeen = $state(0);
+  /** Why the last read produced nothing, when it failed outright. */
+  let planError = $state('');
+  /** True once a walk has written into this page's form. It outranks every guess
+   *  about whether the page is showing an application: it accepted values. Reset
+   *  by a page change, with the plan. */
+  let formFilled = $state(false);
 
   /** Reads the page's form and rebuilds the plan, or clears it for a page that
    *  is not showing an application. */
   async function refreshPlan() {
     if (!user) return;
-    const requestId = ++planRequestId;
-    const reply = (await browser.runtime.sendMessage({
-      kind: 'GET_FRAMED_FORM',
-    } satisfies RuntimeMessage)) as RuntimeMessage | undefined;
-    if (requestId !== planRequestId) return;
-    if (reply?.kind !== 'FRAMED_FORM' || !looksLikeApplication(reply.uploads)) {
+    if (planReading) {
+      planStale = true;
+      return;
+    }
+    planReading = true;
+    try {
+      do {
+        planStale = false;
+        const reply = (await browser.runtime.sendMessage({
+          kind: 'GET_FRAMED_FORM',
+        } satisfies RuntimeMessage)) as RuntimeMessage | undefined;
+        applyRead(reply);
+      } while (planStale);
+    } catch (err) {
+      // A read that could not happen is not a page without a form: say so rather
+      // than clearing a checklist the user is looking at.
+      planError = err instanceof Error ? err.message : 'could not read the form';
+    } finally {
+      planReading = false;
+    }
+  }
+
+  /** Turns one form read into the plan, or into the reason there is none. */
+  function applyRead(reply: RuntimeMessage | undefined) {
+    planError = '';
+    if (reply?.kind !== 'FRAMED_FORM') {
+      questionsSeen = 0;
       plan = null;
       return;
     }
-    // One form, not every question on the page: an application and a job-alert
-    // signup each have their own "Email" — the same scoping the filler uses.
-    plan = buildPlan(scopeToApplication(reply.fields, reply.uploads));
+    questionsSeen = reply.fields.filter((f) => f.label.trim() !== '').length;
+    if (!showsApplicationForm(reply.fields, reply.uploads, { filled: formFilled })) {
+      plan = null;
+      return;
+    }
+    // Scoped to the one form the upload identifies, where there is one: an
+    // application and a job-alert signup each have their own "Email". With no
+    // upload to scope by — every step of an ATS form after the first — the page's
+    // questions ARE the form.
+    plan = buildPlan(
+      reply.uploads.length > 0 ? scopeToApplication(reply.fields, reply.uploads) : reply.fields,
+    );
   }
 
   /** Sends the user to one question: the page scrolls there and takes the cursor. */
@@ -549,7 +601,7 @@
         (frame === undefined || i.frame === frame) &&
         (form === undefined || i.form === form),
     );
-    if (item) plan = markAnswered(plan, item);
+    if (item) plan = markAnswered(plan, item.key);
   }
 
   /**
@@ -573,6 +625,7 @@
         const outcome = applied?.kind === 'FILL_OUTCOMES' ? applied.outcomes[0] : undefined;
         if (outcome?.status === 'filled') {
           walk = applyStep(walk, fill);
+          formFilled = true;
           // Ticked off from what was just written, not from a fresh read: the
           // page's own change notice is debounced, so re-reading here would leave
           // the counter a step behind the value on screen.
@@ -616,9 +669,14 @@
     autofilling = true;
     walkStop = false;
     try {
+      // Read the form first: the walk ticks questions off the plan, and a page
+      // whose form arrived after the last read (an ATS step change, which fires
+      // no page load) would otherwise be walked with nothing to tick.
+      await refreshPlan();
       const report = await runAgentAutofill(token);
       // The agent filled the page itself, server-side. Play its report back so
       // the user watches what changed rather than finding it later.
+      if (report.filled.length > 0) formFilled = true;
       await walkReported(report.filled);
       const filled = report.filled.length;
       notices.push(
@@ -628,9 +686,6 @@
       );
       if (report.deferred.length > 0) {
         notices.push(`Not fillable yet (custom dropdowns): ${nameSome(report.deferred)}.`);
-      }
-      if (report.unmapped.length > 0) {
-        notices.push(`Left for you: ${nameSome(report.unmapped)}.`);
       }
     } catch (err) {
       // The server's own sentence, not just the status: /me/autofill/run answers
@@ -704,20 +759,18 @@
         return;
       }
       const walk = await walkFills(fills);
+      // The form has now accepted values, which is stronger evidence than
+      // anything its markup says — so read it again and let the checklist appear.
+      await refreshPlan();
       const n = walk.done.length;
+      // What was left unanswered is not listed here: the checklist above shows
+      // exactly which questions those are, and naming thirty of them in a notice
+      // is the wall of text this feature replaced.
       notices.push(
         walk.stopped
           ? `Stopped after ${n} field${n === 1 ? '' : 's'} — what was filled stays.`
           : `✓ Autofilled ${n} field${n === 1 ? '' : 's'} — review before submitting.`,
       );
-
-      // A question the walk could not write: a custom-widget combobox (which
-      // commits whatever its own listbox highlights, so the simple filler
-      // declines it rather than writing a wrong value), or one the form dropped
-      // while the walk was running.
-      if (walk.skipped.length > 0) {
-        notices.push(`Left for you: ${nameSome(walk.skipped.map((f) => f.label))}.`);
-      }
     } catch (err) {
       notices.push(`Autofill failed: ${err instanceof Error ? err.message : 'error'}`);
     }
@@ -731,6 +784,10 @@
       <span class="brand">
         <img src="/icon/32.png" alt="" class="brand-mark" width="18" height="18" />
         <strong>freehire</strong>
+        <!-- The build, in the one place both of us can see it: a side panel keeps
+             its script until it is closed, so "did the reload take?" is otherwise
+             unanswerable from a screenshot. -->
+        <span class="build">v{browser.runtime.getManifest().version}</span>
       </span>
       <Badge variant={sending ? 'brand' : 'outline'}>
         {sending ? 'working…' : user ? 'ready' : 'offline'}
@@ -758,7 +815,13 @@
       { id: 'chat', label: 'Chat' },
     ]}
     active={activeTab}
-    onSelect={(id) => (activeTab = id)}
+    onSelect={(id) => {
+      activeTab = id;
+      // Coming back to Match is a moment the user expects the panel to be current:
+      // the form may have moved on (a step, an expanded Apply) while they were in
+      // the chat, and nothing else would have told us.
+      if (id === 'match') void refreshPlan();
+    }}
     label="Panel sections"
     panelId={PANEL_ID}
   />
@@ -807,8 +870,25 @@
                  independent of the match: a page can show an application freehire
                  does not carry a posting for, and the checklist is just as useful
                  there. -->
+            {#if !plan && planError}
+              <p class="no-plan">Could not read this page's form: {planError}</p>
+            {:else if !plan && questionsSeen > 0}
+              <!-- The page asks questions but they did not add up to an
+                   application. Saying so beats an empty space the user has to
+                   guess about. -->
+              <p class="no-plan">
+                {questionsSeen} field{questionsSeen === 1 ? '' : 's'} on this page — not enough to
+                read as an application form.
+              </p>
+            {/if}
             {#if plan}
-              <ApplyPlanCard {plan} filling={fillingLabel} onReveal={revealItem} />
+              <ApplyPlanCard
+                {plan}
+                filling={fillingLabel}
+                walking={autofilling}
+                onReveal={revealItem}
+                onCancel={() => (walkStop = true)}
+              />
             {/if}
 
             {#each notices as notice, i (i)}
@@ -1108,6 +1188,17 @@
    * would squash individual messages instead of just scrolling past them. */
   .messages > :global(*) {
     flex-shrink: 0;
+  }
+
+  .build {
+    font-size: 11px;
+    color: var(--muted-foreground);
+  }
+
+  .no-plan {
+    font-size: 12px;
+    color: var(--muted-foreground);
+    padding: 0 2px;
   }
 
   .empty {

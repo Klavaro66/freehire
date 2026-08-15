@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildPlan, markAnswered } from './applyPlan';
+import { buildPlan, markAnswered, showsApplicationForm } from './applyPlan';
 import type { FramedField } from './protocol';
+import { must } from './test-utils';
 
 /** A question as the page reported it. Overrides say what the case is about. */
 function field(label: string, over: Partial<FramedField> = {}): FramedField {
@@ -98,16 +99,31 @@ describe('buildPlan', () => {
     expect(plan.items.map((i) => i.label)).toEqual(['Email']);
     expect(plan.required).toEqual({ answered: 0, total: 1, percent: 0 });
   });
+
+  // Svelte keys the checklist by this, and a duplicate key is a hard render error
+  // — the whole card disappears. Two questions on one form CAN carry the same
+  // label (an ATS repeats "Years" under several headings, or leaves labels off
+  // and the page falls back to the same text), so the key cannot be the label.
+  it('gives every item a key of its own, even when labels repeat', () => {
+    const plan = buildPlan([
+      field('Years', { index: 0, frame: 0, form: 0 }),
+      field('Years', { index: 1, frame: 0, form: 0 }),
+      field('Years', { index: 0, frame: 1, form: 0 }),
+    ]);
+
+    const keys = plan.items.map((i) => i.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
 });
 
 describe('markAnswered', () => {
   it('ticks one item off and moves the counter', () => {
     const plan = buildPlan([
-      field('First name', { required: true, value: 'Igor' }),
-      field('Email', { required: true }),
+      field('First name', { required: true, value: 'Igor', index: 0 }),
+      field('Email', { required: true, index: 1 }),
     ]);
 
-    const after = markAnswered(plan, { label: 'Email', frame: 0, form: 0 });
+    const after = markAnswered(plan, must(plan.items[1]).key);
 
     expect(after.items.map((i) => i.answered)).toEqual([true, true]);
     expect(after.required).toEqual({ answered: 2, total: 2, percent: 100 });
@@ -119,30 +135,89 @@ describe('markAnswered', () => {
   it('leaves a plan that does not carry the label alone', () => {
     const plan = buildPlan([field('Email', { required: true })]);
 
-    expect(markAnswered(plan, { label: 'Gone', frame: 0, form: 0 })).toEqual(plan);
+    expect(markAnswered(plan, '9:9')).toEqual(plan);
   });
 
-  // Two questions can carry the same label in different forms or frames — an
-  // application and a job-alert signup each have their own "Email". Ticking one
-  // off must not tick the other, or the counter reports progress that is not
-  // there.
-  it('ticks off the question at that address only', () => {
+  // Two questions can carry the same label — an application and a job-alert
+  // signup each have their own "Email", and one ATS form repeats "Years" under
+  // several headings. Ticking one off must not tick the other, or the counter
+  // reports progress that is not there.
+  it('ticks off that question only, where labels repeat', () => {
     const plan = buildPlan([
-      field('Email', { required: true, frame: 0, form: 0 }),
-      field('Email', { required: true, frame: 1, form: 0 }),
+      field('Email', { required: true, frame: 0, index: 0 }),
+      field('Email', { required: true, frame: 1, index: 0 }),
     ]);
 
-    const after = markAnswered(plan, { label: 'Email', frame: 1, form: 0 });
+    const after = markAnswered(plan, must(plan.items[1]).key);
 
     expect(after.items.map((i) => i.answered)).toEqual([false, true]);
     expect(after.required).toEqual({ answered: 1, total: 2, percent: 50 });
   });
 
   it('does not touch the optional side of the counter', () => {
-    const plan = buildPlan([field('Email', { required: true }), field('Website')]);
+    const plan = buildPlan([field('Email', { required: true, index: 0 }), field('Website', { index: 1 })]);
 
-    const after = markAnswered(plan, { label: 'Website', frame: 0, form: 0 });
+    const after = markAnswered(plan, must(plan.items[1]).key);
 
     expect(after.required).toEqual({ answered: 0, total: 1, percent: 0 });
+  });
+});
+
+describe('showsApplicationForm', () => {
+  const upload = { frame: 0, form: 0 };
+
+  it('is true for a form offering a CV upload, however short', () => {
+    expect(showsApplicationForm([field('Email', { required: true })], [upload])).toBe(true);
+  });
+
+  // The upload is what marks an application for the FILLER, and it is gone by the
+  // second step of a multi-step ATS form — where the questions the panel most
+  // needs to account for are. A questionnaire that long is an application whether
+  // or not it still offers a file field.
+  it('is true for a long questionnaire with no upload', () => {
+    const questions = [
+      field('First name', { required: true }),
+      field('Email', { required: true }),
+      field('Years of experience', { required: true }),
+      field('Notice period'),
+      field('Expected compensation', { required: true }),
+    ];
+
+    expect(showsApplicationForm(questions, [])).toBe(true);
+  });
+
+  it('is false for a sign-in form', () => {
+    const login = [field('Email', { required: true }), field('Password', { required: true })];
+
+    expect(showsApplicationForm(login, [])).toBe(false);
+  });
+
+  // The walk has just written into it: whatever the markup says, this page is
+  // asking an application's worth of questions.
+  it('is true for a form the panel has just filled', () => {
+    expect(showsApplicationForm([field('Email')], [], { filled: true })).toBe(true);
+  });
+
+  // A search box, a newsletter field, a cookie preference: pages ask short
+  // questions everywhere, and a checklist over them is noise.
+  it('is false for a page asking nothing in particular', () => {
+    expect(showsApplicationForm([field('Search jobs')], [])).toBe(false);
+    expect(showsApplicationForm([], [])).toBe(false);
+  });
+
+  // Plenty of ATS forms mark a question required with an asterisk in its label
+  // and nothing in the markup. Demanding `required` in the DOM is why a real
+  // application — eleven fields, filled successfully — showed no checklist at all.
+  it('is true for a long questionnaire that marks nothing required in the markup', () => {
+    const questions = ['One', 'Two', 'Three', 'Four', 'Five'].map((l) => field(l));
+
+    expect(showsApplicationForm(questions, [])).toBe(true);
+  });
+
+  // Three fields is a sign-in, a search box with a filter, a newsletter row.
+  it('is false just below the questionnaire threshold', () => {
+    const few = ['One', 'Two', 'Three'].map((l) => field(l));
+
+    expect(showsApplicationForm(few, [])).toBe(false);
   });
 });
