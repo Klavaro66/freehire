@@ -76,7 +76,7 @@ same repository, under the same licence.
 | **Apply** | CV builder with ATS-safe PDF templates, deterministic CV↔vacancy scoring, AI fit analysis, CV tailoring that invents nothing, tracer links, referrals |
 | **Track** | An application board with stages, a mail inbox that links recruiter replies to the application they answer, an append-only event ledger, reminders |
 | **Ask** | An in-process agent with five presets — chat, browse, profile, CV tailoring, interview rehearsal — with no shell and no minted credential |
-| **Build on** | A keyless public API, a CLI, a form-filling browser extension, ChatGPT Actions |
+| **Build on** | A keyless public API, a [CLI](https://github.com/strelov1/freehire-cli), an [MCP server](https://github.com/strelov1/freehire-mcp) for Claude Desktop and Claude Code, a form-filling browser extension, ChatGPT Actions |
 
 **[Full feature reference → `docs/features.md`](docs/features.md)** — what each one
 does, where it lives in the tree, which need an LLM endpoint configured, and
