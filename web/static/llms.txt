@@ -27,6 +27,7 @@ are rounded down and only refreshed when this file is.
 - [FreeHire GPT](https://chatgpt.com/g/g-6a5281b64948819193bf3a1021e075da-freehire): a custom ChatGPT that searches and tracks jobs via the FreeHire API.
 - [ChatGPT integration guide](https://freehire.me/chatgpt): how the GPT works and how to connect it.
 - [FreeHire CLI](https://freehire.me/cli): a small Go CLI over the same API, for terminals, scripts, and agents.
+- [FreeHire MCP server](https://freehire.me/mcp): `npx -y freehire-mcp` — search, market fit, application tracking and CV tailoring as MCP tools, for Claude Desktop, Claude Code, or any MCP host. Same API key as the CLI.
 
 ## Explore
 
