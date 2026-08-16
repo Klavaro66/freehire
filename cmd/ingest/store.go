@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -32,6 +33,10 @@ type dbStore struct {
 	targetVersion int32
 	crawled       *crawledSet
 	tally         *writeTally
+	// hydrationWindow is how long a stored row with no description keeps being withheld from
+	// the seen-set so a hydrating adapter re-attempts its detail fetch. See ExistingExternalIDs
+	// and cmd/ingest's hydrationRetryWindowFor.
+	hydrationWindow time.Duration
 }
 
 // dbStore is the only non-test implementation of pipeline.Store, and it is expected to carry
@@ -48,13 +53,14 @@ var (
 	_ pipeline.SeenLookup = (*dbStore)(nil)
 )
 
-func newDBStore(pool *pgxpool.Pool, targetVersion int, crawled *crawledSet, tally *writeTally) *dbStore {
+func newDBStore(pool *pgxpool.Pool, targetVersion int, crawled *crawledSet, tally *writeTally, hydrationWindow time.Duration) *dbStore {
 	return &dbStore{
-		pool:          pool,
-		q:             db.New(pool),
-		targetVersion: int32(targetVersion),
-		crawled:       crawled,
-		tally:         tally,
+		pool:            pool,
+		q:               db.New(pool),
+		targetVersion:   int32(targetVersion),
+		crawled:         crawled,
+		tally:           tally,
+		hydrationWindow: hydrationWindow,
 	}
 }
 
@@ -324,10 +330,18 @@ func (s *dbStore) Close(ctx context.Context, source, externalID string) error {
 //
 // Each id maps to its row's tech evidence (is_tech IS TRUE), which the refresh path judges the
 // catalogue filter on — a re-listed posting carries no description to derive it from.
+//
+// A row still without a description is withheld from the set until it is pipeline.
+// HydrationRetryWindow old, so the crawl re-attempts the detail fetch its first pass lost rather
+// than treating the body-less row as finished.
 func (s *dbStore) ExistingExternalIDs(ctx context.Context, source, board string) (map[string]bool, error) {
 	set := map[string]bool{}
+	cutoff := pgtype.Timestamptz{Time: time.Now().Add(-s.hydrationWindow), Valid: true}
 	if board == "" {
-		rows, err := s.q.ExistingExternalIDs(ctx, source)
+		rows, err := s.q.ExistingExternalIDs(ctx, db.ExistingExternalIDsParams{
+			Source:          source,
+			HydrationCutoff: cutoff,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -339,8 +353,9 @@ func (s *dbStore) ExistingExternalIDs(ctx context.Context, source, board string)
 	// The pattern is escaped by sources.BoardIDPattern: a board name may contain LIKE syntax,
 	// and a third of the workday board names carry an underscore.
 	rows, err := s.q.ExistingExternalIDsByBoard(ctx, db.ExistingExternalIDsByBoardParams{
-		Source:  source,
-		Pattern: sources.BoardIDPattern(board),
+		Source:          source,
+		Pattern:         sources.BoardIDPattern(board),
+		HydrationCutoff: cutoff,
 	})
 	if err != nil {
 		return nil, err
