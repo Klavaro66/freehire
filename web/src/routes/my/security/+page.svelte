@@ -4,11 +4,15 @@
   import { api, ApiError } from '$lib/api';
   import { currentUser } from '$lib/auth.svelte';
   import DeleteAccountButton from '$lib/components/DeleteAccountButton.svelte';
+  import { locale } from '$lib/i18n/currentLocale.svelte';
+  import { t } from '$lib/i18n/t';
   import { Button } from '$lib/ui';
+  import { messages } from './messages';
 
   // Password + sessions. Both actions are cookie-only server-side: an API key can
   // neither change the password nor end a human's sessions.
 
+  const s = $derived(t(messages, locale()));
   const user = $derived(currentUser());
   // An OAuth-only account has no password to change; it sets one through the
   // forgotten-password flow, which proves the address instead. This has to come from
@@ -19,25 +23,29 @@
   let password = $state('');
   let confirmation = $state('');
   let saving = $state(false);
-  let changeError = $state<string | null>(null);
+  // Stores which message to show, not the resolved string — so a language switch
+  // while an error is visible re-renders it in the new language instead of
+  // leaving behind a snapshot from whichever locale was active when it occurred.
+  type PasswordErrorKey = 'mismatchError' | 'wrongCurrentPassword' | 'weakPassword' | 'genericError';
+  let changeErrorKey = $state<PasswordErrorKey | null>(null);
   let changed = $state(false);
 
   let signingOut = $state(false);
 
-  function messageFor(e: unknown): string {
+  function keyFor(e: unknown): PasswordErrorKey {
     if (e instanceof ApiError) {
-      if (e.status === 401) return 'That current password is not right.';
-      if (e.status === 400) return 'Choose a password of 8–72 characters.';
+      if (e.status === 401) return 'wrongCurrentPassword';
+      if (e.status === 400) return 'weakPassword';
     }
-    return 'Something went wrong. Please try again.';
+    return 'genericError';
   }
 
   async function changePassword(e: SubmitEvent) {
     e.preventDefault();
-    changeError = null;
+    changeErrorKey = null;
     changed = false;
     if (password !== confirmation) {
-      changeError = 'The two new passwords do not match.';
+      changeErrorKey = 'mismatchError';
       return;
     }
     saving = true;
@@ -47,7 +55,7 @@
       changed = true;
       currentPassword = password = confirmation = '';
     } catch (err) {
-      changeError = messageFor(err);
+      changeErrorKey = keyFor(err);
     } finally {
       saving = false;
     }
@@ -67,29 +75,21 @@
   }
 </script>
 
-<svelte:head><title>Security · freehire</title></svelte:head>
+<svelte:head><title>{s.headTitle}</title></svelte:head>
 
-<h1 class="mb-1 text-lg font-semibold tracking-tight">Security</h1>
-<p class="mb-6 text-sm text-muted-foreground">
-  Change your password and end sessions on other devices.
-</p>
+<h1 class="mb-1 text-lg font-semibold tracking-tight">{s.title}</h1>
+<p class="mb-6 text-sm text-muted-foreground">{s.subtitle}</p>
 
 <section class="mb-8 rounded-lg border border-border p-4">
-  <h2 class="mb-1 text-sm font-semibold">Password</h2>
-  <p class="mb-4 text-sm text-muted-foreground">
-    Changing it signs out every other device. You stay signed in here.
-  </p>
+  <h2 class="mb-1 text-sm font-semibold">{s.password.heading}</h2>
+  <p class="mb-4 text-sm text-muted-foreground">{s.password.subheading}</p>
 
   {#if !hasPassword}
-    <p class="text-sm text-muted-foreground">
-      This account signs in with a provider and has no password. To add one — a second way
-      in, independent of the provider — sign out, choose “Forgot your password?” on the
-      sign-in screen, and set it with the code we email you.
-    </p>
+    <p class="text-sm text-muted-foreground">{s.password.noPasswordNotice}</p>
   {:else}
     <form class="flex max-w-sm flex-col gap-3" onsubmit={changePassword}>
       <label class="flex flex-col gap-1 text-sm">
-        <span class="text-muted-foreground">Current password</span>
+        <span class="text-muted-foreground">{s.password.currentPasswordLabel}</span>
         <input
           type="password"
           bind:value={currentPassword}
@@ -99,7 +99,7 @@
         />
       </label>
       <label class="flex flex-col gap-1 text-sm">
-        <span class="text-muted-foreground">New password</span>
+        <span class="text-muted-foreground">{s.password.newPasswordLabel}</span>
         <input
           type="password"
           bind:value={password}
@@ -111,7 +111,7 @@
         />
       </label>
       <label class="flex flex-col gap-1 text-sm">
-        <span class="text-muted-foreground">Repeat new password</span>
+        <span class="text-muted-foreground">{s.password.repeatPasswordLabel}</span>
         <input
           type="password"
           bind:value={confirmation}
@@ -121,35 +121,30 @@
         />
       </label>
 
-      {#if changeError}
-        <p class="text-sm text-destructive">{changeError}</p>
+      {#if changeErrorKey}
+        <p class="text-sm text-destructive">{s.password[changeErrorKey]}</p>
       {/if}
       {#if changed}
-        <p class="text-sm text-muted-foreground">Password changed. Other devices were signed out.</p>
+        <p class="text-sm text-muted-foreground">{s.password.changed}</p>
       {/if}
 
       <Button type="submit" variant="primary" disabled={saving} class="mt-1">
-        {saving ? 'Saving…' : 'Change password'}
+        {saving ? s.password.saving : s.password.save}
       </Button>
     </form>
   {/if}
 </section>
 
 <section class="rounded-lg border border-border p-4">
-  <h2 class="mb-1 text-sm font-semibold">Sessions</h2>
-  <p class="mb-4 text-sm text-muted-foreground">
-    Sign out of every device, including this one. Use this if you think someone else has
-    access. Your API keys keep working — revoke those individually.
-  </p>
+  <h2 class="mb-1 text-sm font-semibold">{s.sessions.heading}</h2>
+  <p class="mb-4 text-sm text-muted-foreground">{s.sessions.subheading}</p>
   <Button variant="outline" disabled={signingOut} onclick={signOutEverywhere}>
-    {signingOut ? 'Signing out…' : 'Sign out everywhere'}
+    {signingOut ? s.sessions.signingOut : s.sessions.signOut}
   </Button>
 </section>
 
 <section class="mt-8 rounded-lg border border-destructive/30 p-4">
-  <h2 class="mb-1 text-sm font-semibold">Danger zone</h2>
-  <p class="mb-4 text-sm text-muted-foreground">
-    Permanently erase your account and everything in it. This cannot be undone.
-  </p>
+  <h2 class="mb-1 text-sm font-semibold">{s.dangerZone.heading}</h2>
+  <p class="mb-4 text-sm text-muted-foreground">{s.dangerZone.description}</p>
   <DeleteAccountButton />
 </section>
