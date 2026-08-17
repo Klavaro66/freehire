@@ -12,23 +12,42 @@ import (
 // Rows are population-sorted (most-populous first) so the loader's first-wins alias
 // registration picks the largest place for a shared name.
 //
-//go:embed cities15000.tsv
+//go:embed cities1000.tsv
 var citiesTSV string
 
-// cityEntry is a resolved city: its canonical display name (feeds the cities facet)
-// and ISO 3166-1 alpha-2 country code (feeds countries/regions).
+// cityEntry is a resolved city: its canonical display name (feeds the cities facet),
+// its ISO 3166-1 alpha-2 country code, and whether more than one country claims the
+// alias.
+//
+// Country is always the most-populous claimant, contested or not, because
+// isRecognizedUSCACity asks a different question — "does the parser know this name as
+// a North American place?" — where a shared name is still evidence. Contested is what
+// gates *emitting* that country as the posting's geography: "Birmingham" (gb, us),
+// "Valencia" (six countries) and "Burlington" (ca, us) state nothing, while
+// "Colorado Springs", "Eden Prairie" and "Benidorm" — 98% of the dictionary's 238k
+// aliases — state theirs.
 type cityEntry struct {
-	Name    string
-	Country string
+	Name      string
+	Country   string
+	Contested bool
 }
 
 // cityDict maps a lowercase city alias to its canonical name + country, built once
 // at init from the embedded dataset with the curated overrides layered on top.
 var cityDict = loadCityDict(citiesTSV, cityOverrides)
 
-// loadCityDict parses the embedded TSV into the alias lookup. An alias already seen
-// is not overwritten (first-wins → most-populous, since the file is population
-// sorted); comment/blank lines are skipped. Overrides are applied last and win.
+// contestMark suffixes an alias in the dataset when more than one country claims it.
+// cmd/gen-cities computes this across the WHOLE GeoNames dump — hamlets included, which
+// is what makes "Taft" and "Somerset" contested — and then writes out only the places
+// large enough for the parser to state. Doing the counting there rather than here is
+// what keeps the embedded file at ~34k rows instead of ~170k.
+const contestMark = "*"
+
+// loadCityDict parses the embedded TSV into the alias lookup. An alias already seen is
+// not overwritten (first-wins → most-populous, since the file is population sorted).
+// An alias carrying contestMark states no country. Comment/blank lines are skipped.
+// Overrides are applied last and win outright, uncontested — they are hand-pinned
+// spellings, so their country is asserted rather than inferred.
 func loadCityDict(tsv string, overrides map[string]cityEntry) map[string]cityEntry {
 	dict := map[string]cityEntry{}
 	sc := bufio.NewScanner(strings.NewReader(tsv))
@@ -42,10 +61,11 @@ func loadCityDict(tsv string, overrides map[string]cityEntry) map[string]cityEnt
 		if len(parts) < 3 {
 			continue
 		}
-		entry := cityEntry{Name: parts[0], Country: parts[1]}
 		for _, alias := range strings.Split(parts[2], "|") {
+			contested := strings.HasSuffix(alias, contestMark)
+			alias = strings.TrimSuffix(alias, contestMark)
 			if _, seen := dict[alias]; !seen {
-				dict[alias] = entry
+				dict[alias] = cityEntry{Name: parts[0], Country: parts[1], Contested: contested}
 			}
 		}
 	}

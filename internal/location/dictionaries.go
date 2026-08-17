@@ -98,7 +98,7 @@ var nameToCountry = map[string]string{
 	"kyiv": "ua", "kiev": "ua",
 	// Other Ukrainian oblast centres, added with the Telegram UA cohort, in the
 	// Ukrainian and the Russian transliteration. Every key here is Ukraine-only in
-	// cities15000.tsv. Omitted because GeoNames lists the alias in more than one
+	// cities1000.tsv. Omitted because GeoNames lists the alias in more than one
 	// country, the same reason "georgia" is omitted above: "odesa"/"odessa" (also
 	// Odessa, Texas), "lutsk" (Belarus), "cherkasy"/"cherkassy" and "donetsk"
 	// (Russia), "nikolaev" (Bulgaria, Russia). Those keep resolving to a bare city
@@ -400,15 +400,18 @@ func computeCollidingSubdivisions() map[string]struct{} {
 // beacon city already resolves from the generated dataset. Country matches the
 // generated entry. Add an entry here for a genuine GeoNames gap or spelling we want
 // to pin — not for cities the dataset already covers.
+// Fields are named rather than positional: an override is hand-asserted, so it stays
+// uncontested by construction, and spelling that out keeps a future field from
+// silently changing what these mean.
 var cityOverrides = map[string]cityEntry{
-	"frankfurt": {"Frankfurt", "de"}, // GeoNames: "Frankfurt am Main"
-	"cologne":   {"Cologne", "de"},   // GeoNames: "Köln"
-	"köln":      {"Cologne", "de"},
-	"sevilla":   {"Seville", "es"}, // GeoNames: "Sevilla"
-	"seville":   {"Seville", "es"},
-	"zurich":    {"Zurich", "ch"},   // GeoNames: "Zürich"
-	"montreal":  {"Montreal", "ca"}, // GeoNames: "Montréal"
-	"montréal":  {"Montreal", "ca"},
+	"frankfurt": {Name: "Frankfurt", Country: "de"}, // GeoNames: "Frankfurt am Main"
+	"cologne":   {Name: "Cologne", Country: "de"},   // GeoNames: "Köln"
+	"köln":      {Name: "Cologne", Country: "de"},
+	"sevilla":   {Name: "Seville", Country: "es"}, // GeoNames: "Sevilla"
+	"seville":   {Name: "Seville", Country: "es"},
+	"zurich":    {Name: "Zurich", Country: "ch"},   // GeoNames: "Zürich"
+	"montreal":  {Name: "Montreal", Country: "ca"}, // GeoNames: "Montréal"
+	"montréal":  {Name: "Montreal", Country: "ca"},
 }
 
 // nameToRegion resolves macro-region names (and explicit open-anywhere markers)
