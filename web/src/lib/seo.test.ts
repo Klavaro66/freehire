@@ -6,6 +6,7 @@ import {
   companyListItems,
   companyMetaDescription,
   companyPageTitle,
+  companiesPageTitle,
   datasetJsonLd,
   jobListItems,
   jobPostingJsonLd,
@@ -586,5 +587,32 @@ describe('listingRobots', () => {
   // dropping them would strand whatever they reach.
   it('keeps the page a link source', () => {
     expect(listingRobots(0)).toContain('follow');
+  });
+});
+
+describe('companiesPageTitle', () => {
+  // "Companies · freehire" was 20 characters naming no subject — two thirds of the
+  // SERP title width spent on the brand, and nothing a query could match.
+  //
+  // The comma grouping is asserted exactly because the helper pins 'en-US': this is
+  // crawler-visible metadata, so SSR and the client recompute must format the number
+  // identically whatever the visitor's locale. Worth knowing what this does and does
+  // not catch: on a runner whose own locale groups differently it fails the moment the
+  // pin is dropped, but on an en-US runner a bare toLocaleString() reads the same, so
+  // it would pass. Asserting the output rather than spying on the formatter is still
+  // the right trade — the alternative tests the call, not the metadata.
+  it('leads with the live count and the subject', () => {
+    expect(companiesPageTitle(294_021)).toBe('294,021 companies hiring in tech · freehire');
+  });
+
+  it('singularizes one company', () => {
+    expect(companiesPageTitle(1)).toBe('1 company hiring in tech · freehire');
+  });
+
+  // A failed or empty search must not advertise "0 companies hiring in tech" — the
+  // directory is still a real page, and the count is the decorative part.
+  it('falls back to the plain subject with no usable count', () => {
+    expect(companiesPageTitle(undefined)).toBe('Companies hiring in tech · freehire');
+    expect(companiesPageTitle(0)).toBe('Companies hiring in tech · freehire');
   });
 });
