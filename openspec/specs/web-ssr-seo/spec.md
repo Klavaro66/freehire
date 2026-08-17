@@ -163,8 +163,13 @@ that is a valid **sitemap index** (`<sitemapindex>`) referencing sub-sitemaps fo
 the static pages, the jobs, and the companies. Neither the index nor any
 sub-sitemap SHALL return the HTML application shell, and each SHALL be valid XML.
 Every sub-sitemap SHALL hold at most 50,000 URLs (the sitemap-protocol limit).
-All companies (`/companies/:slug`) SHALL be enumerated across keyset-cursor-paged
-company sub-sitemaps. The job sub-sitemap SHALL list the **freshest** open jobs
+Every company with at least one FINDABLE role (`/companies/:slug`) SHALL be
+enumerated across keyset-cursor-paged company sub-sitemaps, and a company with
+none SHALL NOT appear. "Findable" is the job search index's own scope — open,
+non-duplicate, non-private, categorized, with a body — because the company page's
+job list is served by that index, so a company outside it has a page that renders
+its name and "0 open jobs". The scope is carried by `companies.job_count`, which
+`RefreshCompanyFacets` computes under exactly those predicates. The job sub-sitemap SHALL list the **freshest** open jobs
 (`/jobs/:slug`, newest first) up to the per-file limit, rather than the full
 catalogue: the jobs table is too large to enumerate per request without a
 heap-bound scan that also evicts the buffer cache, so full job coverage is a
@@ -189,11 +194,18 @@ deliberate follow-up (a precomputed narrow table), not a live scan.
 - **THEN** the response is a valid `<urlset>` of at most 50,000 open-job
   (`/jobs/:slug`) URLs, newest first, each with a `<lastmod>`, and no closed job
 
-#### Scenario: company sub-sitemaps cover all companies
+#### Scenario: company sub-sitemaps cover every company worth crawling
 
 - **WHEN** the index's company sub-sitemaps are followed in sequence by their
   slug cursors
-- **THEN** every company appears in exactly one sub-sitemap, with no artificial cap
+- **THEN** every company holding at least one findable role appears in exactly one
+  sub-sitemap, with no artificial cap
+
+#### Scenario: a company with nothing findable is not in the sitemap
+
+- **WHEN** a company's only open postings are private, body-less, or of a category
+  no dictionary resolved — so its page's job list renders empty
+- **THEN** no company sub-sitemap lists its `/companies/:slug` URL
 
 ### Requirement: Collection landing pages are indexable
 
@@ -247,3 +259,46 @@ The public list pages (`/jobs` and `/companies`) SHALL each render exactly one v
 - **WHEN** `GET /companies` is requested
 - **THEN** the returned HTML body contains exactly one `<h1>` describing the companies list
 
+
+### Requirement: A listing URL with nothing on it is not served as a page
+
+`parsePage` clamps `?page=N` to the deepest page the search window reaches rather
+than rejecting it, so every listing route hands out addresses for pages its results
+do not fill. Those SHALL NOT be served: a listing route (`/`, `/collections/:slug`,
+`/companies/:slug`) SHALL respond 404 when the requested page number is past the
+last page its matches populate. Page 1 SHALL always be served, whatever the result
+count — a listing that is empty today is a real landing page that refills.
+
+A company page SHALL emit `<meta name="robots" content="noindex, follow">` when its
+job list rendered zero results, because `companies.job_count` — which gates the
+sitemap — counts open, non-duplicate rows while the page lists what the JOB search
+index holds, which additionally excludes private jobs, jobs with no body, and jobs
+whose category no dictionary resolved. An employer hiring only for roles that fail
+the second test reaches the sitemap with nothing to show. The directive SHALL be
+omitted when the count is unknown: a failed search resolves to null so the header
+and facts still render, and that must not be spelled the same way as an empty
+company.
+
+#### Scenario: A page past the last populated one is a 404
+
+- **WHEN** `GET /collections/:slug?page=N` is requested with N greater than the
+  number of pages the collection's matches fill
+- **THEN** the server responds 404, rather than 200 with an empty feed under a
+  self-referencing canonical
+
+#### Scenario: An empty listing still serves its first page
+
+- **WHEN** `GET /collections/:slug` is requested for a collection with no open jobs
+- **THEN** the server responds 200 and renders the page's own empty state
+
+#### Scenario: A company with nothing findable asks not to be indexed
+
+- **WHEN** `GET /companies/:slug` is requested for a company whose job search
+  returns zero results
+- **THEN** the `<head>` contains `<meta name="robots" content="noindex, follow">`
+
+#### Scenario: A company with open roles stays indexable
+
+- **WHEN** `GET /companies/:slug` is requested for a company whose job search
+  returns results
+- **THEN** the `<head>` contains no `robots` meta tag
