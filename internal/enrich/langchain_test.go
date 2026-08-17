@@ -83,6 +83,7 @@ func TestSystemPromptKeepsServedAndHybridFields(t *testing.T) {
 		"visa_sponsorship", "timezone_note",
 		"company_type", "company_size", "domains",
 		"relocation", "countries", "regions", "skills",
+		"requirements",
 	} {
 		if !strings.Contains(p, f) {
 			t.Errorf("prompt must still request served/hybrid field %q, got:\n%s", f, p)
@@ -93,6 +94,17 @@ func TestSystemPromptKeepsServedAndHybridFields(t *testing.T) {
 	}
 	if !strings.Contains(p, "concise lowercase label of your own") {
 		t.Errorf("countries/regions must keep the novel own-label allowance")
+	}
+}
+
+// requirements is job-only: no candidate is available at enrich time, unlike the
+// structurally similar matchanalysis.Requirement (which classifies against a CV).
+// The prompt must say so explicitly, since a future reader or the model itself
+// could otherwise conflate the two.
+func TestSystemPromptRequirementsHaveNoCVFraming(t *testing.T) {
+	p := buildSystemPrompt(true)
+	if !strings.Contains(p, "no CV to compare against") {
+		t.Errorf("prompt must frame requirements as job-only (no CV), got:\n%s", p)
 	}
 }
 

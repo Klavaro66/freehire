@@ -17,6 +17,7 @@ package enrich
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/strelov1/freehire/internal/llm"
 	"github.com/strelov1/freehire/internal/vocab"
@@ -47,6 +48,14 @@ const (
 const (
 	maxCities    = 20
 	maxCityRunes = 100
+)
+
+// maxRequirements and maxRequirementTextRunes bound the Requirements list the same
+// free-text way: extracted from the same attacker-influenced description, served
+// verbatim, so an unbounded model response must not persist indefinitely.
+const (
+	maxRequirements         = 30
+	maxRequirementTextRunes = 200
 )
 
 // Enrichment is the typed view of a job's enrichment JSONB payload. JSON keys
@@ -97,6 +106,26 @@ type Enrichment struct {
 	// Company descriptors (job-time observation; seam to the companies entity).
 	CompanyType string `json:"company_type,omitempty"` // enum: CompanyTypeValues
 	CompanySize string `json:"company_size,omitempty"` // enum: CompanySizeValues
+
+	// Stated requirements (job-only, no CV). Freeform: what the posting itself asks
+	// for, with no comparison against any candidate — unlike, and unrelated to,
+	// matchanalysis.Requirement, which additionally classifies a requirement against
+	// one candidate's résumé. Priority is deliberately NOT schema-constrained (see
+	// requestSchema in schema.go): llmschema.Enum only reaches a top-level field or
+	// an array of scalars, not a nested property of an array of objects — adding an
+	// Enum("requirements", ...) override here would silently produce an inert/wrong
+	// constraint rather than erroring, so priority correctness relies on the prompt
+	// plus Sanitize's coercion below instead.
+	Requirements []Requirement `json:"requirements,omitempty"`
+}
+
+// Requirement is one requirement stated in the posting — job-only, not compared
+// against any CV. (Distinct from, and unrelated to, matchanalysis.Requirement,
+// which additionally classifies a requirement against a specific candidate's
+// résumé.)
+type Requirement struct {
+	Text     string `json:"text"`
+	Priority string `json:"priority"` // "required" or "preferred"
 }
 
 // scalarEnum pairs a served scalar enum field (by pointer) with its vocabulary.
@@ -178,6 +207,7 @@ func (e *Enrichment) Sanitize() {
 	e.TimezoneNote = llm.TrimTruncateRunes(e.TimezoneNote, maxTimezoneNoteRunes)
 	e.SalaryCurrency = llm.TrimTruncateRunes(e.SalaryCurrency, maxSalaryCurrencyRunes)
 	e.Cities = boundCities(e.Cities)
+	e.Requirements = boundRequirements(e.Requirements)
 
 	for _, s := range e.servedScalarEnums() {
 		if *s.ptr != "" && !slices.Contains(s.vocab, *s.ptr) {
@@ -225,6 +255,41 @@ func boundCities(cities []string) []string {
 		kept = append(kept, c)
 	}
 	return kept
+}
+
+// boundRequirements clips each requirement's text to maxRequirementTextRunes and the
+// list to maxRequirements entries, the same free-text bound boundCities applies,
+// dropping any entry whose text clips to empty. Priority is coerced into the
+// controlled required/preferred vocabulary rather than validated and rejected — the
+// request schema cannot constrain it (see the Requirements field comment), so this
+// coercion is the only enforcement. Returns nil when nothing survives so the field
+// omits cleanly.
+func boundRequirements(reqs []Requirement) []Requirement {
+	if len(reqs) > maxRequirements {
+		reqs = reqs[:maxRequirements]
+	}
+	var kept []Requirement
+	for _, r := range reqs {
+		r.Text = llm.TrimTruncateRunes(r.Text, maxRequirementTextRunes)
+		if r.Text == "" {
+			continue
+		}
+		r.Priority = coerceRequirementPriority(r.Priority)
+		kept = append(kept, r)
+	}
+	return kept
+}
+
+// coerceRequirementPriority normalizes a requirement's priority to "required" or
+// "preferred", defaulting anything else (including an empty/unrecognized value) to
+// "preferred" — the same fallback matchanalysis.coercePriority uses for its
+// structurally identical field, duplicated locally rather than imported since
+// internal/enrich must not depend on internal/matchanalysis.
+func coerceRequirementPriority(p string) string {
+	if strings.EqualFold(strings.TrimSpace(p), "required") {
+		return "required"
+	}
+	return "preferred"
 }
 
 // keepKnown returns values restricted to those present in vocab, preserving order;
