@@ -10,19 +10,22 @@
   import { CompanyFilterStore, companyFiltersToParams, type CompanySortField } from '$lib/companyFilters';
   import { setListSearchTarget } from '$lib/listSearch.svelte';
   import type { CompanyListItem } from '$lib/types';
-  import { Badge, CountryFlag, EntityLogo, LoadMore } from '$lib/ui';
+  import { Badge, CountryFlag, EntityLogo } from '$lib/ui';
   import { countryLabel } from '$lib/facets';
   import { companyLogoUrl } from '$lib/logo';
+  import { pageCount, pageOffset } from '$lib/pagination';
   import States from './States.svelte';
-  import InfiniteScroll from './InfiniteScroll.svelte';
+  import Pagination from './Pagination.svelte';
   import BackerBadge from './BackerBadge.svelte';
   import CompanyFilterSummary from './filters/CompanyFilterSummary.svelte';
   import CompanyFilterModal from './filters/CompanyFilterModal.svelte';
   import ListToolbar from './ListToolbar.svelte';
 
-  // The first page is server-rendered (route `load`) for the current filters, so
-  // the rows are in the initial HTML.
-  let { initial }: { initial: Slice<CompanyListItem> } = $props();
+  // The requested page is server-rendered (route `load`) for the current filters,
+  // so the rows are in the initial HTML. `currentPage` is the `?page=N` that load
+  // served: page links are the only way through the list, so it is required rather
+  // than optional — see JobsView, which holds the same contract.
+  let { initial, currentPage }: { initial: Slice<CompanyListItem>; currentPage: number } = $props();
 
   // The search query and sidebar facets live in the URL so a filtered view survives
   // reload, sharing, and back/forward. The store owns the state<->URL transport and
@@ -37,11 +40,22 @@
       api.listCompanies('', limit, offset, companyFiltersToParams(filters.applied)),
     );
 
+  // Seeded from the server-rendered page — an intentional one-time snapshot of the
+  // props, which the effects below re-take when the page or the query changes.
   const seeded = makePaginator();
-  seeded.seed(untrack(() => initial));
+  untrack(() => seeded.seed(initial, pageOffset(currentPage)));
   let companies = $state.raw(seeded);
-  let started = false;
+
+  // The page being read. Starts at the route's `?page=N` and is reset only by a
+  // genuinely NEW query — see the effect below for why "the filters changed" is not
+  // the same question.
+  let activePage = $state(untrack(() => currentPage));
   let modalOpen = $state(false);
+  let started = false;
+  // The applied filters as a string, so a re-seed to the same set can be told from a
+  // real change. Seeded with what the route searched with, not left empty: an empty
+  // one would make the first client run look like a new query and snap page 3 to 1.
+  let lastSearchKey = untrack(() => companyFiltersToParams(filters.applied).toString());
 
   // `initial` was fetched for page.url; if a shallow-routing back/forward left
   // page.url lagging the address bar, it's stale — reload on the first run instead.
@@ -68,14 +82,14 @@
     };
   });
 
-  function reload() {
+  function reload(offset = 0) {
     companies = makePaginator();
-    companies.start();
+    companies.start(offset);
   }
 
   // Reload whenever the debounced filters change (typing settled, a facet toggled,
   // or back/forward re-seeded them). Skip the first run: the SSR `initial` already
-  // rendered page one.
+  // rendered the page the URL asked for.
   $effect(() => {
     void filters.applied; // track the debounced filters
     untrack(() => {
@@ -83,7 +97,33 @@
         started = true;
         if (!initialStale) return;
       }
-      reload();
+      // "The filters object changed" is not "the visitor searched for something
+      // else": the store re-seeds on navigation and rewrites the URL, and both fire
+      // this effect with the filters unchanged. Only a changed query means a
+      // different result set, and so page 1; anything else reloads the page being
+      // read. Without the distinction `/companies?page=3` rendered page 3 and snapped
+      // back to page 1 the moment it hydrated. Mirrors JobsView.
+      const searchKey = companyFiltersToParams(filters.applied).toString();
+      const sameQuery = searchKey === lastSearchKey;
+      lastSearchKey = searchKey;
+      if (!sameQuery) activePage = 1;
+      reload(sameQuery ? pageOffset(activePage) : 0);
+    });
+  });
+
+  // Re-seed when a page link is followed: SvelteKit reuses this component across
+  // `?page=N`, so the props arrive again and the state seeded from them does not.
+  // No fetch — the route already listed exactly this page. See JobsView, which
+  // carries the same effect and the longer explanation.
+  $effect(() => {
+    const nextPage = currentPage;
+    const slice = initial;
+    untrack(() => {
+      if (nextPage === activePage) return;
+      activePage = nextPage;
+      const next = makePaginator();
+      next.seed(slice, pageOffset(nextPage));
+      companies = next;
     });
   });
 
@@ -174,19 +214,15 @@
         {/each}
       </div>
 
-      {#if companies.hasMore}
-        <!-- Scroll-to-bottom auto-load; the button below stays as the accessible
-             fallback (keyboard/screen-reader, and retry on a failed load). -->
-        <InfiniteScroll
-          onLoad={() => companies.loadMore()}
-          enabled={!companies.loadingMore && !companies.loadMoreError}
-        />
-        <LoadMore
-          loading={companies.loadingMore}
-          error={companies.loadMoreError}
-          onclick={() => companies.loadMore()}
-        />
-      {/if}
+      <!-- Page links, and the only way through the list: a scroll-to-bottom auto-load
+           used to sit here, which grew the page every time the reader neared the end
+           of it and put the footer permanently out of reach. -->
+      <Pagination
+        current={activePage}
+        total={pageCount(companies.total)}
+        pathname={page.url.pathname}
+        params={page.url.searchParams}
+      />
     {/if}
   </div>
 </div>

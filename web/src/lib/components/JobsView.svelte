@@ -14,7 +14,7 @@
   import { ensureDismissedLoaded, isDismissed, markUndismissed } from '$lib/dismissedJobs.svelte';
   import { latestOnly } from '$lib/latestOnly';
   import { Paginator } from '$lib/paginated.svelte';
-  import { canFetchMore, pageCount, pageOffset } from '$lib/pagination';
+  import { pageCount, pageOffset } from '$lib/pagination';
   import Pagination from './Pagination.svelte';
   import { FilterStore, filtersToParams, activeFilterCount } from '$lib/filters';
   import { loadJobFilters } from '$lib/filterStorage';
@@ -39,8 +39,6 @@
   import ListToolbar from './ListToolbar.svelte';
   import States from './States.svelte';
   import JobRow from './JobRow.svelte';
-  import { LoadMore } from '$lib/ui';
-  import InfiniteScroll from './InfiniteScroll.svelte';
   import HiddenToast from './HiddenToast.svelte';
 
   // Filters live in the URL; the route `load` searches by them and returns the
@@ -63,11 +61,11 @@
   // URL, or the two would disagree and the mount effect would immediately
   // discard the SSR page and refetch.
   //
-  // `currentPage` is set by a route whose `load` honours `?page=N` — it both seeds
-  // the paginator at the right offset (so scrolling on continues the result set
-  // instead of replaying earlier pages) and turns on the <a href> page nav under
-  // the feed. Routes that always serve page one leave it unset and render no nav:
-  // links there would every one of them lead back to the same first page.
+  // `currentPage` is the `?page=N` the route's `load` served, and it is REQUIRED:
+  // page links are now the only way through the results, so a route that mounts
+  // this without honouring `?page=N` would render a nav whose every link leads
+  // back to the page already on screen. Required rather than optional so that
+  // mistake is a type error instead of a listing that silently stops at twenty.
   let {
     initial,
     scope = {},
@@ -81,7 +79,7 @@
     excludeFacets?: string[];
     sidebarTop?: Snippet;
     initialParams?: string;
-    currentPage?: number;
+    currentPage: number;
   } = $props();
 
   // Standalone /jobs (no fixed scope) hands its text search to the header; an
@@ -113,16 +111,16 @@
       keyOf: (job) => job.public_slug,
     });
 
-  // Seeded with the server-rendered first page (an intentional one-time snapshot
-  // of the initial prop); "load more" and filter changes fetch client-side.
   // The page being read. Starts at the route's `?page=N` and survives a reload that
   // didn't change the query; a changed query resets it to 1, because the visitor is
   // now looking at a different result set (and FilterStore has already dropped
   // `page` from the URL — it only ever writes facet params).
-  let activePage = $state(untrack(() => currentPage) ?? 1);
+  let activePage = $state(untrack(() => currentPage));
 
+  // Seeded from the server-rendered page — an intentional one-time snapshot of the
+  // props, which the effects below re-take when the page or the query changes.
   const seeded = makePaginator();
-  seeded.seed(untrack(() => initial), pageOffset(untrack(() => currentPage) ?? 1));
+  untrack(() => seeded.seed(initial, pageOffset(currentPage)));
   let jobs = $state.raw(seeded);
 
   // The live facet distribution (value → count per facet), feeding the dynamic
@@ -162,8 +160,14 @@
   let started = false;
   // Signature of the applied filters last reported as a search, so a re-run that
   // didn't change the filters (a back/forward re-seed) doesn't emit a spurious
-  // funnel event.
-  let lastSearchKey = '';
+  // funnel event — and, since it also decides `sameQuery`, doesn't reset the page.
+  //
+  // Seeded with what the route searched with rather than left empty. Empty only
+  // matches an unfiltered feed, so on `/?q=engineer&page=3` the first re-run read
+  // as a brand-new search and snapped the reader from page 3 back to page 1 — and
+  // logged a search they had not performed. It went unnoticed while scrolling was
+  // how anyone paged; the page links made it visible.
+  let lastSearchKey = untrack(() => filtersToParams(filters.applied).toString());
 
   // Onboarding: the one-time nudge banner + wizard, standalone-only. The lifecycle
   // lives in localStorage (client-only); seed it at init on the client so a returning
@@ -287,11 +291,6 @@
   // a hidden or filtered-out card drops (and an undone one returns) instantly. A job
   // with no skills has no percent to test (see computeClientMatch) and stays, matching
   // the card's own `no-skills` state, which shows no match at all rather than a false 0%.
-  // The search API only serves the first SEARCH_WINDOW rows, however many matches it
-  // reports. Past that, asking for another page returns 400 and the feed would show
-  // "Couldn't load more" — an error for what is just the end of what's reachable.
-  const moreReachable = $derived(canFetchMore(pageOffset(activePage), jobs.items.length));
-
   const visibleJobs = $derived(
     jobs.items.filter((j) => {
       if (isDismissed(j.public_slug)) return false;
@@ -373,6 +372,24 @@
       lastSearchKey = searchKey;
       if (!sameQuery) activePage = 1;
       reloadList(sameQuery ? pageOffset(activePage) : 0);
+    });
+  });
+
+  // Following a page link is a real navigation, but SvelteKit reuses this component
+  // across `?page=N` rather than remounting it — so `initial` and `currentPage` are
+  // re-supplied while the state seeded from them is not. Without this the address bar
+  // said page 4 and the feed still showed page 3, which is the whole nav being
+  // decorative. It re-seeds from the `initial` the route just loaded rather than
+  // fetching: the server already searched for exactly this page.
+  $effect(() => {
+    const nextPage = currentPage;
+    const slice = initial;
+    untrack(() => {
+      if (nextPage === activePage) return;
+      activePage = nextPage;
+      const next = makePaginator();
+      next.seed(slice, pageOffset(nextPage));
+      jobs = next;
     });
   });
 
@@ -472,33 +489,38 @@
           </button>
         </div>
       {/if}
-    {:else if visibleJobs.length === 0 && !jobs.hasMore}
-      <!-- The server returned jobs but the user has hidden every one on this final
-           page: show the empty state rather than a blank feed. (With more pages,
-           the {:else} below keeps InfiniteScroll loading instead.) -->
-      <States state="empty" message="No matching jobs." />
     {:else}
-      <div class="flex flex-col gap-3">
-        {#each visibleJobs as job (job.public_slug)}
-          <JobRow {job} {onHide} />
-        {/each}
-      </div>
-
-      {#if jobs.hasMore && moreReachable}
-        <!-- Scroll-to-bottom auto-load; the button stays as the accessible
-             fallback (keyboard/screen-reader, and retry on a failed load). -->
-        <InfiniteScroll onLoad={() => jobs.loadMore()} enabled={!jobs.loadingMore && !jobs.loadMoreError} />
-        <LoadMore loading={jobs.loadingMore} error={jobs.loadMoreError} onclick={() => jobs.loadMore()} />
-      {/if}
-
-      {#if currentPage !== undefined}
-        <Pagination
-          current={activePage}
-          total={pageCount(jobs.total)}
-          pathname={page.url.pathname}
-          params={page.url.searchParams}
+      {#if visibleJobs.length === 0}
+        <!-- The search DID match on this page — the client-side post-filters removed
+             every row. Saying "no matching jobs" here would blame the search for the
+             reader's own settings, and the two causes are worth telling apart because
+             one of them is a slider they can move. The paginator below still renders,
+             so this is somewhere to leave rather than a dead end. -->
+        <States
+          state="empty"
+          message={minMatch === null
+            ? 'Every job on this page is one you hid.'
+            : 'Every job on this page is hidden or below your match threshold.'}
         />
+      {:else}
+        <div class="flex flex-col gap-3">
+          {#each visibleJobs as job (job.public_slug)}
+            <JobRow {job} {onHide} />
+          {/each}
+        </div>
       {/if}
+
+      <!-- Page links, and the only way through the results: a scroll-to-bottom
+           auto-load used to sit here, which grew the page every time the reader
+           neared the end of it and put the footer permanently out of reach.
+           `pageCount` caps at the deepest page the search API will serve, so no
+           link here walks into its "pagination too deep" 400. -->
+      <Pagination
+        current={activePage}
+        total={pageCount(jobs.total)}
+        pathname={page.url.pathname}
+        params={page.url.searchParams}
+      />
     {/if}
   </div>
 </div>
