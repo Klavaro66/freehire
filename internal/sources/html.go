@@ -47,6 +47,25 @@ func textContent(n *html.Node) string {
 	return strings.TrimSpace(b.String())
 }
 
+// scriptTextByID returns the text of the first <script> element with the given id, or "".
+func scriptTextByID(root *html.Node, id string) string {
+	var found *html.Node
+	walk(root, func(n *html.Node) bool {
+		if found != nil {
+			return false
+		}
+		if n.Type == html.ElementNode && n.Data == "script" && attr(n, "id") == id {
+			found = n
+			return false
+		}
+		return true
+	})
+	if found == nil {
+		return ""
+	}
+	return textContent(found)
+}
+
 // innerHTML renders n's children back to HTML markup.
 func innerHTML(n *html.Node) string {
 	var b strings.Builder
