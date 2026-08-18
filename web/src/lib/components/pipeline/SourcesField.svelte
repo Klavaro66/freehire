@@ -141,38 +141,54 @@
       scene.add(halo);
       scene.add(core);
 
-      // The core scanning: a curved ray that snaps out to one flying point at a time
-      // — quick to appear, brief hold, quick to fade — then swings to the next. A
-      // child of `group` so it shares the points' own local coordinate frame — it
-      // always starts at (0,0,0), the core's local position, and its far end tracks
-      // that point's live position each frame. The curve is a quadratic bezier
-      // through a control point offset perpendicular to the straight line, sampled
-      // into a fixed-length polyline every frame it's live — an actual arc, not a
-      // straight spoke.
+      // The core scanning: several curved rays, each independently snapping out to
+      // one flying point at a time — quick to appear, brief hold, quick to fade —
+      // then swinging to the next. Every ray is its own Line (its own geometry and
+      // material), all children of `group` so they share the points' own local
+      // coordinate frame: each always starts at (0,0,0), the core's local position,
+      // and its far end tracks its target's live position every frame. The curve is
+      // a quadratic bezier through a control point offset perpendicular to the
+      // straight line, sampled into a fixed-length polyline every live frame — an
+      // actual arc, not a straight spoke.
+      const RAY_COUNT = 5;
       const RAY_SEGMENTS = 14;
-      const rayPositions = new Float32Array((RAY_SEGMENTS + 1) * 3);
-      const rayGeometry = new THREE.BufferGeometry();
-      rayGeometry.setAttribute('position', new THREE.BufferAttribute(rayPositions, 3));
-      const rayMaterial = new THREE.LineBasicMaterial({
-        color: brand,
-        transparent: true,
-        opacity: 0,
-      });
-      const ray = new THREE.Line(rayGeometry, rayMaterial);
-      group.add(ray);
-      const rayPositionAttr = rayGeometry.getAttribute('position') as InstanceType<
-        typeof THREE.BufferAttribute
-      >;
-      let rayTarget = 0;
-      let rayBow = 1;
-      let rayPhase = 0;
       const RAY_CYCLE = 0.045; // phase units per animation tick (~60fps): ~0.4s/target — a scan, not a hold
-      const RAY_PEAK = 0.95;
+      const RAY_PEAK = 0.9;
 
-      const updateRayCurve = () => {
-        const ex = at(positions, rayTarget * 3);
-        const ey = at(positions, rayTarget * 3 + 1);
-        const ez = at(positions, rayTarget * 3 + 2);
+      type RayState = {
+        geometry: InstanceType<typeof THREE.BufferGeometry>;
+        positions: Float32Array;
+        positionAttr: InstanceType<typeof THREE.BufferAttribute>;
+        material: InstanceType<typeof THREE.LineBasicMaterial>;
+        target: number;
+        bow: number;
+        phase: number;
+      };
+
+      const makeRay = (phase: number): RayState => {
+        const rayPositions = new Float32Array((RAY_SEGMENTS + 1) * 3);
+        const rayGeometry = new THREE.BufferGeometry();
+        rayGeometry.setAttribute('position', new THREE.BufferAttribute(rayPositions, 3));
+        const rayMaterial = new THREE.LineBasicMaterial({ color: brand, transparent: true, opacity: 0 });
+        group.add(new THREE.Line(rayGeometry, rayMaterial));
+        return {
+          geometry: rayGeometry,
+          positions: rayPositions,
+          positionAttr: rayGeometry.getAttribute('position') as InstanceType<typeof THREE.BufferAttribute>,
+          material: rayMaterial,
+          target: Math.floor(Math.random() * pointCount),
+          bow: Math.random() < 0.5 ? -1 : 1,
+          phase,
+        };
+      };
+      // Staggered start phases so the rays don't all snap to a new target in the
+      // same frame — a scan, not a synchronized blink.
+      const rays: RayState[] = Array.from({ length: RAY_COUNT }, (_, i) => makeRay(i / RAY_COUNT));
+
+      const updateRayCurve = (ray: RayState) => {
+        const ex = at(positions, ray.target * 3);
+        const ey = at(positions, ray.target * 3 + 1);
+        const ez = at(positions, ray.target * 3 + 2);
         const len = Math.hypot(ex, ey, ez) || 1;
         const dirx = ex / len;
         const diry = ey / len;
@@ -188,41 +204,44 @@
         cpx /= plen;
         cpy /= plen;
         cpz /= plen;
-        const bow = len * 0.35 * rayBow;
+        const bow = len * 0.35 * ray.bow;
         const ctrlX = ex / 2 + cpx * bow;
         const ctrlY = ey / 2 + cpy * bow;
         const ctrlZ = ez / 2 + cpz * bow;
+        const rp = ray.positions;
         for (let s = 0; s <= RAY_SEGMENTS; s++) {
           const t = s / RAY_SEGMENTS;
           const it = 1 - t;
           const w1 = 2 * it * t;
           const w2 = t * t;
-          rayPositions[s * 3] = w1 * ctrlX + w2 * ex;
-          rayPositions[s * 3 + 1] = w1 * ctrlY + w2 * ey;
-          rayPositions[s * 3 + 2] = w1 * ctrlZ + w2 * ez;
+          rp[s * 3] = w1 * ctrlX + w2 * ex;
+          rp[s * 3 + 1] = w1 * ctrlY + w2 * ey;
+          rp[s * 3 + 2] = w1 * ctrlZ + w2 * ez;
         }
-        rayPositionAttr.needsUpdate = true;
+        ray.positionAttr.needsUpdate = true;
       };
 
-      // Fades the ray in fast, holds it briefly at full opacity on rayTarget's live
-      // position, fades it out fast, then snaps to a newly-picked target — a scan
-      // beat, not a lingering beam. Returns whether this tick fired a new target, so
-      // the core can flare in step with it.
-      const stepRay = (dt: number): boolean => {
-        rayPhase += RAY_CYCLE * dt;
+      // Fades each ray in fast, holds it briefly at full opacity on its target's
+      // live position, fades it out fast, then snaps to a newly-picked target — a
+      // scan beat, not a lingering beam. Returns whether ANY ray fired a new target
+      // this tick, so the core can flare in step with the scan.
+      const stepRays = (dt: number): boolean => {
         let fired = false;
-        if (rayPhase >= 1) {
-          rayPhase = 0;
-          let next = Math.floor(Math.random() * pointCount);
-          if (pointCount > 1 && next === rayTarget) next = (next + 1) % pointCount;
-          rayTarget = next;
-          rayBow = Math.random() < 0.5 ? -1 : 1;
-          fired = true;
+        for (const ray of rays) {
+          ray.phase += RAY_CYCLE * dt;
+          if (ray.phase >= 1) {
+            ray.phase = 0;
+            let next = Math.floor(Math.random() * pointCount);
+            if (pointCount > 1 && next === ray.target) next = (next + 1) % pointCount;
+            ray.target = next;
+            ray.bow = Math.random() < 0.5 ? -1 : 1;
+            fired = true;
+          }
+          const p = Math.min(1, ray.phase);
+          const envelope = p < 0.25 ? p / 0.25 : p > 0.7 ? (1 - p) / 0.3 : 1;
+          ray.material.opacity = envelope * RAY_PEAK;
+          updateRayCurve(ray);
         }
-        const p = Math.min(1, rayPhase);
-        const envelope = p < 0.25 ? p / 0.25 : p > 0.7 ? (1 - p) / 0.3 : 1;
-        rayMaterial.opacity = envelope * RAY_PEAK;
-        updateRayCurve();
         return fired;
       };
 
@@ -301,7 +320,7 @@
           last = now;
 
           step(dt);
-          const fired = stepRay(dt);
+          const fired = stepRays(dt);
           if (fired) pulse = 1;
           pulse *= 0.9;
           const flare = 1 + pulse * 0.5;
@@ -323,8 +342,10 @@
         material.dispose();
         core.geometry.dispose();
         (core.material as InstanceType<typeof THREE.Material>).dispose();
-        rayGeometry.dispose();
-        rayMaterial.dispose();
+        for (const ray of rays) {
+          ray.geometry.dispose();
+          ray.material.dispose();
+        }
         halo.geometry.dispose();
         (halo.material as InstanceType<typeof THREE.Material>).dispose();
         renderer.dispose();
