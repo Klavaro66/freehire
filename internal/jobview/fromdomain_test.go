@@ -101,3 +101,42 @@ func TestFromDomain_MatchesFrozenWireShape(t *testing.T) {
 		})
 	}
 }
+
+// Requirements is a served enrichment field like summary/salary/visa_sponsorship —
+// FromDomain does not fold or zero it out, unlike the dict-covered facets
+// (seniority, category, skills, etc.). This pins that design decision with a test
+// rather than leaving it as unverified default behavior.
+func TestFromDomain_RequirementsPassThroughUnchanged(t *testing.T) {
+	row := db.Job{
+		ID: 5, Source: "greenhouse", ExternalID: "acme:5", Title: "Backend Engineer",
+		Company: "Acme", CompanySlug: "acme", PublicSlug: "backend-engineer-acme-5",
+		CreatedAt: pgtype.Timestamptz{Time: time.Date(2026, 1, 7, 0, 0, 0, 0, time.UTC), Valid: true},
+		Enrichment: json.RawMessage(
+			`{"requirements":[{"text":"5+ years Go","priority":"required"},{"text":"Kubernetes","priority":"preferred"}]}`),
+	}
+
+	j, x, err := job.FromRow(row)
+	if err != nil {
+		t.Fatalf("job.FromRow: %v", err)
+	}
+	got, err := jobview.FromDomain(j, x)
+	if err != nil {
+		t.Fatalf("FromDomain: %v", err)
+	}
+
+	want := []struct {
+		Text     string `json:"text"`
+		Priority string `json:"priority"`
+	}{
+		{Text: "5+ years Go", Priority: "required"},
+		{Text: "Kubernetes", Priority: "preferred"},
+	}
+	if len(got.Enrichment.Requirements) != len(want) {
+		t.Fatalf("Requirements = %v, want %v", got.Enrichment.Requirements, want)
+	}
+	for i, r := range got.Enrichment.Requirements {
+		if r.Text != want[i].Text || r.Priority != want[i].Priority {
+			t.Errorf("Requirements[%d] = %+v, want %+v", i, r, want[i])
+		}
+	}
+}

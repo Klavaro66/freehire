@@ -77,6 +77,28 @@ func TestUnmarshalCanonicalShapesUnchanged(t *testing.T) {
 	}
 }
 
+func TestUnmarshalCoercesBareObjectRequirementToArray(t *testing.T) {
+	var e Enrichment
+	if err := json.Unmarshal([]byte(`{"requirements":{"text":"5+ years Go","priority":"required"}}`), &e); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(e.Requirements) != 1 || e.Requirements[0] != (Requirement{Text: "5+ years Go", Priority: "required"}) {
+		t.Errorf("requirements = %v, want [{5+ years Go required}]", e.Requirements)
+	}
+}
+
+func TestUnmarshalRequirementsArrayShapeUnchanged(t *testing.T) {
+	raw := `{"requirements":[{"text":"5+ years Go","priority":"required"},{"text":"Kubernetes","priority":"preferred"}]}`
+	var e Enrichment
+	if err := json.Unmarshal([]byte(raw), &e); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := []Requirement{{Text: "5+ years Go", Priority: "required"}, {Text: "Kubernetes", Priority: "preferred"}}
+	if len(e.Requirements) != 2 || e.Requirements[0] != want[0] || e.Requirements[1] != want[1] {
+		t.Errorf("requirements = %v, want %v", e.Requirements, want)
+	}
+}
+
 func TestUnmarshalStillRejectsBrokenJSON(t *testing.T) {
 	var e Enrichment
 	if err := json.Unmarshal([]byte(`{"regions":`), &e); err == nil {

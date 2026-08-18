@@ -71,10 +71,39 @@ func TestRequestSchema_CarriesTheFieldsThePromptAsksFor(t *testing.T) {
 		"summary", "relocation", "visa_sponsorship", "cities", "timezone_note",
 		"salary_min", "salary_max", "salary_currency", "salary_period",
 		"domains", "company_type", "company_size", "regions", "countries", "skills",
+		"requirements",
 	} {
 		if _, ok := props[field]; !ok {
 			t.Errorf("schema is missing %q, so the model would stop returning it", field)
 		}
+	}
+}
+
+// priority is a nested property of each requirements array element (an object),
+// not a top-level scalar or an array of scalars — llmschema.Enum cannot reach it
+// (see the Requirements field's doc comment in enrichment.go), so it must carry
+// no schema-level enum. Enforcement is prompt + Sanitize coercion only.
+func TestRequestSchema_RequirementsHasNoEnum(t *testing.T) {
+	props := schemaProps(t, true)
+
+	obj, ok := props["requirements"].(map[string]any)
+	if !ok {
+		t.Fatal("requirements is not an object")
+	}
+	items, ok := obj["items"].(map[string]any)
+	if !ok {
+		t.Fatal("requirements carries no items schema")
+	}
+	itemProps, ok := items["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("requirements items carry no properties")
+	}
+	priority, ok := itemProps["priority"].(map[string]any)
+	if !ok {
+		t.Fatal("requirements items carry no priority property")
+	}
+	if _, ok := priority["enum"]; ok {
+		t.Error("priority carries a schema-level enum, which would be inert/wrong for a nested array-of-object field")
 	}
 }
 

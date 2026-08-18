@@ -37,6 +37,10 @@ func TestRoundTripFidelity(t *testing.T) {
 		PostingLanguage:    "en",
 		CompanyType:        "product",
 		CompanySize:        "51-200",
+		Requirements: []Requirement{
+			{Text: "5+ years Go", Priority: "required"},
+			{Text: "Kubernetes", Priority: "preferred"},
+		},
 	}
 
 	data, err := json.Marshal(original)
@@ -377,6 +381,75 @@ func TestSanitizeBoundsCities(t *testing.T) {
 		e.Sanitize()
 		if !reflect.DeepEqual(e.Cities, []string{"Kyiv", "Warsaw"}) {
 			t.Errorf("Cities = %v, want unchanged", e.Cities)
+		}
+	})
+}
+
+func TestSanitizeBoundsRequirements(t *testing.T) {
+	t.Run("an over-long requirement text is clipped", func(t *testing.T) {
+		e := Enrichment{Requirements: []Requirement{
+			{Text: "  " + strings.Repeat("x", maxRequirementTextRunes+50) + "  ", Priority: "required"},
+		}}
+		e.Sanitize()
+		if len(e.Requirements) != 1 {
+			t.Fatalf("Requirements = %v, want 1 entry", e.Requirements)
+		}
+		if got := len([]rune(e.Requirements[0].Text)); got != maxRequirementTextRunes {
+			t.Errorf("Requirements[0].Text clipped length = %d runes, want %d", got, maxRequirementTextRunes)
+		}
+	})
+
+	t.Run("an oversized list is capped, not just each entry", func(t *testing.T) {
+		var reqs []Requirement
+		for i := 0; i < maxRequirements+50; i++ {
+			reqs = append(reqs, Requirement{Text: "Go", Priority: "required"})
+		}
+		e := Enrichment{Requirements: reqs}
+		e.Sanitize()
+		if len(e.Requirements) != maxRequirements {
+			t.Errorf("len(Requirements) = %d, want %d", len(e.Requirements), maxRequirements)
+		}
+	})
+
+	t.Run("an entry whose text clips to empty is dropped", func(t *testing.T) {
+		e := Enrichment{Requirements: []Requirement{
+			{Text: "   ", Priority: "required"},
+			{Text: "Go", Priority: "required"},
+		}}
+		e.Sanitize()
+		if len(e.Requirements) != 1 || e.Requirements[0].Text != "Go" {
+			t.Errorf("Requirements = %v, want only the non-blank entry", e.Requirements)
+		}
+	})
+
+	t.Run("priority is coerced case/whitespace-insensitively to required", func(t *testing.T) {
+		e := Enrichment{Requirements: []Requirement{{Text: "Go", Priority: "  Required "}}}
+		e.Sanitize()
+		if got := e.Requirements[0].Priority; got != "required" {
+			t.Errorf("Priority = %q, want %q", got, "required")
+		}
+	})
+
+	t.Run("an unrecognized priority is coerced to preferred", func(t *testing.T) {
+		e := Enrichment{Requirements: []Requirement{{Text: "Go", Priority: "nice-to-have"}}}
+		e.Sanitize()
+		if got := e.Requirements[0].Priority; got != "preferred" {
+			t.Errorf("Priority = %q, want %q", got, "preferred")
+		}
+	})
+
+	t.Run("a normal requirements list is otherwise untouched", func(t *testing.T) {
+		e := Enrichment{Requirements: []Requirement{
+			{Text: "5+ years Go", Priority: "required"},
+			{Text: "Kubernetes", Priority: "preferred"},
+		}}
+		e.Sanitize()
+		want := []Requirement{
+			{Text: "5+ years Go", Priority: "required"},
+			{Text: "Kubernetes", Priority: "preferred"},
+		}
+		if !reflect.DeepEqual(e.Requirements, want) {
+			t.Errorf("Requirements = %v, want unchanged %v", e.Requirements, want)
 		}
 	})
 }

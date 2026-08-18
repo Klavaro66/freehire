@@ -134,6 +134,12 @@ func buildSystemPrompt(askGeo bool) string {
 	b.WriteString("salary_min (int), salary_max (int), salary_currency (ISO 4217), ")
 	b.WriteString("skills (array of lowercase tokens, e.g. go, postgresql).\n")
 
+	b.WriteString("\n\"requirements\" (array, max 30): the posting's own explicit requirements ")
+	b.WriteString("(skills, tools, experience, must/nice-to-have qualifications), each an object ")
+	b.WriteString("with \"text\" (the requirement, short) and \"priority\" (\"required\" or ")
+	b.WriteString("\"preferred\"). Base this ONLY on the job posting — you have no CV to compare ")
+	b.WriteString("against. Return an empty array if the posting states no explicit requirements.\n")
+
 	// Salary guard: the model, told the field is an int, otherwise decimal-strips a
 	// fractional hourly rate ($26.08 -> 2608), inflating it 100x. A concrete
 	// counter-example is what makes a budget model round instead of strip.

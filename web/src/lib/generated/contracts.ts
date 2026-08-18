@@ -59,6 +59,28 @@ export interface Enrichment {
    */
   company_type?: string; // enum: CompanyTypeValues
   company_size?: string; // enum: CompanySizeValues
+  /**
+   * Stated requirements (job-only, no CV). Freeform: what the posting itself asks
+   * for, with no comparison against any candidate — unlike, and unrelated to,
+   * matchanalysis.Requirement, which additionally classifies a requirement against
+   * one candidate's résumé. Priority is deliberately NOT schema-constrained (see
+   * requestSchema in schema.go): llmschema.Enum only reaches a top-level field or
+   * an array of scalars, not a nested property of an array of objects — adding an
+   * Enum("requirements", ...) override here would silently produce an inert/wrong
+   * constraint rather than erroring, so priority correctness relies on the prompt
+   * plus Sanitize's coercion below instead.
+   */
+  requirements?: Requirement[];
+}
+/**
+ * Requirement is one requirement stated in the posting — job-only, not compared
+ * against any CV. (Distinct from, and unrelated to, matchanalysis.Requirement,
+ * which additionally classifies a requirement against a specific candidate's
+ * résumé.)
+ */
+export interface Requirement {
+  text: string;
+  priority: string; // "required" or "preferred"
 }
 
 /**

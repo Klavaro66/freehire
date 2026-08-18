@@ -59,6 +59,29 @@ func (f *sliceOrWrap) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// requirementListOrWrap decodes a JSON array of Requirement objects, or a single
+// bare Requirement object (wrapped into a one-element slice) — the same
+// array-or-scalar tolerance sliceOrWrap gives string fields, applied to
+// Requirements. Strict JSON-schema mode has not historically prevented the model
+// from returning the right value in the wrong shape for other fields (the premise
+// of this whole file), so this field gets the same defensive treatment rather than
+// being assumed exempt.
+type requirementListOrWrap []Requirement
+
+func (f *requirementListOrWrap) UnmarshalJSON(b []byte) error {
+	var arr []Requirement
+	if err := json.Unmarshal(b, &arr); err == nil {
+		*f = arr
+		return nil
+	}
+	var one Requirement
+	if err := json.Unmarshal(b, &one); err != nil {
+		return err
+	}
+	*f = requirementListOrWrap{one}
+	return nil
+}
+
 // roundInt decodes any JSON number, rounding to the nearest integer so a
 // fractional value (an hourly rate like 17.5, or 0.5 years) is preserved instead
 // of failing the decode. It is deliberately STRICTER than flexjson.Int: a string
@@ -112,6 +135,8 @@ type enrichmentJSON struct {
 
 	CompanyType stringOrFirst `json:"company_type,omitempty"`
 	CompanySize stringOrFirst `json:"company_size,omitempty"`
+
+	Requirements requirementListOrWrap `json:"requirements,omitempty"`
 }
 
 // UnmarshalJSON decodes into the tolerant shadow struct, then copies into the
@@ -145,6 +170,7 @@ func (e *Enrichment) UnmarshalJSON(data []byte) error {
 		PostingLanguage:    string(s.PostingLanguage),
 		CompanyType:        string(s.CompanyType),
 		CompanySize:        string(s.CompanySize),
+		Requirements:       []Requirement(s.Requirements),
 	}
 	return nil
 }
