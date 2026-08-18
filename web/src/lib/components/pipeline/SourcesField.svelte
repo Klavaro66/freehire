@@ -68,9 +68,15 @@
       // rare one that happens to come close gets bent in by gravity and caught.
       const group = new THREE.Group();
       const FIELD_R = 3.3;
-      const CAPTURE_R = 0.16;
-      const GRAVITY = 0.3;
-      const MAX_ACCEL = 0.012;
+      const CAPTURE_R = 0.1;
+      // Gravity only exists inside this radius — a chord that never enters it is a
+      // straight line for its entire flight, guaranteed. Without this cutoff, the
+      // pull (however weak) acts on every point for its whole time in the field, and
+      // a long enough flight eventually spirals almost everything inward regardless
+      // of how far off-center it started — which was the actual bug, not the aim.
+      const INFLUENCE_R = 0.9;
+      const GRAVITY = 0.16;
+      const MAX_ACCEL = 0.01;
       const positions = new Float32Array(pointCount * 3);
       const velocities = new Float32Array(pointCount * 3);
       const colors = new Float32Array(pointCount * 3);
@@ -108,7 +114,7 @@
         const dy = ey * FIELD_R - py;
         const dz = ez * FIELD_R - pz;
         const len = Math.hypot(dx, dy, dz) || 1;
-        const speed = 0.006 + Math.random() * 0.007;
+        const speed = 0.0028 + Math.random() * 0.0032;
         velocities[i * 3] = (dx / len) * speed;
         velocities[i * 3 + 1] = (dy / len) * speed;
         velocities[i * 3 + 2] = (dz / len) * speed;
@@ -134,11 +140,11 @@
       // both briefly flare on every catch (see `pulse` in the animation loop below).
       const coreColor = readCssColor('--foreground');
       const halo = new THREE.Mesh(
-        new THREE.SphereGeometry(0.2, 24, 24),
+        new THREE.SphereGeometry(0.13, 24, 24),
         new THREE.MeshBasicMaterial({ color: coreColor, transparent: true, opacity: 0.12 })
       );
       const core = new THREE.Mesh(
-        new THREE.SphereGeometry(0.11, 24, 24),
+        new THREE.SphereGeometry(0.06, 24, 24),
         new THREE.MeshBasicMaterial({ color: coreColor })
       );
       scene.add(halo);
@@ -154,7 +160,7 @@
       const rayGeometry = new THREE.BufferGeometry();
       rayGeometry.setAttribute('position', new THREE.BufferAttribute(rayPositions, 3));
       const rayMaterial = new THREE.LineBasicMaterial({
-        color: coreColor,
+        color: brand,
         transparent: true,
         opacity: 0,
       });
@@ -165,10 +171,12 @@
       >;
       let rayTarget = 0;
       let rayPhase = 0;
-      const RAY_CYCLE = 0.014; // phase units per animation tick (~60fps): about 1.2s/target
+      const RAY_CYCLE = 0.0045; // phase units per animation tick (~60fps): ~3.7s/target
+      const RAY_PEAK = 0.95;
 
-      // Fades the ray in, holds it on rayTarget's live position, fades it out, then
-      // swings it to a newly-picked target for the next cycle.
+      // Fades the ray in, holds it at full opacity on rayTarget's live position for
+      // the middle of the cycle (not just a fleeting sine peak — long enough to
+      // actually register), fades it out, then swings to a newly-picked target.
       const stepRay = (dt: number) => {
         rayPhase += RAY_CYCLE * dt;
         if (rayPhase >= 1) {
@@ -177,7 +185,9 @@
           if (pointCount > 1 && next === rayTarget) next = (next + 1) % pointCount;
           rayTarget = next;
         }
-        rayMaterial.opacity = Math.sin(Math.min(1, rayPhase) * Math.PI) * 0.55;
+        const p = Math.min(1, rayPhase);
+        const envelope = p < 0.2 ? p / 0.2 : p > 0.75 ? (1 - p) / 0.25 : 1;
+        rayMaterial.opacity = envelope * RAY_PEAK;
         rayPositions[3] = at(positions, rayTarget * 3);
         rayPositions[4] = at(positions, rayTarget * 3 + 1);
         rayPositions[5] = at(positions, rayTarget * 3 + 2);
@@ -201,13 +211,18 @@
           return 'caught';
         }
 
-        const accel = Math.min(MAX_ACCEL, GRAVITY / Math.max(distSq, 0.05)) * dt;
-        const vx = at(velocities, i * 3) - (px / dist) * accel;
-        const vy = at(velocities, i * 3 + 1) - (py / dist) * accel;
-        const vz = at(velocities, i * 3 + 2) - (pz / dist) * accel;
-        velocities[i * 3] = vx;
-        velocities[i * 3 + 1] = vy;
-        velocities[i * 3 + 2] = vz;
+        let vx = at(velocities, i * 3);
+        let vy = at(velocities, i * 3 + 1);
+        let vz = at(velocities, i * 3 + 2);
+        if (dist < INFLUENCE_R) {
+          const accel = Math.min(MAX_ACCEL, GRAVITY / Math.max(distSq, 0.05)) * dt;
+          vx -= (px / dist) * accel;
+          vy -= (py / dist) * accel;
+          vz -= (pz / dist) * accel;
+          velocities[i * 3] = vx;
+          velocities[i * 3 + 1] = vy;
+          velocities[i * 3 + 2] = vz;
+        }
         positions[i * 3] = px + vx * dt;
         positions[i * 3 + 1] = py + vy * dt;
         positions[i * 3 + 2] = pz + vz * dt;
