@@ -73,17 +73,15 @@
 
   // Both the mail and calendar connect flows end as a top-level browser navigation
   // back here, carrying their verdict in the URL — the same convention the inbox
-  // used to read for the mail flow alone.
-  const GMAIL_CONNECT_ERRORS: Record<string, string> = {
-    auth: 'Your session ended before Gmail finished connecting. Sign in, then try again.',
+  // used to read for the mail flow alone. Only the `auth` message names the product;
+  // `state` and `exchange` are the same regardless of which consent failed.
+  const connectErrors = (product: string): Record<string, string> => ({
+    auth: `Your session ended before ${product} finished connecting. Sign in, then try again.`,
     state: 'That connect link expired or was opened out of order. Start the connection again.',
     exchange: 'Google did not finish handing over access. Try connecting again.',
-  };
-  const CALENDAR_CONNECT_ERRORS: Record<string, string> = {
-    auth: 'Your session ended before Calendar finished connecting. Sign in, then try again.',
-    state: 'That connect link expired or was opened out of order. Start the connection again.',
-    exchange: 'Google did not finish handing over access. Try connecting again.',
-  };
+  });
+  const GMAIL_CONNECT_ERRORS = connectErrors('Gmail');
+  const CALENDAR_CONNECT_ERRORS = connectErrors('Calendar');
   let googleNotice = $state<{ ok: boolean; text: string } | null>(null);
 
   function readGoogleVerdict() {
@@ -240,6 +238,9 @@
     void notifications.ensureLoaded();
     void loadDiscord();
   });
+
+  // Shared by every "already connected" badge below (Mail, Calendar, Telegram, Discord).
+  const CONNECTED_BADGE_CLASS = 'border-brand-ring/40 text-brand-strong';
 </script>
 
 <div class="flex flex-col gap-4">
@@ -274,7 +275,7 @@
             <div class="flex items-center gap-1.5 text-sm">
               <Mail class="h-3.5 w-3.5 text-muted-foreground" /> Mail
               {#if hasGmail}
-                <Badge variant="outline" class="border-brand-ring/40 text-brand-strong">Connected</Badge>
+                <Badge variant="outline" class={CONNECTED_BADGE_CLASS}>Connected</Badge>
                 {#if gmail?.status === 'needs_reconsent'}
                   <Badge variant="outline" class="border-destructive/40 text-destructive">Reconnect needed</Badge>
                 {/if}
@@ -314,7 +315,7 @@
             <div class="flex items-center gap-1.5 text-sm">
               <CalendarDays class="h-3.5 w-3.5 text-muted-foreground" /> Calendar
               {#if hasCalendar}
-                <Badge variant="outline" class="border-brand-ring/40 text-brand-strong">Connected</Badge>
+                <Badge variant="outline" class={CONNECTED_BADGE_CLASS}>Connected</Badge>
               {/if}
             </div>
             <p class="text-xs text-muted-foreground">
@@ -349,7 +350,7 @@
           <div class="flex items-center gap-2 text-sm font-medium">
             <ProviderIcon provider="telegram" class="h-4 w-4" /> Telegram
             {#if tg.linked}
-              <Badge variant="outline" class="border-brand-ring/40 text-brand-strong">Connected</Badge>
+              <Badge variant="outline" class={CONNECTED_BADGE_CLASS}>Connected</Badge>
             {/if}
           </div>
           <p class="mt-1 text-xs text-muted-foreground">
@@ -398,7 +399,7 @@
           <div class="flex items-center gap-2 text-sm font-medium">
             <ProviderIcon provider="discord" class="h-4 w-4" /> Discord
             {#if discord.linked}
-              <Badge variant="outline" class="border-brand-ring/40 text-brand-strong">Linked</Badge>
+              <Badge variant="outline" class={CONNECTED_BADGE_CLASS}>Linked</Badge>
             {/if}
           </div>
           <p class="mt-1 text-xs text-muted-foreground">
