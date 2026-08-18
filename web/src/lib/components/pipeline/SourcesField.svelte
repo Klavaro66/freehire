@@ -61,16 +61,16 @@
       }
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-      // A real gravity well, not a funnel: each point launches on a straight line
-      // aimed near — not necessarily through — the core, with a random miss distance.
-      // A wide miss just arcs past and exits the field to respawn on the far side; a
-      // close miss gets bent in by the pull and is caught. Most points fly by; only
-      // the ones that come close enough are the ones the core keeps.
+      // A field of independent flight paths, not a funnel: each point launches on a
+      // straight chord between two random points on the outer shell — uncorrelated
+      // with the core, same as the original static field, except now in motion. Most
+      // chords pass nowhere near the middle and just cross the field and exit; the
+      // rare one that happens to come close gets bent in by gravity and caught.
       const group = new THREE.Group();
       const FIELD_R = 3.3;
-      const CAPTURE_R = 0.3;
-      const GRAVITY = 0.55;
-      const MAX_ACCEL = 0.02;
+      const CAPTURE_R = 0.16;
+      const GRAVITY = 0.3;
+      const MAX_ACCEL = 0.012;
       const positions = new Float32Array(pointCount * 3);
       const velocities = new Float32Array(pointCount * 3);
       const colors = new Float32Array(pointCount * 3);
@@ -91,9 +91,9 @@
         return [Math.cos(theta) * sinPhi, cosPhi, Math.sin(theta) * sinPhi];
       };
 
-      // (Re)launches point i from the field's outer edge, aimed at a point offset
-      // from the core by a random "miss distance" — the thing that makes most
-      // trajectories a near-pass rather than a bullseye.
+      // (Re)launches point i on a chord from one random point on the outer shell to
+      // another — a trajectory that has nothing to do with where the core sits, so
+      // whether it happens to pass close is geometry, not aim.
       const spawn = (i: number) => {
         const [sx, sy, sz] = randomOnSphere();
         const px = sx * FIELD_R;
@@ -103,13 +103,12 @@
         positions[i * 3 + 1] = py;
         positions[i * 3 + 2] = pz;
 
-        const missDistance = Math.random() * Math.random() * 1.8; // biased toward small misses
-        const [mx, my, mz] = randomOnSphere();
-        const dx = mx * missDistance - px;
-        const dy = my * missDistance - py;
-        const dz = mz * missDistance - pz;
+        const [ex, ey, ez] = randomOnSphere();
+        const dx = ex * FIELD_R - px;
+        const dy = ey * FIELD_R - py;
+        const dz = ez * FIELD_R - pz;
         const len = Math.hypot(dx, dy, dz) || 1;
-        const speed = 0.018 + Math.random() * 0.02;
+        const speed = 0.006 + Math.random() * 0.007;
         velocities[i * 3] = (dx / len) * speed;
         velocities[i * 3 + 1] = (dy / len) * speed;
         velocities[i * 3 + 2] = (dz / len) * speed;
@@ -135,15 +134,55 @@
       // both briefly flare on every catch (see `pulse` in the animation loop below).
       const coreColor = readCssColor('--foreground');
       const halo = new THREE.Mesh(
-        new THREE.SphereGeometry(0.34, 24, 24),
+        new THREE.SphereGeometry(0.2, 24, 24),
         new THREE.MeshBasicMaterial({ color: coreColor, transparent: true, opacity: 0.12 })
       );
       const core = new THREE.Mesh(
-        new THREE.SphereGeometry(0.2, 24, 24),
+        new THREE.SphereGeometry(0.11, 24, 24),
         new THREE.MeshBasicMaterial({ color: coreColor })
       );
       scene.add(halo);
       scene.add(core);
+
+      // The core reaching out: a single ray that swings from itself to one flying
+      // point at a time, fading in, tracking that point while it holds, then fading
+      // out before picking the next target. A child of `group` so it shares the
+      // points' own local coordinate frame — its start is always (0,0,0), the core's
+      // local position, and its end is read straight from that point's live position
+      // each frame, so it never drifts off a point that is itself still moving.
+      const rayPositions = new Float32Array(6);
+      const rayGeometry = new THREE.BufferGeometry();
+      rayGeometry.setAttribute('position', new THREE.BufferAttribute(rayPositions, 3));
+      const rayMaterial = new THREE.LineBasicMaterial({
+        color: coreColor,
+        transparent: true,
+        opacity: 0,
+      });
+      const ray = new THREE.Line(rayGeometry, rayMaterial);
+      group.add(ray);
+      const rayPositionAttr = rayGeometry.getAttribute('position') as InstanceType<
+        typeof THREE.BufferAttribute
+      >;
+      let rayTarget = 0;
+      let rayPhase = 0;
+      const RAY_CYCLE = 0.014; // phase units per animation tick (~60fps): about 1.2s/target
+
+      // Fades the ray in, holds it on rayTarget's live position, fades it out, then
+      // swings it to a newly-picked target for the next cycle.
+      const stepRay = (dt: number) => {
+        rayPhase += RAY_CYCLE * dt;
+        if (rayPhase >= 1) {
+          rayPhase = 0;
+          let next = Math.floor(Math.random() * pointCount);
+          if (pointCount > 1 && next === rayTarget) next = (next + 1) % pointCount;
+          rayTarget = next;
+        }
+        rayMaterial.opacity = Math.sin(Math.min(1, rayPhase) * Math.PI) * 0.55;
+        rayPositions[3] = at(positions, rayTarget * 3);
+        rayPositions[4] = at(positions, rayTarget * 3 + 1);
+        rayPositions[5] = at(positions, rayTarget * 3 + 2);
+        rayPositionAttr.needsUpdate = true;
+      };
 
       // Advances one point by one tick: gravity bends its velocity toward the core,
       // then it moves. Returns whether this tick caught it (came within CAPTURE_R,
@@ -245,6 +284,7 @@
           last = now;
 
           const caught = step(dt);
+          stepRay(dt);
           if (caught > 0) pulse = 1;
           pulse *= 0.9;
           const flare = 1 + pulse * 0.5;
@@ -266,6 +306,8 @@
         material.dispose();
         core.geometry.dispose();
         (core.material as InstanceType<typeof THREE.Material>).dispose();
+        rayGeometry.dispose();
+        rayMaterial.dispose();
         halo.geometry.dispose();
         (halo.material as InstanceType<typeof THREE.Material>).dispose();
         renderer.dispose();
