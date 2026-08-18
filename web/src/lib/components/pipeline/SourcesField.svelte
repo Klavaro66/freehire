@@ -289,7 +289,7 @@
       // field toward the bottom-right so the core node — the brightest, largest thing
       // here — never sits behind a word regardless of how the box's aspect ratio
       // reflows the text block across breakpoints.
-      const fieldOffset = new THREE.Vector3(1.2, -0.75, 0);
+      const fieldOffset = new THREE.Vector3(1.2, -0.15, 0);
       group.position.copy(fieldOffset);
       core.position.copy(fieldOffset);
       halo.position.copy(fieldOffset);
@@ -363,7 +363,7 @@
 
 <div
   bind:this={container}
-  class="relative h-96 overflow-hidden sm:h-[32rem] lg:h-[38rem]"
+  class="relative h-72 overflow-hidden sm:h-80 lg:h-96"
 >
   <canvas
     bind:this={canvas}
