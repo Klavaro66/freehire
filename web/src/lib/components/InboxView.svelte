@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -16,7 +16,6 @@
   import StatusChip from '$lib/components/StatusChip.svelte';
   import { inboxLinkState, type LastUnlinked } from '$lib/inboxLink';
   import { Paginator } from '$lib/paginated.svelte';
-  import GmailConnectDialog from './GmailConnectDialog.svelte';
   import InboxSettings from './InboxSettings.svelte';
   import ApplicationLinkPicker from './ApplicationLinkPicker.svelte';
   import InfiniteScroll from './InfiniteScroll.svelte';
@@ -71,7 +70,6 @@
     { limit: PAGE_SIZE },
   );
 
-  let syncing = $state(false);
   let refreshing = $state(false);
   let markingAll = $state(false);
 
@@ -111,38 +109,6 @@
   );
   const sourceOptions = $derived([{ value: '' as InboxSource, label: 'All' }, ...presentSources]);
 
-  // The Gmail connect flow ends as a top-level browser navigation back to this page
-  // carrying its verdict in the URL: ?gmail=connected, or ?gmail_error=<reason> when
-  // the backend gave up. It is a banner and not the fatal `error` screen — the inbox
-  // itself is fine, only the connect attempt is not. The URL is cleaned afterwards so
-  // a reload does not replay a stale verdict. onMount (not afterNavigate, as in
-  // TopBar) is enough: this page is only ever reached from the callback by a cold
-  // load, never by an in-app navigation.
-  const GMAIL_CONNECT_ERRORS: Record<string, string> = {
-    auth: 'Your session ended before Gmail finished connecting. Sign in, then try again.',
-    state: 'That connect link expired or was opened out of order. Start the connection again.',
-    exchange: 'Google did not finish handing over access. Try connecting again.',
-  };
-  let connectNotice = $state<{ ok: boolean; text: string } | null>(null);
-
-  function readConnectVerdict() {
-    const params = page.url.searchParams;
-    const failed = params.get('gmail_error');
-    if (failed) {
-      connectNotice = {
-        ok: false,
-        text: GMAIL_CONNECT_ERRORS[failed] ?? 'Connecting Gmail failed. Try again.',
-      };
-    } else if (params.get('gmail') === 'connected') {
-      connectNotice = { ok: true, text: 'Gmail connected — your ATS mail will show up here shortly.' };
-    } else {
-      return;
-    }
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- shallow same-page URL clean-up to the current pathname; nothing to resolve
-    replaceState(page.url.pathname, {});
-  }
-
-  let destroyed = false;
   // A message addressed from outside the inbox — the tracking calendar links each
   // mail-derived event to the message behind it. Opening it here marks it read, which is
   // correct: read_at means a human saw the message, and this arrival is a person clicking
@@ -158,14 +124,10 @@
   }
 
   onMount(() => {
-    readConnectVerdict();
     // After load(), not before: fetchFirstPage replaces pager.items wholesale, and
     // openMessage patches the opened row to read INSIDE that list. Racing the two leaves
     // the message the reader just opened still showing as unread.
     void load().then(openAddressedMessage);
-  });
-  onDestroy(() => {
-    destroyed = true;
   });
 
   async function load() {
@@ -432,42 +394,9 @@
 
   // --- Gmail source ---
 
-  // First-time connect opens an explainer dialog (what's read + how the LLM pipeline
-  // sorts it, with source links); connectGmail is the actual OAuth redirect it triggers.
-  let showConnectDialog = $state(false);
-
-  function connectGmail() {
-    window.location.href = '/api/v1/me/gmail/connect';
-  }
-
-  async function sync() {
-    if (syncing) return;
-    syncing = true;
-    error = null;
-    try {
-      await api.syncGmail();
-      for (let i = 0; i < 8; i++) {
-        await new Promise((r) => setTimeout(r, 2500));
-        // Stop polling once the page is gone — no requests for a dead view.
-        if (destroyed) return;
-        await fetchFirstPage('Sync failed.');
-      }
-    } catch (e) {
-      error = errorMessage(e, 'Sync failed.');
-    } finally {
-      syncing = false;
-    }
-  }
-
-
   // Deep link to a Gmail message in Gmail's web UI (the Gmail API id is the URL id).
   const gmailUrl = (externalId: string) =>
     `https://mail.google.com/mail/?authuser=${encodeURIComponent(gmail?.email ?? '')}#all/${externalId}`;
-
-  // --- Hosted mailbox source ---
-
-
-
 
   // A source was added or removed in the Settings pane. A filter pointing at an
   // account that no longer exists would render an empty list that looks like "no
@@ -495,15 +424,6 @@
   <p class="text-sm text-destructive">{error}</p>
 {:else}
   <div class="flex flex-col gap-4">
-    {#if connectNotice}
-      <p
-        class="rounded-md border px-3 py-2 text-sm {connectNotice.ok
-          ? 'border-brand/30 bg-brand/10 text-foreground'
-          : 'border-destructive/30 bg-destructive/10 text-destructive'}"
-      >
-        {connectNotice.text}
-      </p>
-    {/if}
     <!-- Tabs: keep the mail list and the account setup on separate panes. -->
     <div class="flex gap-4 border-b border-border text-sm">
       {#each [{ id: 'inbox', label: 'Inbox' }, { id: 'settings', label: 'Settings' }] as t (t.id)}
@@ -520,16 +440,7 @@
     </div>
 
     {#if tab === 'settings'}
-      <InboxSettings
-        bind:gmail
-        bind:mailbox
-        {syncing}
-        onSync={sync}
-        onConnect={() => (showConnectDialog = true)}
-        onReconnect={connectGmail}
-        onSourceChanged={onSourceChanged}
-        onError={(m) => (error = m)}
-      />
+      <InboxSettings {gmail} bind:mailbox onSourceChanged={onSourceChanged} onError={(m) => (error = m)} />
     {:else if !hasAnySource}
       <p class="py-8 text-center text-sm text-muted-foreground">
         No mail source yet —
@@ -841,10 +752,6 @@
       {/if}
     {/if}
   </div>
-{/if}
-
-{#if showConnectDialog}
-  <GmailConnectDialog onClose={() => (showConnectDialog = false)} onConnect={connectGmail} />
 {/if}
 
 <style>

@@ -20,6 +20,7 @@ import {
   Coins,
   ShieldCheck,
   TrendingUp,
+  Plug,
 } from '@lucide/svelte';
 import type { LucideIcon } from '@lucide/svelte';
 import type { AccountNavItem } from './accountNav';
@@ -34,6 +35,7 @@ export const accountNavIcons: Record<AccountNavItem['href'], LucideIcon> = {
   '/my/inbox': Inbox,
   '/my/market-pulse': TrendingUp,
   '/my/notifications': BellRing,
+  '/my/integrations': Plug,
   '/my/api-keys': Key,
   '/my/submissions': FileText,
   '/my/contributions': Link2,

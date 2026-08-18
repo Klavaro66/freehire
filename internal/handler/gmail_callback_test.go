@@ -16,7 +16,7 @@ import (
 
 // The Gmail callback is a top-level browser navigation returning from Google, not
 // an XHR: a caller whose session cookie did not survive the round-trip must land
-// back on the inbox with an error marker, never on a JSON 401 with no way forward.
+// back on Integrations with an error marker, never on a JSON 401 with no way forward.
 // This is the shape the handler was written for — RequireAuth on the route made its
 // own unauthenticated branch unreachable and rendered `{"error":"not authenticated"}`
 // into the browser instead.
@@ -33,7 +33,7 @@ func TestGmailCallbackWithoutSessionRedirectsInsteadOfJSON(t *testing.T) {
 	if resp.StatusCode != fiber.StatusFound {
 		t.Fatalf("status = %d, want %d (a redirect, not a JSON error)", resp.StatusCode, fiber.StatusFound)
 	}
-	if got, want := resp.Header.Get("Location"), frontend+"/my/inbox?gmail_error=auth"; got != want {
+	if got, want := resp.Header.Get("Location"), frontend+"/my/integrations?gmail_error=auth"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
 }
@@ -59,7 +59,7 @@ func TestGmailCallbackStateMismatchRedirects(t *testing.T) {
 	if resp.StatusCode != fiber.StatusFound {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusFound)
 	}
-	if got, want := resp.Header.Get("Location"), frontend+"/my/inbox?gmail_error=state"; got != want {
+	if got, want := resp.Header.Get("Location"), frontend+"/my/integrations?gmail_error=state"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
 }

@@ -203,13 +203,14 @@ func (h *inboxHandlers) GmailConnect(c *fiber.Ctx) error {
 
 // GmailCallback finishes the flow: it verifies state, exchanges the code for a
 // refresh token + the connected address, stores the token encrypted, and
-// redirects back to the inbox. Failures redirect with ?gmail_error (never JSON);
-// the underlying cause is logged server-side first (like oauthFail), since the
-// generic redirect marker tells the user nothing.
+// redirects back to the Integrations tab — the surface the connect was started
+// from. Failures redirect with ?gmail_error (never JSON); the underlying cause
+// is logged server-side first (like oauthFail), since the generic redirect
+// marker tells the user nothing.
 func (h *inboxHandlers) GmailCallback(c *fiber.Ctx) error {
 	redirect := func(qs string, err error) error {
 		log.Printf("gmail connect: %s: %v", qs, err)
-		return c.Redirect(h.frontendOrigin+"/my/inbox?"+qs, fiber.StatusFound)
+		return c.Redirect(h.frontendOrigin+"/my/integrations?"+qs, fiber.StatusFound)
 	}
 	userID, ok := auth.UserID(c)
 	if !ok {
@@ -242,7 +243,7 @@ func (h *inboxHandlers) GmailCallback(c *fiber.Ctx) error {
 			return redirect("gmail_error=exchange", err)
 		}
 	}
-	return c.Redirect(h.frontendOrigin+"/my/inbox?gmail=connected", fiber.StatusFound)
+	return c.Redirect(h.frontendOrigin+"/my/integrations?gmail=connected", fiber.StatusFound)
 }
 
 // CalendarConnect starts the calendar consent. Its own state cookie: two flows in flight
@@ -260,12 +261,12 @@ func (h *inboxHandlers) CalendarConnect(c *fiber.Ctx) error {
 // that it now covers the calendar. Failures redirect with ?calendar_error and are logged
 // server-side first, exactly as the mail flow does — the marker tells the user nothing.
 //
-// It lands back on the tracking calendar rather than the inbox: that is the surface the
-// grant was given for.
+// It lands back on Integrations rather than the tracking calendar: that is the surface
+// the connect was started from, same as the mail flow.
 func (h *inboxHandlers) CalendarCallback(c *fiber.Ctx) error {
 	redirect := func(qs string, err error) error {
 		log.Printf("calendar connect: %s: %v", qs, err)
-		return c.Redirect(h.frontendOrigin+"/my/tracking/calendar?"+qs, fiber.StatusFound)
+		return c.Redirect(h.frontendOrigin+"/my/integrations?"+qs, fiber.StatusFound)
 	}
 	userID, ok := auth.UserID(c)
 	if !ok {
@@ -294,7 +295,7 @@ func (h *inboxHandlers) CalendarCallback(c *fiber.Ctx) error {
 			return redirect("calendar_error=exchange", err)
 		}
 	}
-	return c.Redirect(h.frontendOrigin+"/my/tracking/calendar?calendar=connected", fiber.StatusFound)
+	return c.Redirect(h.frontendOrigin+"/my/integrations?calendar=connected", fiber.StatusFound)
 }
 
 // GmailStatus reports whether the caller has connected Gmail.
