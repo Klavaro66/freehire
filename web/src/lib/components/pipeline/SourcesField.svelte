@@ -61,22 +61,13 @@
       }
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-      // A field of independent flight paths, not a funnel: each point launches on a
-      // straight chord between two random points on the outer shell — uncorrelated
-      // with the core, same as the original static field, except now in motion. Most
-      // chords pass nowhere near the middle and just cross the field and exit; the
-      // rare one that happens to come close gets bent in by gravity and caught.
+      // A field of independent flight paths, nothing more: each point launches on a
+      // straight chord between two random points on the outer shell and flies it in
+      // a dead straight line — uncorrelated with the core, same distribution as the
+      // original static field, just moving. Nothing is ever pulled toward the
+      // center; the core's only involvement is the scanning ray below.
       const group = new THREE.Group();
       const FIELD_R = 3.3;
-      const CAPTURE_R = 0.1;
-      // Gravity only exists inside this radius — a chord that never enters it is a
-      // straight line for its entire flight, guaranteed. Without this cutoff, the
-      // pull (however weak) acts on every point for its whole time in the field, and
-      // a long enough flight eventually spirals almost everything inward regardless
-      // of how far off-center it started — which was the actual bug, not the aim.
-      const INFLUENCE_R = 0.9;
-      const GRAVITY = 0.16;
-      const MAX_ACCEL = 0.01;
       const positions = new Float32Array(pointCount * 3);
       const velocities = new Float32Array(pointCount * 3);
       const colors = new Float32Array(pointCount * 3);
@@ -135,9 +126,9 @@
       group.add(points);
       scene.add(group);
 
-      // The one node that never falls: what all of it feeds into. A dim, larger halo
-      // behind the solid core reads as a glow without a postprocessing bloom pass, and
-      // both briefly flare on every catch (see `pulse` in the animation loop below).
+      // The one node nothing ever flies into: a dim, larger halo behind the solid
+      // core reads as a glow without a postprocessing bloom pass, and both briefly
+      // flare each time the scan ray fires (see `pulse` in the animation loop below).
       const coreColor = readCssColor('--foreground');
       const halo = new THREE.Mesh(
         new THREE.SphereGeometry(0.13, 24, 24),
@@ -150,13 +141,16 @@
       scene.add(halo);
       scene.add(core);
 
-      // The core reaching out: a single ray that swings from itself to one flying
-      // point at a time, fading in, tracking that point while it holds, then fading
-      // out before picking the next target. A child of `group` so it shares the
-      // points' own local coordinate frame — its start is always (0,0,0), the core's
-      // local position, and its end is read straight from that point's live position
-      // each frame, so it never drifts off a point that is itself still moving.
-      const rayPositions = new Float32Array(6);
+      // The core scanning: a curved ray that snaps out to one flying point at a time
+      // — quick to appear, brief hold, quick to fade — then swings to the next. A
+      // child of `group` so it shares the points' own local coordinate frame — it
+      // always starts at (0,0,0), the core's local position, and its far end tracks
+      // that point's live position each frame. The curve is a quadratic bezier
+      // through a control point offset perpendicular to the straight line, sampled
+      // into a fixed-length polyline every frame it's live — an actual arc, not a
+      // straight spoke.
+      const RAY_SEGMENTS = 14;
+      const rayPositions = new Float32Array((RAY_SEGMENTS + 1) * 3);
       const rayGeometry = new THREE.BufferGeometry();
       rayGeometry.setAttribute('position', new THREE.BufferAttribute(rayPositions, 3));
       const rayMaterial = new THREE.LineBasicMaterial({
@@ -170,68 +164,78 @@
         typeof THREE.BufferAttribute
       >;
       let rayTarget = 0;
+      let rayBow = 1;
       let rayPhase = 0;
-      const RAY_CYCLE = 0.0045; // phase units per animation tick (~60fps): ~3.7s/target
+      const RAY_CYCLE = 0.045; // phase units per animation tick (~60fps): ~0.4s/target — a scan, not a hold
       const RAY_PEAK = 0.95;
 
-      // Fades the ray in, holds it at full opacity on rayTarget's live position for
-      // the middle of the cycle (not just a fleeting sine peak — long enough to
-      // actually register), fades it out, then swings to a newly-picked target.
-      const stepRay = (dt: number) => {
+      const updateRayCurve = () => {
+        const ex = at(positions, rayTarget * 3);
+        const ey = at(positions, rayTarget * 3 + 1);
+        const ez = at(positions, rayTarget * 3 + 2);
+        const len = Math.hypot(ex, ey, ez) || 1;
+        const dirx = ex / len;
+        const diry = ey / len;
+        const dirz = ez / len;
+        // A reference axis unlikely to be parallel to the line, so the cross product
+        // below never degenerates to zero.
+        const upx = Math.abs(diry) > 0.9 ? 1 : 0;
+        const upy = Math.abs(diry) > 0.9 ? 0 : 1;
+        let cpx = diry * 0 - dirz * upy;
+        let cpy = dirz * upx - dirx * 0;
+        let cpz = dirx * upy - diry * upx;
+        const plen = Math.hypot(cpx, cpy, cpz) || 1;
+        cpx /= plen;
+        cpy /= plen;
+        cpz /= plen;
+        const bow = len * 0.35 * rayBow;
+        const ctrlX = ex / 2 + cpx * bow;
+        const ctrlY = ey / 2 + cpy * bow;
+        const ctrlZ = ez / 2 + cpz * bow;
+        for (let s = 0; s <= RAY_SEGMENTS; s++) {
+          const t = s / RAY_SEGMENTS;
+          const it = 1 - t;
+          const w1 = 2 * it * t;
+          const w2 = t * t;
+          rayPositions[s * 3] = w1 * ctrlX + w2 * ex;
+          rayPositions[s * 3 + 1] = w1 * ctrlY + w2 * ey;
+          rayPositions[s * 3 + 2] = w1 * ctrlZ + w2 * ez;
+        }
+        rayPositionAttr.needsUpdate = true;
+      };
+
+      // Fades the ray in fast, holds it briefly at full opacity on rayTarget's live
+      // position, fades it out fast, then snaps to a newly-picked target — a scan
+      // beat, not a lingering beam. Returns whether this tick fired a new target, so
+      // the core can flare in step with it.
+      const stepRay = (dt: number): boolean => {
         rayPhase += RAY_CYCLE * dt;
+        let fired = false;
         if (rayPhase >= 1) {
           rayPhase = 0;
           let next = Math.floor(Math.random() * pointCount);
           if (pointCount > 1 && next === rayTarget) next = (next + 1) % pointCount;
           rayTarget = next;
+          rayBow = Math.random() < 0.5 ? -1 : 1;
+          fired = true;
         }
         const p = Math.min(1, rayPhase);
-        const envelope = p < 0.2 ? p / 0.2 : p > 0.75 ? (1 - p) / 0.25 : 1;
+        const envelope = p < 0.25 ? p / 0.25 : p > 0.7 ? (1 - p) / 0.3 : 1;
         rayMaterial.opacity = envelope * RAY_PEAK;
-        rayPositions[3] = at(positions, rayTarget * 3);
-        rayPositions[4] = at(positions, rayTarget * 3 + 1);
-        rayPositions[5] = at(positions, rayTarget * 3 + 2);
-        rayPositionAttr.needsUpdate = true;
+        updateRayCurve();
+        return fired;
       };
 
-      // Advances one point by one tick: gravity bends its velocity toward the core,
-      // then it moves. Returns whether this tick caught it (came within CAPTURE_R,
-      // in which case it's relaunched from the edge) or lost it (drifted past
-      // FIELD_R outbound with too wide a miss to ever come back — also relaunched,
-      // but that is NOT a catch, so the core's flare only fires on a real capture).
-      const advance = (i: number, dt: number): 'caught' | 'lost' | null => {
-        const px = at(positions, i * 3);
-        const py = at(positions, i * 3 + 1);
-        const pz = at(positions, i * 3 + 2);
-        const distSq = px * px + py * py + pz * pz;
-        const dist = Math.sqrt(distSq);
-
-        if (dist < CAPTURE_R) {
-          spawn(i);
-          return 'caught';
-        }
-
-        let vx = at(velocities, i * 3);
-        let vy = at(velocities, i * 3 + 1);
-        let vz = at(velocities, i * 3 + 2);
-        if (dist < INFLUENCE_R) {
-          const accel = Math.min(MAX_ACCEL, GRAVITY / Math.max(distSq, 0.05)) * dt;
-          vx -= (px / dist) * accel;
-          vy -= (py / dist) * accel;
-          vz -= (pz / dist) * accel;
-          velocities[i * 3] = vx;
-          velocities[i * 3 + 1] = vy;
-          velocities[i * 3 + 2] = vz;
-        }
-        positions[i * 3] = px + vx * dt;
-        positions[i * 3 + 1] = py + vy * dt;
-        positions[i * 3 + 2] = pz + vz * dt;
-
-        if (dist > FIELD_R * 1.15) {
-          spawn(i);
-          return 'lost';
-        }
-        return null;
+      // Advances one point by one tick — a dead straight line, nothing bends it.
+      // Once it drifts past FIELD_R outbound it's relaunched on a fresh chord.
+      const advance = (i: number, dt: number) => {
+        const px = at(positions, i * 3) + at(velocities, i * 3) * dt;
+        const py = at(positions, i * 3 + 1) + at(velocities, i * 3 + 1) * dt;
+        const pz = at(positions, i * 3 + 2) + at(velocities, i * 3 + 2) * dt;
+        positions[i * 3] = px;
+        positions[i * 3 + 1] = py;
+        positions[i * 3 + 2] = pz;
+        if (Math.hypot(px, py, pz) > FIELD_R * 1.15) spawn(i);
       };
 
       // A fresh spawn() puts every point on the outer shell, which would render as a
@@ -247,12 +251,11 @@
       >;
       const colorAttr = geometry.getAttribute('color') as InstanceType<typeof THREE.BufferAttribute>;
       const step = (dt: number) => {
-        let caught = 0;
         for (let i = 0; i < pointCount; i++) {
-          if (advance(i, dt) === 'caught') caught++;
+          advance(i, dt);
           const dist = Math.hypot(at(positions, i * 3), at(positions, i * 3 + 1), at(positions, i * 3 + 2));
-          // Brighter as it nears the core — a point reads as flying toward the light,
-          // not just sliding along a static gradient.
+          // A depth cue only — brighter the closer it happens to pass to the core on
+          // its own straight line, nothing pulls it there.
           const proximity = 1 - Math.min(1, dist / FIELD_R);
           const bright = 0.55 + proximity * 0.85;
           colors[i * 3] = brand.r * bright;
@@ -261,7 +264,6 @@
         }
         positionAttr.needsUpdate = true;
         colorAttr.needsUpdate = true;
-        return caught;
       };
       step(0);
 
@@ -294,13 +296,13 @@
         let last = performance.now();
         const animate = (now: number) => {
           // Clamped so a backgrounded tab regaining focus doesn't fast-forward the
-          // fall by several seconds in one jump.
+          // flight by several seconds in one jump.
           const dt = Math.min(3, (now - last) / (1000 / 60));
           last = now;
 
-          const caught = step(dt);
-          stepRay(dt);
-          if (caught > 0) pulse = 1;
+          step(dt);
+          const fired = stepRay(dt);
+          if (fired) pulse = 1;
           pulse *= 0.9;
           const flare = 1 + pulse * 0.5;
           core.scale.setScalar(flare);
