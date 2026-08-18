@@ -80,6 +80,10 @@
       // (i*3(+0..2) never exceeds pointCount*3), so this is purely a type escape
       // hatch, not a real fallback.
       const at = (arr: Float32Array, i: number) => arr[i] ?? 0;
+      // BufferGeometry.getAttribute() is typed to return possibly-undefined too, for
+      // an attribute name that was in fact just set two lines above every call site.
+      const attrOf = (g: InstanceType<typeof THREE.BufferGeometry>, name: string) =>
+        g.getAttribute(name) as InstanceType<typeof THREE.BufferAttribute>;
 
       // Uniform-random point on a unit sphere (rejection-free: this parametrization
       // does not clump at the poles the way naive lat/long sampling would).
@@ -129,17 +133,15 @@
       scene.add(group);
 
       // The one node nothing ever flies into: a dim, larger halo behind the solid
-      // core reads as a glow without a postprocessing bloom pass, and both briefly
-      // flare each time the scan ray fires (see `pulse` in the animation loop below).
+      // core reads as a glow without a postprocessing bloom pass, and both breathe
+      // gently on their own slow cycle (see the animation loop below). Named
+      // materials, not `.material` casts at the point of use — Mesh's own typing
+      // widens that to `Material | Material[]`.
       const coreColor = readCssColor('--foreground');
-      const halo = new THREE.Mesh(
-        new THREE.SphereGeometry(0.13, 24, 24),
-        new THREE.MeshBasicMaterial({ color: coreColor, transparent: true, opacity: 0.12 })
-      );
-      const core = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06, 24, 24),
-        new THREE.MeshBasicMaterial({ color: coreColor })
-      );
+      const haloMaterial = new THREE.MeshBasicMaterial({ color: coreColor, transparent: true, opacity: 0.12 });
+      const coreMaterial = new THREE.MeshBasicMaterial({ color: coreColor });
+      const halo = new THREE.Mesh(new THREE.SphereGeometry(0.13, 24, 24), haloMaterial);
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.06, 24, 24), coreMaterial);
       scene.add(halo);
       scene.add(core);
 
@@ -176,7 +178,7 @@
         return {
           geometry: rayGeometry,
           positions: rayPositions,
-          positionAttr: rayGeometry.getAttribute('position') as InstanceType<typeof THREE.BufferAttribute>,
+          positionAttr: attrOf(rayGeometry, 'position'),
           material: rayMaterial,
           target: Math.floor(Math.random() * pointCount),
           bow: Math.random() < 0.5 ? -1 : 1,
@@ -196,11 +198,12 @@
         const diry = ey / len;
         const dirz = ez / len;
         // A reference axis unlikely to be parallel to the line, so the cross product
-        // below never degenerates to zero.
+        // below never degenerates to zero. Its z-component is always 0, so the cross
+        // product's own z-dropping terms are omitted rather than written out as `* 0`.
         const upx = Math.abs(diry) > 0.9 ? 1 : 0;
         const upy = Math.abs(diry) > 0.9 ? 0 : 1;
-        let cpx = diry * 0 - dirz * upy;
-        let cpy = dirz * upx - dirx * 0;
+        let cpx = -dirz * upy;
+        let cpy = dirz * upx;
         let cpz = dirx * upy - diry * upx;
         const plen = Math.hypot(cpx, cpy, cpz) || 1;
         cpx /= plen;
@@ -225,10 +228,8 @@
 
       // Fades each ray in fast, holds it briefly at full opacity on its target's
       // live position, fades it out fast, then snaps to a newly-picked target — a
-      // scan beat, not a lingering beam. Returns whether ANY ray fired a new target
-      // this tick, so the core can flare in step with the scan.
-      const stepRays = (dt: number): boolean => {
-        let fired = false;
+      // scan beat, not a lingering beam.
+      const stepRays = (dt: number) => {
         for (const ray of rays) {
           ray.phase += RAY_CYCLE * dt;
           if (ray.phase >= 1) {
@@ -237,14 +238,12 @@
             if (pointCount > 1 && next === ray.target) next = (next + 1) % pointCount;
             ray.target = next;
             ray.bow = Math.random() < 0.5 ? -1 : 1;
-            fired = true;
           }
           const p = Math.min(1, ray.phase);
           const envelope = p < 0.25 ? p / 0.25 : p > 0.7 ? (1 - p) / 0.3 : 1;
           ray.material.opacity = envelope * RAY_PEAK;
           updateRayCurve(ray);
         }
-        return fired;
       };
 
       // Advances one point by one tick — a dead straight line, nothing bends it.
@@ -267,10 +266,8 @@
         for (let k = 0; k < warmup; k++) advance(i, 1);
       }
 
-      const positionAttr = geometry.getAttribute('position') as InstanceType<
-        typeof THREE.BufferAttribute
-      >;
-      const colorAttr = geometry.getAttribute('color') as InstanceType<typeof THREE.BufferAttribute>;
+      const positionAttr = attrOf(geometry, 'position');
+      const colorAttr = attrOf(geometry, 'color');
       const step = (dt: number) => {
         for (let i = 0; i < pointCount; i++) {
           advance(i, dt);
@@ -331,8 +328,7 @@
           const breathe = 1 + Math.sin(now / 1600) * 0.05;
           core.scale.setScalar(breathe);
           halo.scale.setScalar(breathe);
-          (halo.material as InstanceType<typeof THREE.MeshBasicMaterial>).opacity =
-            0.12 + Math.sin(now / 1600) * 0.04;
+          haloMaterial.opacity = 0.12 + Math.sin(now / 1600) * 0.04;
 
           group.rotation.y += 0.0006 * dt;
           renderer.render(scene, camera);
@@ -347,13 +343,13 @@
         geometry.dispose();
         material.dispose();
         core.geometry.dispose();
-        (core.material as InstanceType<typeof THREE.Material>).dispose();
+        coreMaterial.dispose();
         for (const ray of rays) {
           ray.geometry.dispose();
           ray.material.dispose();
         }
         halo.geometry.dispose();
-        (halo.material as InstanceType<typeof THREE.Material>).dispose();
+        haloMaterial.dispose();
         renderer.dispose();
       };
     })();
