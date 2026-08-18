@@ -31,6 +31,7 @@
     {
       title: 'Resources',
       links: [
+        { label: 'How it works', href: resolve('/how-it-works') },
         { label: 'Blog', href: resolve('/blog') },
         { label: 'Insights', href: resolve('/insights') },
         { label: 'Hiring signal', href: resolve('/insights/companies') },
