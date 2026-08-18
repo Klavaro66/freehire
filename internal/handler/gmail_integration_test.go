@@ -112,4 +112,18 @@ func TestGmailInboxEndToEnd(t *testing.T) {
 	if _, body := do("GET", "/api/v1/me/inbox"); func() bool { g, _ := body["data"].([]any); return len(g) != 0 }() {
 		t.Error("inbox not purged after disconnect")
 	}
+
+	// A calendar-only consent (UpsertCalendarGrant) writes the same gmail_connections row
+	// with an empty address — GmailStatus must not report that as Mail connected, or the
+	// SPA's Mail card shows "Connected" with no address behind it.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO gmail_connections (user_id, email, refresh_token_enc, status) VALUES ($1, '', 'enc', 'connected')`, uid); err != nil {
+		t.Fatalf("seed calendar-only connection: %v", err)
+	}
+	if _, body := do("GET", "/api/v1/me/gmail"); func() bool {
+		d, _ := body["data"].(map[string]any)
+		return d["connected"] == true
+	}() {
+		t.Error("calendar-only grant (empty email) reported as Mail connected")
+	}
 }
