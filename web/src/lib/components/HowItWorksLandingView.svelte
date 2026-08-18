@@ -1,8 +1,8 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { ArrowRight } from '@lucide/svelte';
   import { Button, SectionLabel } from '$lib/ui';
   import Disclosure from '$lib/components/ghost/Disclosure.svelte';
+  import SourcesField from '$lib/components/pipeline/SourcesField.svelte';
   import StageIllustration from '$lib/components/pipeline/StageIllustration.svelte';
   import { PIPELINE_STAGES } from '$lib/pipelineStages';
   import { PIPELINE_FAQ } from '$lib/pipelineFaq';
@@ -12,25 +12,30 @@
   // narrowing anything. All three are answered by walking one posting through the same
   // five stages the backend runs it through — see docs/architecture.md and the root
   // AGENTS.md, which this page's copy is written from.
+  let {
+    scale,
+  }: { scale: { sources: number | null; atsPlatforms: number | null; companies: number | null } } =
+    $props();
 </script>
 
-<article class="flex flex-col gap-16">
-  <header class="flex flex-col items-start gap-6">
+<article class="flex flex-col gap-14">
+  <header class="flex flex-col items-start gap-5">
     <SectionLabel text="how it works" />
     <h1 class="max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
       One posting, five steps, before you ever see it.
     </h1>
-    <p class="max-w-2xl text-base leading-relaxed text-muted-foreground">
-      Every job in the catalogue is crawled straight from where a company actually posted
-      it, tagged against a fixed dictionary, checked for duplicates against every other
-      board, and rebuilt into the index you search — automatically, continuously, with no
-      person touching an individual listing.
+    <p class="max-w-xl text-base leading-relaxed text-muted-foreground">
+      Crawled, tagged, checked for duplicates, and rebuilt into the index you search —
+      automatically, with no person touching an individual listing.
     </p>
     <div class="flex flex-wrap gap-3">
       <Button href={resolve('/jobs')} variant="primary" size="lg">Browse jobs</Button>
       <Button href={resolve('/open')} variant="ghost" size="lg">See the live catalogue</Button>
     </div>
   </header>
+
+  <!-- The opening thesis, made visual: not one board, a field of them. -->
+  <SourcesField sources={scale.sources} atsPlatforms={scale.atsPlatforms} />
 
   <!-- The signature: one example posting, followed through all five stages. Its title and
        facts stay the same specific example end to end (StageIllustration's five cards)
@@ -41,24 +46,24 @@
       Follow one posting below — the picture at each step is that same job, at that stage.
     </p>
 
-    <div class="flex flex-col items-stretch gap-2 lg:flex-row lg:items-stretch lg:gap-0">
-      {#each PIPELINE_STAGES as stage, i (stage.key)}
-        <div class="flex flex-1 flex-col gap-3 rounded-lg border border-border p-4">
-          <div class="flex items-baseline gap-2">
-            <span class="font-mono text-xs text-muted-foreground">{stage.n}</span>
-            <h3 class="text-sm font-semibold tracking-tight">{stage.title}</h3>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      {#each PIPELINE_STAGES as stage (stage.key)}
+        <div class="relative flex flex-col gap-3 overflow-hidden rounded-lg border border-border p-4">
+          <div
+            class="pointer-events-none absolute -right-2 -top-3 font-mono text-6xl font-bold text-border select-none"
+            aria-hidden="true"
+          >
+            {stage.n}
           </div>
-          <StageIllustration stage={stage.key} />
-          <p class="text-sm leading-relaxed text-muted-foreground">{stage.blurb}</p>
-          <Disclosure summary="More detail" srSuffix={stage.title}>
+          <h3 class="relative text-sm font-semibold tracking-tight">{stage.title}</h3>
+          <div class="relative rounded-md bg-secondary/40 p-3">
+            <StageIllustration stage={stage.key} />
+          </div>
+          <p class="relative text-sm font-medium leading-snug">{stage.blurb}</p>
+          <Disclosure summary="More detail" srSuffix={stage.title} class="relative">
             <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{stage.detail}</p>
           </Disclosure>
         </div>
-        {#if i < PIPELINE_STAGES.length - 1}
-          <div class="flex items-center justify-center py-1 lg:px-1 lg:py-0" aria-hidden="true">
-            <ArrowRight class="size-4 shrink-0 rotate-90 text-muted-foreground/40 lg:rotate-0" />
-          </div>
-        {/if}
       {/each}
     </div>
   </section>
@@ -81,8 +86,7 @@
   <section class="flex flex-col items-start gap-4 rounded-lg border border-border p-6">
     <h2 class="text-lg font-semibold tracking-tight">See it running on the real catalogue</h2>
     <p class="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-      The pipeline runs on every job you'll find here. The open startup page shows the
-      current figures — jobs, companies and sources — straight from the same API.
+      This pipeline runs on every job you'll find here.
     </p>
     <div class="flex flex-wrap gap-3">
       <Button href={resolve('/jobs')} variant="primary">Browse jobs</Button>

@@ -4,6 +4,9 @@
   import HowItWorksLandingView from '$lib/components/HowItWorksLandingView.svelte';
   import { breadcrumbJsonLd, faqPageJsonLd, jsonLdScript } from '$lib/seo';
   import { PIPELINE_FAQ } from '$lib/pipelineFaq';
+  import type { PageData } from './$types';
+
+  const { data }: { data: PageData } = $props();
 
   const origin = $derived(page.url.origin);
   const canonical = $derived(`${origin}/how-it-works`);
@@ -30,5 +33,5 @@
 </svelte:head>
 
 <div class="mx-auto w-full max-w-6xl px-4 py-6">
-  <HowItWorksLandingView />
+  <HowItWorksLandingView scale={data.scale} />
 </div>
