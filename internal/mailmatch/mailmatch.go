@@ -9,6 +9,8 @@ package mailmatch
 import (
 	"strings"
 	"unicode"
+
+	"github.com/strelov1/freehire/internal/normalize"
 )
 
 // atsPseudoNames are ATS platform brand names that surface where a company name
@@ -50,8 +52,29 @@ var nameSuffixes = []string{
 	" workday", " team",
 }
 
-// legalSuffixes are corporate-form suffixes to drop from a company name.
-var legalSuffixes = []string{" llc", " inc", " ltd", " gmbh", " corp", " co"}
+// stripLegalForm drops one trailing corporate form from an already-lowercased company name.
+//
+// The vocabulary is normalize's, not this package's. Mail matching exists to reach a company
+// the catalogue holds, and the catalogue keys companies by normalize.CompanySlug — so a form
+// this stripped and that did not (or the reverse) produced a name matching nothing, and a mail
+// that matches no company links to no application without saying so.
+// It repeats, and it splits on punctuation as well as space, for the two shapes senders
+// actually use: "Acme GmbH & Co. KG" needs three passes over an ampersand, and
+// "Sun Technologies,Inc." attaches the form with no space at all — 13,730 catalogue
+// companies are written that way. A name of one word is never stripped, so a sender called
+// "Limited" survives.
+func stripLegalForm(s string) string {
+	for {
+		trimmed := trimTrailingPunct(s)
+		i := strings.LastIndexFunc(trimmed, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '.' && r != '/'
+		})
+		if i <= 0 || !normalize.IsLegalForm(trimmed[i+1:]) {
+			return trimmed
+		}
+		s = trimmed[:i]
+	}
+}
 
 // subjectPrefixes are the templated subject openers that name the company next.
 var subjectPrefixes = []string{
@@ -81,7 +104,7 @@ func fromSenderName(fromName string) string {
 	// stripping suffixes, so a trailing period/comma can't hide the suffix.
 	s = trimTrailingPunct(s)
 	s = stripFirstSuffix(s, nameSuffixes)
-	s = stripFirstSuffix(s, legalSuffixes)
+	s = stripLegalForm(s)
 	return cleanCompany(s)
 }
 
