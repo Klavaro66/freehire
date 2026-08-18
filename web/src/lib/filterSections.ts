@@ -150,12 +150,12 @@ export const COMPANY_RAIL_GROUPS: CompanyRailGroup[] = [
 
 export const RAIL: RailEntry[] = [
   // One "Role" pane holds the whole "what role" concept: the role picker
-  // (natural/named/composite roles), the seniority pills, and the specialization
-  // chips — three controls, one tab. They overlap by design (role=senior is also
-  // reachable via the seniority pill); the picker is the natural-language entry,
-  // the pills/chips the browse-by-axis entry.
+  // (natural/named/composite roles), the seniority pills, the specialization
+  // chips, and the AI Specialization facet — four controls, one tab. They overlap
+  // by design (role=senior is also reachable via the seniority pill); the picker is
+  // the natural-language entry, the pills/chips/AI-specialization the browse-by-axis
+  // entry.
   { key: 'category', label: 'Role', section: 'ROLE', kind: 'category' },
-  { key: 'ai_archetype', label: 'AI Specialization', section: 'ROLE', kind: 'facet', facetParam: 'ai_archetype' },
   { key: 'location', label: 'Location', section: 'ROLE', kind: 'location' },
   { key: 'work', label: 'Work & employment', section: 'ROLE', kind: 'work' },
   { key: 'skills', label: 'Skills', section: 'ROLE', kind: 'facet', facetParam: 'skills' },
