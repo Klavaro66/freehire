@@ -3,10 +3,12 @@
   import { SectionLabel } from '$lib/ui';
 
   // The opening thesis of the page: before any of the five stages run, this is what
-  // stage one actually faces — not one board, a field of them. `sources` and
-  // `ats_platforms` come from the same live catalogue-scale snapshot /open reads (see
-  // +page.server.ts), so the number here is never invented and never drifts from what
-  // the rest of the site claims.
+  // stage one actually faces — not one board, a field of them. `sources` drives how
+  // many points fly (the field's actual density); `companies` is what the headline
+  // number says, since "how many employers" is the more legible scale claim than
+  // "how many crawler adapters". Both come from the same live catalogue-scale
+  // snapshot /open reads (see +page.server.ts), so neither is ever invented or
+  // drifts from what the rest of the site claims.
   //
   // Three.js is dynamically imported inside onMount — never in the initial bundle —
   // and the real numbers render as plain HTML underneath the canvas regardless of
@@ -14,11 +16,11 @@
   // enhancement layered on top; losing it loses nothing true about the page.
   let {
     sources,
-    atsPlatforms,
-  }: { sources: number | null; atsPlatforms: number | null } = $props();
+    companies,
+  }: { sources: number | null; companies: number | null } = $props();
 
-  const nf = new Intl.NumberFormat('en');
-  const sourcesLabel = $derived(sources != null ? nf.format(sources) : '200+');
+  const compactNf = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+  const companiesLabel = $derived(companies != null ? compactNf.format(companies) : null);
 
   let container: HTMLDivElement;
   let canvas: HTMLCanvasElement;
@@ -311,7 +313,6 @@
       if (reduceMotion) {
         renderer.render(scene, camera);
       } else {
-        let pulse = 0;
         let last = performance.now();
         const animate = (now: number) => {
           // Clamped so a backgrounded tab regaining focus doesn't fast-forward the
@@ -320,13 +321,18 @@
           last = now;
 
           step(dt);
-          const fired = stepRays(dt);
-          if (fired) pulse = 1;
-          pulse *= 0.9;
-          const flare = 1 + pulse * 0.5;
-          core.scale.setScalar(flare);
-          halo.scale.setScalar(flare);
-          (halo.material as InstanceType<typeof THREE.MeshBasicMaterial>).opacity = 0.12 + pulse * 0.35;
+          stepRays(dt);
+
+          // A slow, smooth breath — deliberately NOT tied to the rays firing. Five
+          // rays cycling every ~0.4s each fire roughly every 80ms; snapping the
+          // core's scale on every one of those (the previous version) sawtoothed
+          // visibly at that rate instead of reading as a pulse. This is a single
+          // gentle sine, low amplitude, its own slow period.
+          const breathe = 1 + Math.sin(now / 1600) * 0.05;
+          core.scale.setScalar(breathe);
+          halo.scale.setScalar(breathe);
+          (halo.material as InstanceType<typeof THREE.MeshBasicMaterial>).opacity =
+            0.12 + Math.sin(now / 1600) * 0.04;
 
           group.rotation.y += 0.0006 * dt;
           renderer.render(scene, camera);
@@ -374,12 +380,12 @@
   <div class="relative z-10 flex h-full flex-col justify-start gap-2 p-6 sm:p-8">
     <SectionLabel text="where it starts" />
     <p class="font-mono text-4xl font-bold tracking-tight sm:text-5xl">
-      {sourcesLabel}<span class="text-muted-foreground"> sources</span>
+      {companiesLabel ?? 'thousands of'}
+      <span class="text-muted-foreground">companies</span>
     </p>
     <p class="max-w-sm text-sm leading-relaxed text-muted-foreground">
-      Career pages, ATS platforms and boards
-      {atsPlatforms != null ? `— ${nf.format(atsPlatforms)} platforms among them` : ''} — each crawled
-      on its own schedule. Every one is where stage one starts.
+      Every open role traces back to one of them — crawled straight from where they
+      actually posted it, not a copy of a copy.
     </p>
   </div>
 </div>

@@ -13,7 +13,6 @@ export const load: PageServerLoad = async ({ fetch, setHeaders }) => {
   return {
     scale: {
       sources: catalog?.sources ?? null,
-      atsPlatforms: catalog?.ats_platforms ?? null,
       // A degraded snapshot (`exact: false`) has no real company count — it reads
       // zero, and zero is not "we measured zero companies", so drop it like /open does.
       companies: catalog?.exact ? (catalog?.companies ?? null) : null,

@@ -12,17 +12,14 @@
   // narrowing anything. All three are answered by walking one posting through the same
   // five stages the backend runs it through — see docs/architecture.md and the root
   // AGENTS.md, which this page's copy is written from.
-  let {
-    scale,
-  }: { scale: { sources: number | null; atsPlatforms: number | null; companies: number | null } } =
-    $props();
+  let { scale }: { scale: { sources: number | null; companies: number | null } } = $props();
 </script>
 
 <article class="flex flex-col gap-14">
   <header class="flex flex-col items-start gap-5">
     <SectionLabel text="how it works" />
     <h1 class="max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
-      One posting, five steps, before you ever see it.
+      Five steps before a posting reaches you.
     </h1>
     <p class="max-w-xl text-base leading-relaxed text-muted-foreground">
       Crawled, tagged, checked for duplicates, and rebuilt into the index you search —
@@ -35,7 +32,7 @@
   </header>
 
   <!-- The opening thesis, made visual: not one board, a field of them. -->
-  <SourcesField sources={scale.sources} atsPlatforms={scale.atsPlatforms} />
+  <SourcesField sources={scale.sources} companies={scale.companies} />
 
   <!-- The signature: one example posting, followed through all five stages. Its title and
        facts stay the same specific example end to end (StageIllustration's five cards)
