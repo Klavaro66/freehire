@@ -433,6 +433,24 @@ const COLLECTION: FacetOption[] = [
   })),
 ];
 
+// The job filter modal splits COLLECTION across two panes instead of one grouped
+// list: the curated picks stay on Industry & collection, the credentials move to
+// their own block on the Relocation pane (they're evidence of visa/sponsorship
+// eligibility, which is what that pane is about). Both stay ChipFacet `options`
+// overrides on the same `collections` param rather than becoming separate FACETS
+// entries — a second entry sharing the param would double its value in the query
+// string. The company modal has no Relocation pane to split into, so it keeps using
+// COLLECTION (and its "Employer credentials" sub-heading) unchanged.
+export const JOB_COLLECTION: FacetOption[] = COLLECTION.filter((o) => o.group !== 'Employer credentials');
+
+// Stripped of `group`: this renders as its own ChipFacet block with its own "Employer
+// credentials" header, so the in-list sub-heading PillGroup would otherwise add above
+// the first pill (COLLECTION's grouping cue for the combined company-modal list) would
+// just repeat that header.
+export const EMPLOYER_CREDENTIALS: FacetOption[] = COLLECTION.filter((o) => o.group === 'Employer credentials').map(
+  ({ group: _group, ...o }) => o,
+);
+
 // Company-size buckets — the vocab.CompanySizeValues vocabulary. Not exported as
 // a generated values array (it's a scalar enrichment field, not a search facet on
 // jobs), so the closed set is spelled out here like CURRENCY; the values are

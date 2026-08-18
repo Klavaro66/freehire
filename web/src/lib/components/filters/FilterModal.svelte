@@ -3,7 +3,7 @@
   import { resolve } from '$app/paths';
   import { Bell, Info, UserRound } from '@lucide/svelte';
   import { Tooltip } from '$lib/ui';
-  import { FACETS } from '$lib/facets';
+  import { EMPLOYER_CREDENTIALS, FACETS, JOB_COLLECTION } from '$lib/facets';
   import { isAuthenticated } from '$lib/auth.svelte';
   import { openAuthDialog } from '$lib/auth-dialog.svelte';
   import { profileStore } from '$lib/profile.svelte';
@@ -129,22 +129,33 @@
     ),
   ]);
 
+  const jobCollectionValues = JOB_COLLECTION.map((o) => o.value);
+  const employerCredentialValues = EMPLOYER_CREDENTIALS.map((o) => o.value);
+
   // Values selected for one facet — included plus excluded — so the rail count reflects
-  // any staged selection regardless of sign.
-  function selCount(f: JobFilters, param: string): number {
+  // any staged selection regardless of sign. `values`, when passed, scopes the count to
+  // just that subset — for a param split across two panes (see ChipFacet's `options`
+  // override), so a badge doesn't count values shown under a different tab.
+  function selCount(f: JobFilters, param: string, values?: string[]): number {
     const st = f.facets[param];
-    return st ? st.include.length + st.exclude.length : 0;
+    if (!st) return 0;
+    if (!values) return st.include.length + st.exclude.length;
+    const allowed = new Set(values);
+    return st.include.filter((v) => allowed.has(v)).length + st.exclude.filter((v) => allowed.has(v)).length;
   }
 
   function entryCount(e: RailEntry): number {
     const f = staged.value;
-    if (e.kind === 'category') return selCount(f, 'role') + selCount(f, 'category') + selCount(f, 'seniority');
+    if (e.kind === 'category')
+      return selCount(f, 'role') + selCount(f, 'category') + selCount(f, 'seniority') + selCount(f, 'ai_archetype');
     if (e.kind === 'location') return selCount(f, 'regions') + selCount(f, 'countries') + selCount(f, 'cities');
     if (e.kind === 'salary') return selCount(f, 'salary_currency') + (f.salaryMin != null ? 1 : 0);
     if (e.kind === 'work') return selCount(f, 'work_mode') + selCount(f, 'employment_type');
-    if (e.kind === 'industry') return selCount(f, 'domains') + selCount(f, 'company_type') + selCount(f, 'collections');
+    if (e.kind === 'industry')
+      return selCount(f, 'domains') + selCount(f, 'company_type') + selCount(f, 'collections', jobCollectionValues);
     if (e.kind === 'language') return selCount(f, 'english_level') + selCount(f, 'posting_language');
-    if (e.kind === 'relocation') return selCount(f, 'relocation') + (f.visa ? 1 : 0);
+    if (e.kind === 'relocation')
+      return selCount(f, 'relocation') + (f.visa ? 1 : 0) + selCount(f, 'collections', employerCredentialValues);
     if (e.kind === 'posted') return f.postedWithinDays != null ? 1 : 0;
     // The Minimum skill match threshold lives at the top of the Skills pane, so it
     // counts toward that tab's badge alongside the skills facet selections.
@@ -291,6 +302,12 @@
     {:else}
       <CategoryPane store={staged} {plain} counts={c} />
     {/if}
+    {#if !exclude.includes('ai_archetype')}
+      {@const aiArchetypeDef = facetDefFor('ai_archetype')}
+      {#if aiArchetypeDef}
+        <div class="mt-6"><FacetSection def={aiArchetypeDef} store={staged} counts={c} expand /></div>
+      {/if}
+    {/if}
   {:else if entry.kind === 'location'}
     <LocationPane store={staged} counts={c} />
   {:else if entry.kind === 'facet'}
@@ -338,12 +355,23 @@
   {:else if entry.kind === 'industry'}
     <ChipFacet store={staged} param="domains" label="Industry" counts={c} />
     <div class="mt-6"><ChipFacet store={staged} param="company_type" label="Company type" counts={c} /></div>
-    <div class="mt-6"><ChipFacet store={staged} param="collections" label="Collection" counts={c} /></div>
+    <div class="mt-6">
+      <ChipFacet store={staged} param="collections" label="Collection" counts={c} options={JOB_COLLECTION} />
+    </div>
   {:else if entry.kind === 'language'}
     {#if englishDef}<FacetSection def={englishDef} store={staged} counts={c} expand />{/if}
     <div class="mt-4">{#if postingDef}<FacetSection def={postingDef} store={staged} counts={c} expand />{/if}</div>
   {:else if entry.kind === 'relocation'}
     <ChipFacet store={staged} param="relocation" label="Relocation" counts={c} />
+    <div class="mt-6">
+      <ChipFacet
+        store={staged}
+        param="collections"
+        label="Employer credentials"
+        counts={c}
+        options={EMPLOYER_CREDENTIALS}
+      />
+    </div>
     <h3 class="mb-2 mt-6 text-sm font-semibold tracking-tight">Visa</h3>
     <label class="flex cursor-pointer items-center gap-2 text-sm">
       <input
