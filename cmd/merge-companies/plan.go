@@ -3,6 +3,8 @@ package main
 import (
 	"cmp"
 	"slices"
+	"strings"
+	"unicode"
 
 	"github.com/strelov1/freehire/internal/normalize"
 )
@@ -89,10 +91,10 @@ func planMerges(companies []company, frozen map[string]bool, minJobs int) []merg
 		})
 
 		winner := electCanonical(members, frozen)
-		m := merge{Canonical: winner.Slug, FoldedKey: key}
+		m := merge{Canonical: winner, FoldedKey: key}
 		for _, c := range members {
 			m.Jobs += c.JobCount
-			if c.Slug == winner.Slug {
+			if c.Slug == winner {
 				continue
 			}
 			m.Aliases = append(m.Aliases, alias{
@@ -115,38 +117,58 @@ func planMerges(companies []company, frozen map[string]bool, minJobs int) []merg
 // electCanonical picks the group's surviving slug. Members arrive sorted by open jobs
 // descending, so "the first that qualifies" is "the biggest that qualifies".
 //
-// Three rules, in order:
+//  1. An already-frozen canon wins outright, exactly as stored — even carrying a form. It has
+//     been redirecting and indexing, and moving it costs more than a tidier slug is worth.
+//  2. Otherwise the canon is the slug the RULE yields for the elected member's name, and the
+//     election prefers a member whose name is written in several words.
 //
-//  1. An already-frozen canon wins outright, even one carrying a corporate form. It has been
-//     redirecting and indexing; moving it costs more than a tidier slug is worth.
-//  2. Otherwise the biggest slug the rule can REPRODUCE — a fixed point of CompanySlug. Pure
-//     job count is not enough: the first prod dry run elected `danaher-corporation` over
-//     `danaher` (714 open jobs) because it happened to be larger, which would have made the
-//     catalogue's canonical url the one carrying the form and 301'd the better-known slug into
-//     it. It is also unstable, since every new posting derives the stripped slug and would need
-//     an alias row for the canon to reach itself.
-//  3. Failing that, the biggest. A group where nothing is a fixed point is odd but real, and
-//     merging it under an imperfect canon still beats leaving the employer split.
-func electCanonical(members []company, frozen map[string]bool) company {
+// Deriving rather than reusing a stored slug is what makes the canon a fixed point by
+// construction: CompanySlug of a derived slug is itself, so there is no separate rule keeping
+// forms off the canonical url. It also stops a row that carries a form from being ignored for
+// carrying one — "Public Storage" exists in the catalogue only as `public-storage-inc`, and
+// skipping it left the squashed `publicstorage` to win by default, 2,811 times across the
+// catalogue.
+//
+// The word-shape preference only speaks when it discriminates. Where no name is multi-word
+// (Dominos beside Domino's) or every name is (Alfa Bank beside Al Fa Bank), it says nothing and
+// the job count decides.
+func electCanonical(members []company, frozen map[string]bool) string {
 	for _, c := range members {
 		if frozen[c.Slug] {
-			return c
+			return c.Slug
 		}
 	}
 	for _, c := range members {
-		if normalize.CompanySlug(c.Slug) == c.Slug {
-			return c
+		if nameWords(c.Name) > 1 {
+			return normalize.CompanySlug(c.Name)
 		}
 	}
-	return members[0]
+	return normalize.CompanySlug(members[0].Name)
+}
+
+// nameWords counts the words of a name that are the name proper, trailing legal forms
+// dropped: "Ace Hardware Corporation" is a two-word employer, not a three-word one.
+//
+// A HYPHEN separates words as surely as a space — Kimberly-Clark and T-Mobile write themselves
+// that way — but an apostrophe does not: Brink's and Domino's are one word each. That is the
+// distinction a slug cannot preserve, since Slug renders every one of them as a hyphen, and it
+// is the whole reason this reads the name.
+func nameWords(name string) int {
+	fields := strings.FieldsFunc(name, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '-'
+	})
+	for len(fields) > 1 && normalize.IsLegalForm(fields[len(fields)-1]) {
+		fields = fields[:len(fields)-1]
+	}
+	return len(fields)
 }
 
 // reasonFor classifies why a slug is retiring. The test is whether the current pure rule,
 // applied to the alias's OWN name, already reaches the canonical slug: if it does, this
 // duplicate exists only because the catalogue was keyed before that rule did, and nothing but
 // the redirect needs the registry.
-func reasonFor(c, winner company) string {
-	if normalize.CompanySlug(c.Name) == winner.Slug {
+func reasonFor(c company, winner string) string {
+	if normalize.CompanySlug(c.Name) == winner {
 		return reasonLegalForm
 	}
 	return reasonSpelling

@@ -94,6 +94,61 @@ func (q *Queries) BackfillCompanySlugFoldedChunk(ctx context.Context, arg Backfi
 	return result.RowsAffected(), nil
 }
 
+const backfillDuplicateMarkerOwnerChunk = `-- name: BackfillDuplicateMarkerOwnerChunk :execrows
+UPDATE jobs j
+SET duplicate_of_aggregator = CASE
+        WHEN j.source = ANY($1::text[])
+         AND NOT (c.source = ANY($1::text[]))
+        THEN j.duplicate_of
+    END,
+    duplicate_of_role = CASE
+        WHEN j.source = ANY($1::text[])
+         AND NOT (c.source = ANY($1::text[]))
+        THEN NULL
+        ELSE j.duplicate_of
+    END
+FROM jobs c
+WHERE c.id = j.duplicate_of
+  AND j.id >= $2 AND j.id < $3
+  AND j.duplicate_of IS NOT NULL
+  AND j.duplicate_of_aggregator IS NULL
+  AND j.duplicate_of_role IS NULL
+  AND j.duplicate_of_fuzzy IS NULL
+`
+
+type BackfillDuplicateMarkerOwnerChunkParams struct {
+	Aggregators []string `json:"aggregators"`
+	FromID      int64    `json:"from_id"`
+	ToID        int64    `json:"to_id"`
+}
+
+// Seed the owned marker columns (0114) from the single duplicate_of that predates them, for one
+// id range.
+//
+// Provenance cannot be recovered: a marked row records WHERE it points, never which pass decided
+// it. So the seed goes by shape — a marked row whose own source is an aggregator and whose canon's
+// is not is the aggregator pass's; everything else is seeded as the role pass's.
+//
+// Fuzzy markers are indistinguishable from role markers that way and land in the role column. That
+// is self-correcting and cheap to reason about: the first role recompute clears the ones that are
+// not role clusters, and the fuzzy pass re-sets them in its own column during the same run. One
+// extra cycle of the churn this change removes, once.
+//
+// Closed rows are seeded too, deliberately. The passes only consider open rows, so nothing would
+// ever seed a closed row's columns — and then the first statement to touch any marker column on it
+// would fire the derivation and silently clear a duplicate_of that prune still walks.
+//
+// The "no owned column set yet" predicate is what makes re-runs free, and it is also the reconcile
+// sweep: a row written between this chunk passing its range and the trigger existing still matches,
+// so running the pass again after the trigger lands finishes the job. No separate mode needed.
+func (q *Queries) BackfillDuplicateMarkerOwnerChunk(ctx context.Context, arg BackfillDuplicateMarkerOwnerChunkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillDuplicateMarkerOwnerChunk, arg.Aggregators, arg.FromID, arg.ToID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const canonicalJobForRole = `-- name: CanonicalJobForRole :one
 SELECT id, public_slug
 FROM jobs
@@ -141,14 +196,28 @@ func (q *Queries) CanonicalJobForRole(ctx context.Context, arg CanonicalJobForRo
 	return i, err
 }
 
-const closeJobByID = `-- name: CloseJobByID :execrows
-UPDATE jobs
-SET closed_at     = now(),
-    closed_reason = 'moderated',
-    updated_at    = now()
-WHERE id = $1 AND closed_at IS NULL
+const closeJobByID = `-- name: CloseJobByID :one
+WITH closed AS (
+    UPDATE jobs
+    SET closed_at     = now(),
+        closed_reason = 'moderated',
+        updated_at    = now()
+    WHERE jobs.id = $1 AND jobs.closed_at IS NULL
+    RETURNING jobs.id
+), queued AS (
+    INSERT INTO search_delete_outbox (job_id)
+    SELECT id FROM closed
+    ON CONFLICT (job_id) DO NOTHING
+)
+SELECT count(*) FROM closed
 `
 
+// The removal enqueue rides this statement (see CloseUnseenJobs for why): feeding
+// search_delete_outbox from the UPDATE's own RETURNING keeps it atomic with the close and
+// exact — only rows that actually closed are queued, and a rolled-back close queues nothing.
+//
+// :one rather than :execrows because the CTE moves the row count out of the command tag.
+// count(*) over the closed rows is the same int64 the caller already had.
 // Soft-close one job now (see job-lifecycle): a moderator resolving a report with
 // close_job=true. The third writer of closed_at, alongside the ingest sweep and the
 // liveness probe. WHERE closed_at IS NULL keeps it idempotent — a second close on an
@@ -156,21 +225,28 @@ WHERE id = $1 AND closed_at IS NULL
 // status guard. A later ingest upsert may legitimately reopen a board job (reopen-on-
 // reappear); that is the lifecycle's existing behavior, not a conflict.
 func (q *Queries) CloseJobByID(ctx context.Context, id int64) (int64, error) {
-	result, err := q.db.Exec(ctx, closeJobByID, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, closeJobByID, id)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
-const closeJobBySourceExternalID = `-- name: CloseJobBySourceExternalID :execrows
-UPDATE jobs
-SET closed_at     = now(),
-    closed_reason = 'feed_removed',
-    updated_at    = now()
-WHERE closed_at IS NULL
-  AND source = $1
-  AND external_id = $2
+const closeJobBySourceExternalID = `-- name: CloseJobBySourceExternalID :one
+WITH closed AS (
+    UPDATE jobs
+    SET closed_at     = now(),
+        closed_reason = 'feed_removed',
+        updated_at    = now()
+    WHERE closed_at IS NULL
+      AND source = $1
+      AND external_id = $2
+    RETURNING id
+), queued AS (
+    INSERT INTO search_delete_outbox (job_id)
+    SELECT id FROM closed
+    ON CONFLICT (job_id) DO NOTHING
+)
+SELECT count(*) FROM closed
 `
 
 type CloseJobBySourceExternalIDParams struct {
@@ -178,6 +254,12 @@ type CloseJobBySourceExternalIDParams struct {
 	ExternalID string `json:"external_id"`
 }
 
+// The removal enqueue rides this statement (see CloseUnseenJobs for why): feeding
+// search_delete_outbox from the UPDATE's own RETURNING keeps it atomic with the close and
+// exact — only rows that actually closed are queued, and a rolled-back close queues nothing.
+//
+// :one rather than :execrows because the CTE moves the row count out of the command tag.
+// count(*) over the closed rows is the same int64 the caller already had.
 // Stream-driven close (see job-lifecycle): a self-closing feed source (e.g. jobtech)
 // learns of a removed posting from its incremental stream and closes it by identity,
 // rather than relying on the post-run unseen sweep (which it opts out of, since an
@@ -185,11 +267,10 @@ type CloseJobBySourceExternalIDParams struct {
 // for the still-open ones). WHERE closed_at IS NULL keeps it idempotent; a later
 // upsert of the same (source, external_id) reopens it if the posting reappears.
 func (q *Queries) CloseJobBySourceExternalID(ctx context.Context, arg CloseJobBySourceExternalIDParams) (int64, error) {
-	result, err := q.db.Exec(ctx, closeJobBySourceExternalID, arg.Source, arg.ExternalID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, closeJobBySourceExternalID, arg.Source, arg.ExternalID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const closeStaleUnsignalledJobs = `-- name: CloseStaleUnsignalledJobs :execrows
@@ -234,34 +315,55 @@ func (q *Queries) CloseStaleUnsignalledJobs(ctx context.Context, arg CloseStaleU
 	return result.RowsAffected(), nil
 }
 
-const closeUnseenJobByID = `-- name: CloseUnseenJobByID :execrows
-UPDATE jobs
-SET closed_at     = now(),
-    closed_reason = 'unseen',
-    updated_at    = now()
-WHERE id = $1 AND closed_at IS NULL
+const closeUnseenJobByID = `-- name: CloseUnseenJobByID :one
+WITH closed AS (
+    UPDATE jobs
+    SET closed_at     = now(),
+        closed_reason = 'unseen',
+        updated_at    = now()
+    WHERE jobs.id = $1 AND jobs.closed_at IS NULL
+    RETURNING jobs.id
+), queued AS (
+    INSERT INTO search_delete_outbox (job_id)
+    SELECT id FROM closed
+    ON CONFLICT (job_id) DO NOTHING
+)
+SELECT count(*) FROM closed
 `
 
+// The removal enqueue rides this statement (see CloseUnseenJobs for why): feeding
+// search_delete_outbox from the UPDATE's own RETURNING keeps it atomic with the close and
+// exact — only rows that actually closed are queued, and a rolled-back close queues nothing.
+//
+// :one rather than :execrows because the CTE moves the row count out of the command tag.
+// count(*) over the closed rows is the same int64 the caller already had.
 // Row-by-row sweep fallback (see UnseenJobIDs): closes with the same 'unseen' reason
 // as the bulk sweep, one id at a time, so a single row's error (e.g. corrupted index
 // entry) can be caught and skipped by the caller without losing the rest of the batch.
 func (q *Queries) CloseUnseenJobByID(ctx context.Context, id int64) (int64, error) {
-	result, err := q.db.Exec(ctx, closeUnseenJobByID, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, closeUnseenJobByID, id)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
-const closeUnseenJobs = `-- name: CloseUnseenJobs :execrows
-UPDATE jobs
-SET closed_at     = now(),
-    closed_reason = 'unseen',
-    updated_at    = now()
-WHERE closed_at IS NULL
-  AND source = $1
-  AND last_seen_at < $2
-  AND company_slug = ANY($3::text[])
+const closeUnseenJobs = `-- name: CloseUnseenJobs :one
+WITH closed AS (
+    UPDATE jobs
+    SET closed_at     = now(),
+        closed_reason = 'unseen',
+        updated_at    = now()
+    WHERE closed_at IS NULL
+      AND source = $1
+      AND last_seen_at < $2
+      AND company_slug = ANY($3::text[])
+    RETURNING id
+), queued AS (
+    INSERT INTO search_delete_outbox (job_id)
+    SELECT id FROM closed
+    ON CONFLICT (job_id) DO NOTHING
+)
+SELECT count(*) FROM closed
 `
 
 type CloseUnseenJobsParams struct {
@@ -278,22 +380,39 @@ type CloseUnseenJobsParams struct {
 // that times out and only completes some boards) must not close the companies it never
 // touched. The caller passes the crawled slugs and owns the grace window (cutoff =
 // now() - window), so neither a failed nor a partial crawl mass-closes a catalogue.
+//
+// The removal enqueue rides this statement rather than being a call per closed row.
+// A sweep closes a whole provider's stale postings in one round trip, so anything
+// per-row would undo that; feeding search_delete_outbox from the UPDATE's own RETURNING
+// keeps the enqueue atomic with the close (a rolled-back sweep queues nothing) and
+// exact (only rows that actually closed are queued).
+//
+// :one rather than :execrows because the CTE moves the row count out of the command tag.
+// count(*) over the closed rows is the same int64 the caller already had, so no call site
+// changes.
 func (q *Queries) CloseUnseenJobs(ctx context.Context, arg CloseUnseenJobsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, closeUnseenJobs, arg.Source, arg.Cutoff, arg.CompanySlugs)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, closeUnseenJobs, arg.Source, arg.Cutoff, arg.CompanySlugs)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
-const closeUnseenJobsBySource = `-- name: CloseUnseenJobsBySource :execrows
-UPDATE jobs
-SET closed_at     = now(),
-    closed_reason = 'unseen',
-    updated_at    = now()
-WHERE closed_at IS NULL
-  AND source = $1
-  AND last_seen_at < $2
+const closeUnseenJobsBySource = `-- name: CloseUnseenJobsBySource :one
+WITH closed AS (
+    UPDATE jobs
+    SET closed_at     = now(),
+        closed_reason = 'unseen',
+        updated_at    = now()
+    WHERE closed_at IS NULL
+      AND source = $1
+      AND last_seen_at < $2
+    RETURNING id
+), queued AS (
+    INSERT INTO search_delete_outbox (job_id)
+    SELECT id FROM closed
+    ON CONFLICT (job_id) DO NOTHING
+)
+SELECT count(*) FROM closed
 `
 
 type CloseUnseenJobsBySourceParams struct {
@@ -301,6 +420,12 @@ type CloseUnseenJobsBySourceParams struct {
 	Cutoff pgtype.Timestamptz `json:"cutoff"`
 }
 
+// The removal enqueue rides this statement (see CloseUnseenJobs for why): feeding
+// search_delete_outbox from the UPDATE's own RETURNING keeps it atomic with the close and
+// exact — only rows that actually closed are queued, and a rolled-back close queues nothing.
+//
+// :one rather than :execrows because the CTE moves the row count out of the command tag.
+// count(*) over the closed rows is the same int64 the caller already had.
 // Post-ingest sweep for a fullCatalog source (see job-lifecycle spec): close every open job of
 // ONE source not seen since the cutoff, WITHOUT the crawled-company scope. A fullCatalog adapter
 // (e.g. habr_career) lists its whole catalogue each run, so an unseen job is genuinely gone —
@@ -309,11 +434,10 @@ type CloseUnseenJobsBySourceParams struct {
 // of a fullCatalog provider (a truncated crawl, which such adapters surface as an error, would
 // otherwise mass-close everything it never reached); a partial run falls back to CloseUnseenJobs.
 func (q *Queries) CloseUnseenJobsBySource(ctx context.Context, arg CloseUnseenJobsBySourceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, closeUnseenJobsBySource, arg.Source, arg.Cutoff)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, closeUnseenJobsBySource, arg.Source, arg.Cutoff)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const companiesWithAggregatorPostings = `-- name: CompaniesWithAggregatorPostings :many
@@ -517,6 +641,34 @@ func (q *Queries) CountCatalogueScale(ctx context.Context) (CountCatalogueScaleR
 	row := q.db.QueryRow(ctx, countCatalogueScale)
 	var i CountCatalogueScaleRow
 	err := row.Scan(&i.OpenJobs, &i.Companies)
+	return i, err
+}
+
+const duplicateMarkerOwnerBackfillBounds = `-- name: DuplicateMarkerOwnerBackfillBounds :one
+SELECT COALESCE(min(id), 0)::bigint AS min_id,
+       COALESCE(max(id), 0)::bigint AS max_id,
+       count(*) FILTER (
+           WHERE duplicate_of IS NOT NULL
+             AND duplicate_of_aggregator IS NULL
+             AND duplicate_of_role IS NULL
+             AND duplicate_of_fuzzy IS NULL
+       )::bigint AS remaining
+FROM jobs
+`
+
+type DuplicateMarkerOwnerBackfillBoundsRow struct {
+	MinID     int64 `json:"min_id"`
+	MaxID     int64 `json:"max_id"`
+	Remaining int64 `json:"remaining"`
+}
+
+// The id range the owned-marker backfill walks, plus how many rows still need it. Exact count on
+// purpose, like the folded-slug bounds beside it: the pass is run by hand and rarely, and a wrong
+// "0 remaining" would end it early.
+func (q *Queries) DuplicateMarkerOwnerBackfillBounds(ctx context.Context) (DuplicateMarkerOwnerBackfillBoundsRow, error) {
+	row := q.db.QueryRow(ctx, duplicateMarkerOwnerBackfillBounds)
+	var i DuplicateMarkerOwnerBackfillBoundsRow
+	err := row.Scan(&i.MinID, &i.MaxID, &i.Remaining)
 	return i, err
 }
 
@@ -760,7 +912,7 @@ func (q *Queries) FuzzyDedupCandidateTitlesForCompany(ctx context.Context, compa
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 FROM jobs
 WHERE id = $1
 `
@@ -829,12 +981,15 @@ func (q *Queries) GetJob(ctx context.Context, id int64) (Job, error) {
 		&i.SalaryCurrencySource,
 		&i.SalaryPeriodSource,
 		&i.CompanySlugFolded,
+		&i.DuplicateOfAggregator,
+		&i.DuplicateOfRole,
+		&i.DuplicateOfFuzzy,
 	)
 	return i, err
 }
 
 const getJobBySlug = `-- name: GetJobBySlug :one
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 FROM jobs
 WHERE public_slug = $1
 `
@@ -903,12 +1058,15 @@ func (q *Queries) GetJobBySlug(ctx context.Context, publicSlug string) (Job, err
 		&i.SalaryCurrencySource,
 		&i.SalaryPeriodSource,
 		&i.CompanySlugFolded,
+		&i.DuplicateOfAggregator,
+		&i.DuplicateOfRole,
+		&i.DuplicateOfFuzzy,
 	)
 	return i, err
 }
 
 const getJobBySourceExternalID = `-- name: GetJobBySourceExternalID :one
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 FROM jobs
 WHERE source = $1 AND external_id = $2
 `
@@ -984,6 +1142,9 @@ func (q *Queries) GetJobBySourceExternalID(ctx context.Context, arg GetJobBySour
 		&i.SalaryCurrencySource,
 		&i.SalaryPeriodSource,
 		&i.CompanySlugFolded,
+		&i.DuplicateOfAggregator,
+		&i.DuplicateOfRole,
+		&i.DuplicateOfFuzzy,
 	)
 	return i, err
 }
@@ -1082,7 +1243,7 @@ INSERT INTO jobs (
     $24, $25,
     $26::bigint, true
 )
-RETURNING id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+RETURNING id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 `
 
 type InsertPrivateJobParams struct {
@@ -1223,8 +1384,35 @@ func (q *Queries) InsertPrivateJob(ctx context.Context, arg InsertPrivateJobPara
 		&i.SalaryCurrencySource,
 		&i.SalaryPeriodSource,
 		&i.CompanySlugFolded,
+		&i.DuplicateOfAggregator,
+		&i.DuplicateOfRole,
+		&i.DuplicateOfFuzzy,
 	)
 	return i, err
+}
+
+const latestOpenJobAddedAt = `-- name: LatestOpenJobAddedAt :one
+SELECT (
+    SELECT created_at
+    FROM jobs
+    WHERE closed_at IS NULL AND duplicate_of IS NULL AND NOT is_private
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+) AS last_job_added_at
+`
+
+// created_at of the most recently added open, public job — the "is the pipeline
+// still writing rows" signal for the public /status endpoint. Same predicate and
+// ordering as ListJobs above, so it is served by the same jobs_open_created_idx
+// (an index scan for one row, not the full scan CountCatalogueScale needs) and
+// safe on a live request path. Wrapped in a scalar subquery so this always
+// returns exactly one row — NULL for an empty catalogue — rather than the
+// no-rows error a bare LIMIT 1 SELECT would give sqlc's :one on an empty table.
+func (q *Queries) LatestOpenJobAddedAt(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, latestOpenJobAddedAt)
+	var last_job_added_at pgtype.Timestamptz
+	err := row.Scan(&last_job_added_at)
+	return last_job_added_at, err
 }
 
 const listJobIDsAfter = `-- name: ListJobIDsAfter :many
@@ -1302,7 +1490,7 @@ func (q *Queries) ListJobIDsUpdatedAfter(ctx context.Context, arg ListJobIDsUpda
 }
 
 const listJobs = `-- name: ListJobs :many
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 FROM jobs
 WHERE closed_at IS NULL AND duplicate_of IS NULL AND NOT is_private
 ORDER BY created_at DESC, id DESC
@@ -1394,6 +1582,9 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, erro
 			&i.SalaryCurrencySource,
 			&i.SalaryPeriodSource,
 			&i.CompanySlugFolded,
+			&i.DuplicateOfAggregator,
+			&i.DuplicateOfRole,
+			&i.DuplicateOfFuzzy,
 		); err != nil {
 			return nil, err
 		}
@@ -1406,7 +1597,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, erro
 }
 
 const listJobsByCompany = `-- name: ListJobsByCompany :many
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 FROM jobs
 WHERE company_slug = $1 AND closed_at IS NULL AND duplicate_of IS NULL
 ORDER BY created_at DESC, id DESC
@@ -1491,6 +1682,9 @@ func (q *Queries) ListJobsByCompany(ctx context.Context, arg ListJobsByCompanyPa
 			&i.SalaryCurrencySource,
 			&i.SalaryPeriodSource,
 			&i.CompanySlugFolded,
+			&i.DuplicateOfAggregator,
+			&i.DuplicateOfRole,
+			&i.DuplicateOfFuzzy,
 		); err != nil {
 			return nil, err
 		}
@@ -1503,7 +1697,7 @@ func (q *Queries) ListJobsByCompany(ctx context.Context, arg ListJobsByCompanyPa
 }
 
 const listJobsByIDAfter = `-- name: ListJobsByIDAfter :many
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 FROM jobs
 WHERE id > $1
 ORDER BY id
@@ -1588,6 +1782,9 @@ func (q *Queries) ListJobsByIDAfter(ctx context.Context, arg ListJobsByIDAfterPa
 			&i.SalaryCurrencySource,
 			&i.SalaryPeriodSource,
 			&i.CompanySlugFolded,
+			&i.DuplicateOfAggregator,
+			&i.DuplicateOfRole,
+			&i.DuplicateOfFuzzy,
 		); err != nil {
 			return nil, err
 		}
@@ -1600,7 +1797,7 @@ func (q *Queries) ListJobsByIDAfter(ctx context.Context, arg ListJobsByIDAfterPa
 }
 
 const listJobsBySourceAfter = `-- name: ListJobsBySourceAfter :many
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 FROM jobs
 WHERE source = $1 AND id > $2
 ORDER BY id
@@ -1687,6 +1884,9 @@ func (q *Queries) ListJobsBySourceAfter(ctx context.Context, arg ListJobsBySourc
 			&i.SalaryCurrencySource,
 			&i.SalaryPeriodSource,
 			&i.CompanySlugFolded,
+			&i.DuplicateOfAggregator,
+			&i.DuplicateOfRole,
+			&i.DuplicateOfFuzzy,
 		); err != nil {
 			return nil, err
 		}
@@ -1699,7 +1899,7 @@ func (q *Queries) ListJobsBySourceAfter(ctx context.Context, arg ListJobsBySourc
 }
 
 const listJobsUpdatedAfter = `-- name: ListJobsUpdatedAfter :many
-SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 FROM jobs
 WHERE id > $1 AND updated_at >= $2
 ORDER BY id
@@ -1789,6 +1989,9 @@ func (q *Queries) ListJobsUpdatedAfter(ctx context.Context, arg ListJobsUpdatedA
 			&i.SalaryCurrencySource,
 			&i.SalaryPeriodSource,
 			&i.CompanySlugFolded,
+			&i.DuplicateOfAggregator,
+			&i.DuplicateOfRole,
+			&i.DuplicateOfFuzzy,
 		); err != nil {
 			return nil, err
 		}
@@ -1866,8 +2069,8 @@ func (q *Queries) ListRoleClusterCopies(ctx context.Context, arg ListRoleCluster
 
 const markFuzzyDuplicatesForCompany = `-- name: MarkFuzzyDuplicatesForCompany :execrows
 UPDATE jobs j
-SET duplicate_of = m.canon_id,
-    updated_at   = now()
+SET duplicate_of_fuzzy = m.canon_id,
+    updated_at         = now()
 FROM (
     SELECT unnest($2::bigint[]) AS id,
            unnest($3::bigint[]) AS canon_id
@@ -1875,7 +2078,7 @@ FROM (
 WHERE j.id = m.id
   AND j.company_slug = $1
   AND j.closed_at IS NULL
-  AND j.duplicate_of IS DISTINCT FROM m.canon_id
+  AND j.duplicate_of_fuzzy IS DISTINCT FROM m.canon_id
 `
 
 type MarkFuzzyDuplicatesForCompanyParams struct {
@@ -1897,23 +2100,29 @@ func (q *Queries) MarkFuzzyDuplicatesForCompany(ctx context.Context, arg MarkFuz
 	return result.RowsAffected(), nil
 }
 
-const markJobDuplicateOf = `-- name: MarkJobDuplicateOf :execrows
+const markJobDuplicateOfRole = `-- name: MarkJobDuplicateOfRole :execrows
 UPDATE jobs
-SET duplicate_of = $1,
-    updated_at   = now()
+SET duplicate_of_role = $1,
+    updated_at        = now()
 WHERE id = $2
 `
 
-type MarkJobDuplicateOfParams struct {
-	DuplicateOf pgtype.Int8 `json:"duplicate_of"`
-	ID          int64       `json:"id"`
+type MarkJobDuplicateOfRoleParams struct {
+	DuplicateOfRole pgtype.Int8 `json:"duplicate_of_role"`
+	ID              int64       `json:"id"`
 }
 
-// Point one row at its canon. The import path only: the batch passes recompute whole companies
-// (RecomputeRoleDuplicatesForCompany, SuppressAggregatorDuplicatesForCompany) and must keep
-// doing so — this marks the single row an import just wrote.
-func (q *Queries) MarkJobDuplicateOf(ctx context.Context, arg MarkJobDuplicateOfParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markJobDuplicateOf, arg.DuplicateOf, arg.ID)
+// Point one row at its ROLE canon. The import path only: the batch passes recompute whole
+// companies (RecomputeRoleDuplicatesForCompanies, SuppressAggregatorDuplicatesForCompanies) and
+// must keep doing so — this marks the single row an import just wrote.
+//
+// Writes duplicate_of_role, not duplicate_of, and the name says so. Both callers
+// (cmd/ingest/store.go, internal/linkimport) resolve their canon through
+// jobdedup.CanonicalForRole, so this is the role verdict arriving early — the same clustering
+// the batch pass would reach hours later. A write to duplicate_of itself would not survive:
+// the derivation in migration 0115 recomputes it from the owned columns.
+func (q *Queries) MarkJobDuplicateOfRole(ctx context.Context, arg MarkJobDuplicateOfRoleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markJobDuplicateOfRole, arg.DuplicateOfRole, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -2059,11 +2268,11 @@ target AS (
     WHERE j.company_slug = ANY($1::text[]) AND j.closed_at IS NULL
 )
 UPDATE jobs j
-SET duplicate_of = t.new_dup,
-    updated_at   = now()
+SET duplicate_of_role = t.new_dup,
+    updated_at        = now()
 FROM target t
 WHERE j.id = t.id
-  AND j.duplicate_of IS DISTINCT FROM t.new_dup
+  AND j.duplicate_of_role IS DISTINCT FROM t.new_dup
 `
 
 // The batched slice of the role-duplicate recompute, driven over a CHUNK of companies
@@ -2807,11 +3016,11 @@ target AS (
     GROUP BY a.id
 )
 UPDATE jobs j
-SET duplicate_of = t.new_dup,
-    updated_at   = now()
+SET duplicate_of_aggregator = t.new_dup,
+    updated_at              = now()
 FROM target t
 WHERE j.id = t.id
-  AND j.duplicate_of IS DISTINCT FROM t.new_dup
+  AND j.duplicate_of_aggregator IS DISTINCT FROM t.new_dup
 `
 
 type SuppressAggregatorDuplicatesForCompaniesParams struct {
@@ -3141,7 +3350,7 @@ SET title        = $1,
                                THEN NULL ELSE jobs.similar_computed_at END,
     updated_at   = now()
 WHERE public_slug = $24 AND created_by IS NOT NULL
-RETURNING id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+RETURNING id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 `
 
 type UpdateManualJobParams struct {
@@ -3272,6 +3481,9 @@ func (q *Queries) UpdateManualJob(ctx context.Context, arg UpdateManualJobParams
 		&i.SalaryCurrencySource,
 		&i.SalaryPeriodSource,
 		&i.CompanySlugFolded,
+		&i.DuplicateOfAggregator,
+		&i.DuplicateOfRole,
+		&i.DuplicateOfFuzzy,
 	)
 	return i, err
 }
@@ -3371,7 +3583,7 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     similar_computed_at = CASE WHEN jobs.company_slug IS DISTINCT FROM EXCLUDED.company_slug
                                THEN NULL ELSE jobs.similar_computed_at END,
     updated_at   = now()
-RETURNING jobs.id, jobs.source, jobs.external_id, jobs.url, jobs.title, jobs.company, jobs.location, jobs.remote, jobs.description, jobs.posted_at, jobs.created_at, jobs.updated_at, jobs.company_slug, jobs.enrichment, jobs.enriched_at, jobs.enrichment_version, jobs.public_slug, jobs.last_seen_at, jobs.closed_at, jobs.countries, jobs.regions, jobs.work_mode, jobs.liveness_strikes, jobs.skills, jobs.seniority, jobs.category, jobs.created_by, jobs.updated_by, jobs.posting_language, jobs.employment_type, jobs.education_level, jobs.experience_years_min, jobs.collections, jobs.content_hash, jobs.english_level, jobs.cities, jobs.view_count, jobs.applied_count, jobs.role_fingerprint, jobs.semantic_embedded_model, jobs.semantic_embedded_hash, jobs.duplicate_of, jobs.is_tech, jobs.semantic_embedding, jobs.salary_min_manual, jobs.salary_max_manual, jobs.salary_currency_manual, jobs.salary_period_manual, jobs.upvote_count, jobs.downvote_count, jobs.ats_absent_at, jobs.closed_reason, jobs.is_private, jobs.similar_job_ids, jobs.similar_computed_at, jobs.salary_min_source, jobs.salary_max_source, jobs.salary_currency_source, jobs.salary_period_source, jobs.company_slug_folded,
+RETURNING jobs.id, jobs.source, jobs.external_id, jobs.url, jobs.title, jobs.company, jobs.location, jobs.remote, jobs.description, jobs.posted_at, jobs.created_at, jobs.updated_at, jobs.company_slug, jobs.enrichment, jobs.enriched_at, jobs.enrichment_version, jobs.public_slug, jobs.last_seen_at, jobs.closed_at, jobs.countries, jobs.regions, jobs.work_mode, jobs.liveness_strikes, jobs.skills, jobs.seniority, jobs.category, jobs.created_by, jobs.updated_by, jobs.posting_language, jobs.employment_type, jobs.education_level, jobs.experience_years_min, jobs.collections, jobs.content_hash, jobs.english_level, jobs.cities, jobs.view_count, jobs.applied_count, jobs.role_fingerprint, jobs.semantic_embedded_model, jobs.semantic_embedded_hash, jobs.duplicate_of, jobs.is_tech, jobs.semantic_embedding, jobs.salary_min_manual, jobs.salary_max_manual, jobs.salary_currency_manual, jobs.salary_period_manual, jobs.upvote_count, jobs.downvote_count, jobs.ats_absent_at, jobs.closed_reason, jobs.is_private, jobs.similar_job_ids, jobs.similar_computed_at, jobs.salary_min_source, jobs.salary_max_source, jobs.salary_currency_source, jobs.salary_period_source, jobs.company_slug_folded, jobs.duplicate_of_aggregator, jobs.duplicate_of_role, jobs.duplicate_of_fuzzy,
     NOT COALESCE((SELECT existed FROM existing), false) AS inserted,
     ((SELECT old_hash FROM existing) IS DISTINCT FROM $29) AS changed
 `
@@ -3530,6 +3742,9 @@ func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) (UpsertJob
 		&i.Job.SalaryCurrencySource,
 		&i.Job.SalaryPeriodSource,
 		&i.Job.CompanySlugFolded,
+		&i.Job.DuplicateOfAggregator,
+		&i.Job.DuplicateOfRole,
+		&i.Job.DuplicateOfFuzzy,
 		&i.Inserted,
 		&i.Changed,
 	)
@@ -3634,7 +3849,7 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     similar_computed_at = CASE WHEN jobs.company_slug IS DISTINCT FROM EXCLUDED.company_slug
                                THEN NULL ELSE jobs.similar_computed_at END,
     updated_at   = now()
-RETURNING id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded
+RETURNING id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy
 `
 
 type UpsertManualJobParams struct {
@@ -3782,6 +3997,9 @@ func (q *Queries) UpsertManualJob(ctx context.Context, arg UpsertManualJobParams
 		&i.SalaryCurrencySource,
 		&i.SalaryPeriodSource,
 		&i.CompanySlugFolded,
+		&i.DuplicateOfAggregator,
+		&i.DuplicateOfRole,
+		&i.DuplicateOfFuzzy,
 	)
 	return i, err
 }

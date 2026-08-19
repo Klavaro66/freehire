@@ -42,6 +42,13 @@
      * held and is not.
      */
     dismissible?: boolean;
+    /**
+     * Size the card at `sm` and up with an `sm:max-w-*` utility, never a bare
+     * `max-w-*` — the base classes carry an unprefixed `max-w-none` for the
+     * mobile takeover, and `cn()`'s twMerge keeps only the last unprefixed
+     * value in the group, so a bare override wins at every width and cancels
+     * the takeover below `sm` too.
+     */
     class?: string;
     children: Snippet;
   } = $props();
@@ -57,7 +64,15 @@
   // any of that by hand is strictly worse.
   $effect(() => {
     if (!el) return;
-    if (open && !el.open) el.showModal();
+    if (open && !el.open) {
+      el.showModal();
+      // showModal() focuses the first focusable descendant (often a button below
+      // the fold) and the platform scrolls it into view — invisible for a dialog
+      // that always fit the viewport, but on the mobile takeover it opens already
+      // scrolled past the title. The dialog is its own scroll container now, so
+      // reset it without touching the page scroll lockPageScroll owns.
+      el.scrollTop = 0;
+    }
     if (!open && el.open) el.close();
   });
 
@@ -103,11 +118,25 @@
   {oncancel}
   {onclick}
   class={cn(
-    'm-auto w-full max-w-lg rounded-lg border border-border bg-card p-0 text-card-foreground shadow-lg backdrop:bg-black/50 backdrop:backdrop-blur-sm',
+    // Below sm: fills the viewport edge-to-edge, same breakpoint FilterModalShell
+    // uses for its own mobile takeover. At sm and up: the original centered card.
+    // max-h-none is load-bearing: the UA stylesheet gives dialog:modal its own
+    // max-height reserve (leaving a gap around the edges by default), which
+    // silently clamps h-dvh short of the actual viewport unless overridden.
+    // dvh, not h-full (%): a mobile browser's toolbar grows and shrinks the
+    // visual viewport without firing a resize, and a percentage height resolves
+    // against the larger, toolbar-collapsed one, reopening the same gap.
+    'm-0 h-dvh max-h-none w-full max-w-none overflow-y-auto rounded-none border-0 bg-card p-0 text-card-foreground shadow-lg backdrop:bg-black/50 backdrop:backdrop-blur-sm',
+    // h-fit, not h-auto: a top-layer <dialog> with inset:0 from the UA stylesheet
+    // stretches to fill when height is the keyword 'auto' — a well-known quirk of
+    // the CSS positioned-box sizing algorithm. fit-content bypasses it outright.
+    // max-h is explicit (matching FilterModalShell's own cap) rather than left to
+    // the UA default reserve, which isn't a documented, cross-browser-stable value.
+    'sm:m-auto sm:h-fit sm:max-h-[calc(100vh-3rem)] sm:w-full sm:max-w-lg sm:rounded-lg sm:border sm:border-border',
     className,
   )}
 >
-  <div class="relative p-6">
+  <div class="relative min-h-dvh p-6 sm:min-h-full">
     {#if title}
       <h2 id={titleId} class="text-lg font-semibold">{title}</h2>
     {/if}
@@ -120,7 +149,7 @@
     {#if dismissible}
       <button
         type="button"
-        class="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        class="fixed right-4 top-4 flex size-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:absolute"
         onclick={() => (open = false)}
         aria-label="Close"
       >

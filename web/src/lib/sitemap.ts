@@ -32,6 +32,8 @@ export const STATIC_PATHS = [
   '/features/inbox',
   '/features/referrals',
   '/features/tailor',
+  '/features/tracking',
+  '/features/notifications',
   '/features/ghost-jobs',
   '/features/advanced-search',
   '/how-it-works',

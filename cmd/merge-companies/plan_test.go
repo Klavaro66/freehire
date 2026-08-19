@@ -126,9 +126,12 @@ func TestPlanMerges_CanonicalIsAFixedPointOfTheSlugRule(t *testing.T) {
 	}
 }
 
-// TestPlanMerges_JobCountStillDecidesBetweenFixedPoints: the fixed-point preference is a
-// tie-break BEFORE job count, not a replacement for it. Both spellings here are ones the rule
-// produces, so the bigger one still wins — including when it is the uglier of the two.
+// TestPlanMerges_JobCountStillDecidesBetweenFixedPoints: the preferences are tie-breaks BEFORE
+// job count, not replacements for it. Where neither the fixed-point rule nor the word shape of
+// the name discriminates, the bigger spelling still wins.
+//
+// This once asserted that turnertownsend beats turner-townsend on volume. The employer writes
+// two words, so the word-shape rule now takes it the other way — and that is the better url.
 func TestPlanMerges_JobCountStillDecidesBetweenFixedPoints(t *testing.T) {
 	got := planMerges([]company{
 		{Slug: "dollartree", Name: "DollarTree", JobCount: 283},
@@ -138,13 +141,13 @@ func TestPlanMerges_JobCountStillDecidesBetweenFixedPoints(t *testing.T) {
 		t.Errorf("Canonical = %q, want dollar-tree", got[0].Canonical)
 	}
 
+	// Both spellings of one WORD: the count decides and nothing else has an opinion.
 	got = planMerges([]company{
-		{Slug: "turner-townsend", Name: "Turner Townsend", JobCount: 16},
-		{Slug: "turnertownsend", Name: "TurnerTownsend", JobCount: 400},
+		{Slug: "dominos", Name: "Dominos", JobCount: 14396},
+		{Slug: "domino-s", Name: "Domino's", JobCount: 1},
 	}, nil, 0)
-	if got[0].Canonical != "turnertownsend" {
-		t.Errorf("Canonical = %q, want turnertownsend — both are fixed points, so the count "+
-			"decides even though the hyphenated one reads better", got[0].Canonical)
+	if got[0].Canonical != "dominos" {
+		t.Errorf("Canonical = %q, want dominos", got[0].Canonical)
 	}
 }
 
@@ -157,5 +160,169 @@ func TestPlanMerges_FrozenCanonWinsEvenIfItCarriesAForm(t *testing.T) {
 	}, map[string]bool{"acme-inc": true}, 0)
 	if got[0].Canonical != "acme-inc" {
 		t.Errorf("Canonical = %q, want acme-inc (frozen)", got[0].Canonical)
+	}
+}
+
+// TestPlanMerges_FallsBackToTheDerivedSlug covers the group where NOTHING is a fixed point.
+//
+// The >=100-job wave surfaced four: carnival-corporation, dcs-corporation, quess-corp-limited,
+// avaron-pte-ltd. Every member carried a form, so "the biggest fixed point" found none and the
+// election fell back to the biggest member — leaving a canonical url with the form still on it,
+// which is the outcome the fixed-point rule exists to prevent.
+//
+// The right canon is the one the rule itself yields, whether or not a company row holds it yet:
+// that is the slug every future posting derives, and the reconcile creates the row.
+func TestPlanMerges_FallsBackToTheDerivedSlug(t *testing.T) {
+	got := planMerges([]company{
+		{Slug: "carnival-corporation", Name: "Carnival Corporation", JobCount: 300},
+		{Slug: "carnival-corporation-plc", Name: "Carnival Corporation plc", JobCount: 40},
+	}, nil, 0)
+
+	if len(got) != 1 {
+		t.Fatalf("planned %d merges, want 1", len(got))
+	}
+	if got[0].Canonical != "carnival" {
+		t.Errorf("Canonical = %q, want carnival — with no member the rule can reproduce, the "+
+			"canon is what the rule yields, not the least bad row that happens to exist",
+			got[0].Canonical)
+	}
+	// Both rows retire into it, including the one the election started from.
+	if len(got[0].Aliases) != 2 {
+		t.Errorf("got %d aliases, want 2 — every existing slug retires when none of them is "+
+			"the canon", len(got[0].Aliases))
+	}
+}
+
+// TestPlanMerges_PrefersTheSpellingTheNameIsWrittenIn decides the spelling class by the shape
+// of the NAME, which is the signal job count alone cannot see.
+//
+// The >=100-job wave elects a squashed canonical over a hyphenated one 73 times out of 162
+// spelling merges. Some are right — AT&T really is one word, so `att` beats `at-t` — and some
+// are plainly wrong: `accenturefederalservices`, `acehardware`, `westerndigital`. What tells
+// them apart is not the slug but whether the employer writes its name with spaces.
+//
+// This is also why "prefer the more hyphenated slug" failed and this does not: that rule read
+// the slug, where a stray apostrophe looks exactly like a word break.
+func TestPlanMerges_PrefersTheSpellingTheNameIsWrittenIn(t *testing.T) {
+	t.Run("a multi-word name keeps its word breaks", func(t *testing.T) {
+		got := planMerges([]company{
+			{Slug: "westerndigital", Name: "WesternDigital", JobCount: 400},
+			{Slug: "western-digital", Name: "Western Digital", JobCount: 126},
+		}, nil, 0)
+		if got[0].Canonical != "western-digital" {
+			t.Errorf("Canonical = %q, want western-digital — the employer writes two words",
+				got[0].Canonical)
+		}
+	})
+
+	t.Run("no member is multi-word, so the count decides", func(t *testing.T) {
+		// The counterexample that killed "prefer hyphens": the break in `domino-s` comes from
+		// an apostrophe, not a space, and neither name has a space at all.
+		got := planMerges([]company{
+			{Slug: "dominos", Name: "Dominos", JobCount: 14396},
+			{Slug: "domino-s", Name: "Domino's", JobCount: 1},
+		}, nil, 0)
+		if got[0].Canonical != "dominos" {
+			t.Errorf("Canonical = %q, want dominos", got[0].Canonical)
+		}
+	})
+
+	t.Run("every member is multi-word, so the count decides", func(t *testing.T) {
+		// The other counterexample: both names carry spaces, so the shape says nothing and
+		// the count correctly picks the un-corrupted spelling.
+		got := planMerges([]company{
+			{Slug: "alfa-bank", Name: "Alfa Bank", JobCount: 1617},
+			{Slug: "al-fa-bank", Name: "Al Fa Bank", JobCount: 20},
+		}, nil, 0)
+		if got[0].Canonical != "alfa-bank" {
+			t.Errorf("Canonical = %q, want alfa-bank", got[0].Canonical)
+		}
+	})
+
+	t.Run("a hyphen in the name is a word break too", func(t *testing.T) {
+		// Kimberly-Clark writes itself with a hyphen, which is as much a word break as a
+		// space. Counting only spaces made it a one-word name and elected `kimberlyclark`.
+		got := planMerges([]company{
+			{Slug: "kimberlyclark", Name: "KimberlyClark", JobCount: 300},
+			{Slug: "kimberly-clark", Name: "Kimberly-Clark", JobCount: 40},
+		}, nil, 0)
+		if got[0].Canonical != "kimberly-clark" {
+			t.Errorf("Canonical = %q, want kimberly-clark", got[0].Canonical)
+		}
+	})
+
+	t.Run("an apostrophe is NOT a word break", func(t *testing.T) {
+		// The distinction the slug cannot make: Brink's is one word, and `brinks` beats
+		// `brink-s` exactly as `dominos` beats `domino-s`.
+		got := planMerges([]company{
+			{Slug: "brinks", Name: "Brinks", JobCount: 200},
+			{Slug: "brink-s", Name: "Brink's", JobCount: 10},
+		}, nil, 0)
+		if got[0].Canonical != "brinks" {
+			t.Errorf("Canonical = %q, want brinks", got[0].Canonical)
+		}
+	})
+
+	t.Run("a legal form is not a word that makes a name multi-word", func(t *testing.T) {
+		// "Ace Hardware Corporation" is two words plus a form; it must not outrank a plain
+		// "Ace Hardware", and both must beat the squashed spelling.
+		got := planMerges([]company{
+			{Slug: "acehardware", Name: "AceHardware", JobCount: 500},
+			{Slug: "ace-hardware", Name: "Ace Hardware", JobCount: 90},
+		}, nil, 0)
+		if got[0].Canonical != "ace-hardware" {
+			t.Errorf("Canonical = %q, want ace-hardware", got[0].Canonical)
+		}
+	})
+}
+
+// TestPlanMerges_MultiWordNameWinsEvenWhenOnlyAFormedRowHasIt closes the last gap the prod dry
+// runs found, and it is a big one: 2,811 of 7,375 retiring slugs across the full catalogue.
+//
+// "Public Storage" only exists in the catalogue as `public-storage-inc`, a row carrying a form.
+// Preferring a member that is ALREADY a fixed point dropped that row from consideration before
+// its word shape could be read, leaving the squashed `publicstorage` to win by default.
+//
+// Deriving the canon from the elected member's NAME fixes it and needs no extra rule: the
+// derived slug is a fixed point by construction, so the fixed-point preference disappears.
+func TestPlanMerges_MultiWordNameWinsEvenWhenOnlyAFormedRowHasIt(t *testing.T) {
+	got := planMerges([]company{
+		{Slug: "publicstorage", Name: "PublicStorage", JobCount: 300},
+		{Slug: "public-storage-inc", Name: "Public Storage Inc", JobCount: 40},
+	}, nil, 0)
+
+	if got[0].Canonical != "public-storage" {
+		t.Errorf("Canonical = %q, want public-storage — the employer writes two words, and a "+
+			"corporate form on the row that says so is not a reason to ignore it",
+			got[0].Canonical)
+	}
+	if len(got[0].Aliases) != 2 {
+		t.Errorf("got %d aliases, want 2 — no existing row holds the canon", len(got[0].Aliases))
+	}
+}
+
+// TestPlanMerges_SeesASlugWhoseIndexCounterIsZero is the bug that stranded 8,375 rows on
+// `jpmorganchase` after wave 1 had merged it.
+//
+// The planner read companies.job_count, which counts the postings the SEARCH INDEX holds — not
+// the rows this worker rewrites. A retired slug drops to 0 in the index while its unmoved rows
+// stay in the table, so filtering on that counter made exactly the leftovers of a merge
+// invisible: the better the merge worked, the more reliably its remainder hid.
+//
+// The query now reads jobs, so a slug with rows and a zero counter is planned like any other.
+// This test pins the planning side of it: a group whose members report 0 open jobs must still
+// merge.
+func TestPlanMerges_SeesASlugWhoseIndexCounterIsZero(t *testing.T) {
+	got := planMerges([]company{
+		{Slug: "jp-morgan-chase", Name: "JP Morgan Chase", JobCount: 0},
+		{Slug: "jpmorganchase", Name: "JPMorganChase", JobCount: 0},
+	}, nil, 0)
+
+	if len(got) != 1 {
+		t.Fatalf("planned %d merges, want 1 — a slug the search index has forgotten still has "+
+			"rows in the table, and those rows are what this worker exists to move", len(got))
+	}
+	if got[0].Canonical != "jp-morgan-chase" {
+		t.Errorf("Canonical = %q, want jp-morgan-chase", got[0].Canonical)
 	}
 }

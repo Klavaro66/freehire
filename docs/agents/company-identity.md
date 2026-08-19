@@ -93,6 +93,21 @@ nothing 404s. Do not run a manual reindex, and do not set `REINDEX_DEDUP`.
 `jobs.company` is left alone by a merge. The source keeps sending "DollarTree", so the next
 crawl would put it back, and the display name comes from `companies.name` regardless.
 
+**Any worker that re-derives `company_slug` must resolve through the registry.** `jobderive` is
+pure, so a re-derive yields the spelling the SOURCE used — which for a merged posting is the
+retired one. `cmd/backfill-derive` loads the registry once per run and resolves before it
+computes `role_fingerprint` (itself derived from the company slug); without that, a routine
+~15h backfill would silently undo every spelling merge and churn the repost identities on the
+way out. A worker that cannot READ the registry must fail rather than proceed: an empty
+registry is indistinguishable from a catalogue with no merges.
+
+**The merge worker plans from `jobs`, never from `companies.job_count`.** That column counts the
+postings the SEARCH INDEX holds, not the rows the worker rewrites, and the two diverge exactly
+where it hurts: a slug a merge has already retired drops to 0 in the index while its unmoved
+rows stay in the table. Filtering on it made the leftovers of a merge invisible — 8,375 rows
+stranded on `jpmorganchase` after the first wave, permanently, because the better the merge
+worked the more reliably the remainder hid.
+
 ## Gotchas
 
 - **The canonical slug must be a fixed point of the rule, and job count alone does not give
@@ -100,11 +115,24 @@ crawl would put it back, and the display name comes from `companies.name` regard
   jobs) purely because it was larger — making the canonical url the one carrying a corporate
   form, and 301ing the better-known slug into it. It is unstable too: every new posting derives
   the stripped slug, so the canon would depend forever on an alias row to reach itself. The
-  election prefers the biggest slug `CompanySlug` can reproduce, and only then the biggest.
-- **Electing by anything but job count elects backwards.** "Prefer the more readable slug" is
-  the tempting rule and it picks `domino-s` (1 job) over `dominos` (14,396) and `al-fa-bank`
-  (20) over `alfa-bank` (1,617). Hyphens mark the corrupted spelling about as often as the
-  correct one.
+  canon is therefore always `CompanySlug` of the elected member's NAME, never a stored slug
+  reused — which makes it a fixed point by construction and needs no separate rule. Returning a
+  slug no row holds yet is safe and often right (`carnival`, `public-storage`): a company
+  already using it would fold to the same key, so it would be a member, and the reconcile that
+  follows the re-key creates the row.
+- **Read the NAME, not the slug, when choosing between spellings.** "Prefer the more
+  hyphenated slug" is the tempting rule and it elects `domino-s` (1 job) over `dominos`
+  (14,396) and `al-fa-bank` (20) over `alfa-bank` (1,617): in a slug an apostrophe is
+  indistinguishable from a word break. What actually decides is whether the employer WRITES
+  its name in several words — `Western Digital`, `Ace Hardware` and `Kimberly-Clark` do, `AT&T`,
+  `Brink's` and `Dominos` do not. A hyphen in the NAME separates words; an apostrophe does not —
+  and `CompanySlug` DROPS apostrophes before slugging, so "Kohl's" keys at `kohls` rather than
+  the `kohl-s` plain `Slug` would give. That artefact stopped being survivable once the canon
+  became derived rather than chosen among stored slugs: it elected `kohl-s` over `kohls` across
+  2,939 postings.
+
+  The preference only speaks when it discriminates. Where no name is multi-word, or every name
+  is, the job count decides as before.
 - **The word break is not whitespace.** It is every rune `Slug` drops EXCEPT `.` and `/`, which
   live inside the forms themselves (`B.V.`, `A/S`). Whitespace alone loses
   `Sun Technologies,Inc.`, and 13,730 catalogue companies are written that way.

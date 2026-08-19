@@ -80,9 +80,15 @@ func (q *Queries) ListCanonicalCompanySlugs(ctx context.Context) ([]string, erro
 }
 
 const listCompaniesForMerge = `-- name: ListCompaniesForMerge :many
-SELECT slug, name, job_count
-FROM companies
-WHERE job_count > 0
+SELECT company_slug AS slug,
+       -- id breaks the tie: two rows sharing a created_at would otherwise pick a name
+       -- arbitrarily, and the name decides the CANONICAL SLUG — so a dry run a human read
+       -- could differ from what --apply then does.
+       ((array_agg(company ORDER BY created_at DESC, id DESC))[1])::text AS name,
+       count(*) FILTER (WHERE closed_at IS NULL)::int AS job_count
+FROM jobs
+WHERE company_slug <> ''
+GROUP BY company_slug
 `
 
 type ListCompaniesForMergeRow struct {
@@ -91,10 +97,20 @@ type ListCompaniesForMergeRow struct {
 	JobCount int32  `json:"job_count"`
 }
 
-// The merge worker's input: every company that has an open job, with the count that elects
-// the winner of its folded group. Grouping happens in Go because the fold is
-// normalize.CompanyKey — a repeating legal-form strip no SQL expression should try to
-// reproduce, since a second implementation of that rule is the bug this change removes.
+// The merge worker's input: every company slug the JOBS table actually holds, with the display
+// name and the open-job count that elects the winner of its folded group.
+//
+// READ FROM jobs, NOT FROM companies.job_count. That column counts the postings the SEARCH
+// INDEX holds, not the rows this worker rewrites, and the two diverge exactly where it hurts:
+// a slug a merge has already retired drops to 0 in the index while its unmoved rows stay in
+// the table. Planning from the counter made those rows INVISIBLE to the planner — 8,375 of
+// them on `jpmorganchase` alone, stranded permanently, because the better the merge worked the
+// more reliably the remainder hid.
+//
+// The name is the most recent one seen for the slug, matching how SyncCompaniesFromJobs
+// collapses a slug's name variants. Grouping into folded groups happens in Go because the fold
+// is normalize.CompanyKey — a repeating legal-form strip no SQL expression should reproduce,
+// since a second implementation of that rule is the bug this whole change removes.
 func (q *Queries) ListCompaniesForMerge(ctx context.Context) ([]ListCompaniesForMergeRow, error) {
 	rows, err := q.db.Query(ctx, listCompaniesForMerge)
 	if err != nil {
@@ -105,6 +121,45 @@ func (q *Queries) ListCompaniesForMerge(ctx context.Context) ([]ListCompaniesFor
 	for rows.Next() {
 		var i ListCompaniesForMergeRow
 		if err := rows.Scan(&i.Slug, &i.Name, &i.JobCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCompanySlugAliases = `-- name: ListCompanySlugAliases :many
+SELECT DISTINCT folded_key, canonical_slug
+FROM company_slug_aliases
+ORDER BY folded_key, canonical_slug
+`
+
+type ListCompanySlugAliasesRow struct {
+	FoldedKey     string `json:"folded_key"`
+	CanonicalSlug string `json:"canonical_slug"`
+}
+
+// The whole registry, folded key to canonical slug. cmd/backfill-derive loads it once per run
+// and resolves in memory: it re-derives every job in the table, and jobderive is pure, so
+// without this a backfill would silently move every merged posting back to the spelling its
+// source happened to use — undoing the merges and taking role_fingerprint, which is computed
+// from the company slug, with it.
+//
+// Ordered for the same reason ResolveCompanySlugAliases is: one canonical slug per folded key
+// is the writer's invariant, and a violation should resolve identically every run.
+func (q *Queries) ListCompanySlugAliases(ctx context.Context) ([]ListCompanySlugAliasesRow, error) {
+	rows, err := q.db.Query(ctx, listCompanySlugAliases)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCompanySlugAliasesRow{}
+	for rows.Next() {
+		var i ListCompanySlugAliasesRow
+		if err := rows.Scan(&i.FoldedKey, &i.CanonicalSlug); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

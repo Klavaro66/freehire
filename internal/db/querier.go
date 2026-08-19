@@ -82,6 +82,26 @@ type Querier interface {
 	// writes nothing, so no dead tuples and no bloat for repeating the pass. That matters
 	// on a 7.4M-row table where an unguarded UPDATE would rewrite every row it touches.
 	BackfillCompanySlugFoldedChunk(ctx context.Context, arg BackfillCompanySlugFoldedChunkParams) (int64, error)
+	// Seed the owned marker columns (0114) from the single duplicate_of that predates them, for one
+	// id range.
+	//
+	// Provenance cannot be recovered: a marked row records WHERE it points, never which pass decided
+	// it. So the seed goes by shape — a marked row whose own source is an aggregator and whose canon's
+	// is not is the aggregator pass's; everything else is seeded as the role pass's.
+	//
+	// Fuzzy markers are indistinguishable from role markers that way and land in the role column. That
+	// is self-correcting and cheap to reason about: the first role recompute clears the ones that are
+	// not role clusters, and the fuzzy pass re-sets them in its own column during the same run. One
+	// extra cycle of the churn this change removes, once.
+	//
+	// Closed rows are seeded too, deliberately. The passes only consider open rows, so nothing would
+	// ever seed a closed row's columns — and then the first statement to touch any marker column on it
+	// would fire the derivation and silently clear a duplicate_of that prune still walks.
+	//
+	// The "no owned column set yet" predicate is what makes re-runs free, and it is also the reconcile
+	// sweep: a row written between this chunk passing its range and the trigger existing still matches,
+	// so running the pass again after the trigger lands finishes the job. No separate mode needed.
+	BackfillDuplicateMarkerOwnerChunk(ctx context.Context, arg BackfillDuplicateMarkerOwnerChunkParams) (int64, error)
 	// The same for mail. A thread linked to a posting must end up linked to the application,
 	// or the first deletion detaches it from a record that is still standing.
 	BackfillEmailApplicationLinks(ctx context.Context, batchSize int32) (int64, error)
@@ -217,6 +237,24 @@ type Querier interface {
 	// lease predicate reclaims entries whose worker died (stale claimed_at), so no
 	// separate reaper process is needed.
 	ClaimEnrichmentBatch(ctx context.Context, arg ClaimEnrichmentBatchParams) ([]ClaimEnrichmentBatchRow, error)
+	// Claim a batch of live, unleased removals by stamping claimed_at.
+	//
+	// Deliberately has NO `EXISTS (SELECT 1 FROM jobs ...)` guard, unlike
+	// ClaimSearchOutboxBatch. That query skips entries whose job closed or became a duplicate,
+	// because there is nothing left to index. Here the opposite holds: a job that is closed,
+	// demoted, or hard-deleted is exactly what this queue exists to act on, and a removal needs
+	// only the primary key. Adding the guard would make the queue skip every entry it was
+	// created for.
+	//
+	// Claim order is insertion order (the id index), not freshest-first. Indexing sorts by
+	// job_posted_at because a searcher notices a missing new posting sooner than a missing old
+	// one; for removal one stale document is as wrong as another, so the simpler order wins and
+	// the partial index serves it directly.
+	//
+	// FOR UPDATE OF o locks only queue rows; SKIP LOCKED lets concurrent workers take disjoint
+	// rows; the lease predicate reclaims entries whose worker died (stale claimed_at), so no
+	// separate reaper process is needed.
+	ClaimSearchDeleteOutboxBatch(ctx context.Context, arg ClaimSearchDeleteOutboxBatchParams) ([]ClaimSearchDeleteOutboxBatchRow, error)
 	// Claim a batch of live, unleased entries for OPEN canonical jobs, freshest job
 	// first, by stamping claimed_at.
 	//
@@ -346,6 +384,13 @@ type Querier interface {
 	ClearUserResume(ctx context.Context, id int64) error
 	// Moderator close: the thread leaves the open listing and rejects new replies.
 	CloseCommunityThread(ctx context.Context, id int64) error
+	//
+	// The removal enqueue rides this statement (see CloseUnseenJobs for why): feeding
+	// search_delete_outbox from the UPDATE's own RETURNING keeps it atomic with the close and
+	// exact — only rows that actually closed are queued, and a rolled-back close queues nothing.
+	//
+	// :one rather than :execrows because the CTE moves the row count out of the command tag.
+	// count(*) over the closed rows is the same int64 the caller already had.
 	// Soft-close one job now (see job-lifecycle): a moderator resolving a report with
 	// close_job=true. The third writer of closed_at, alongside the ingest sweep and the
 	// liveness probe. WHERE closed_at IS NULL keeps it idempotent — a second close on an
@@ -353,6 +398,13 @@ type Querier interface {
 	// status guard. A later ingest upsert may legitimately reopen a board job (reopen-on-
 	// reappear); that is the lifecycle's existing behavior, not a conflict.
 	CloseJobByID(ctx context.Context, id int64) (int64, error)
+	//
+	// The removal enqueue rides this statement (see CloseUnseenJobs for why): feeding
+	// search_delete_outbox from the UPDATE's own RETURNING keeps it atomic with the close and
+	// exact — only rows that actually closed are queued, and a rolled-back close queues nothing.
+	//
+	// :one rather than :execrows because the CTE moves the row count out of the command tag.
+	// count(*) over the closed rows is the same int64 the caller already had.
 	// Stream-driven close (see job-lifecycle): a self-closing feed source (e.g. jobtech)
 	// learns of a removed posting from its incremental stream and closes it by identity,
 	// rather than relying on the post-run unseen sweep (which it opts out of, since an
@@ -380,6 +432,13 @@ type Querier interface {
 	// under-closing is the correct bias when there is no evidence to appeal to. Idempotent via
 	// WHERE closed_at IS NULL: a cron worker runs this repeatedly and closes each row once.
 	CloseStaleUnsignalledJobs(ctx context.Context, arg CloseStaleUnsignalledJobsParams) (int64, error)
+	//
+	// The removal enqueue rides this statement (see CloseUnseenJobs for why): feeding
+	// search_delete_outbox from the UPDATE's own RETURNING keeps it atomic with the close and
+	// exact — only rows that actually closed are queued, and a rolled-back close queues nothing.
+	//
+	// :one rather than :execrows because the CTE moves the row count out of the command tag.
+	// count(*) over the closed rows is the same int64 the caller already had.
 	// Row-by-row sweep fallback (see UnseenJobIDs): closes with the same 'unseen' reason
 	// as the bulk sweep, one id at a time, so a single row's error (e.g. corrupted index
 	// entry) can be caught and skipped by the caller without losing the rest of the batch.
@@ -392,7 +451,24 @@ type Querier interface {
 	// that times out and only completes some boards) must not close the companies it never
 	// touched. The caller passes the crawled slugs and owns the grace window (cutoff =
 	// now() - window), so neither a failed nor a partial crawl mass-closes a catalogue.
+	//
+	// The removal enqueue rides this statement rather than being a call per closed row.
+	// A sweep closes a whole provider's stale postings in one round trip, so anything
+	// per-row would undo that; feeding search_delete_outbox from the UPDATE's own RETURNING
+	// keeps the enqueue atomic with the close (a rolled-back sweep queues nothing) and
+	// exact (only rows that actually closed are queued).
+	//
+	// :one rather than :execrows because the CTE moves the row count out of the command tag.
+	// count(*) over the closed rows is the same int64 the caller already had, so no call site
+	// changes.
 	CloseUnseenJobs(ctx context.Context, arg CloseUnseenJobsParams) (int64, error)
+	//
+	// The removal enqueue rides this statement (see CloseUnseenJobs for why): feeding
+	// search_delete_outbox from the UPDATE's own RETURNING keeps it atomic with the close and
+	// exact — only rows that actually closed are queued, and a rolled-back close queues nothing.
+	//
+	// :one rather than :execrows because the CTE moves the row count out of the command tag.
+	// count(*) over the closed rows is the same int64 the caller already had.
 	// Post-ingest sweep for a fullCatalog source (see job-lifecycle spec): close every open job of
 	// ONE source not seen since the cutoff, WITHOUT the crawled-company scope. A fullCatalog adapter
 	// (e.g. habr_career) lists its whole catalogue each run, so an unseen job is genuinely gone —
@@ -478,6 +554,10 @@ type Querier interface {
 	// This is an uncapped full-table GROUP BY over the whole jobs table, returning a row
 	// per company. It is computed once per prune run, not per batch.
 	CompanyTechEvidence(ctx context.Context) ([]CompanyTechEvidenceRow, error)
+	// Drop the entries for removals that landed. Deleting a document that was never indexed is
+	// a no-op in Meilisearch, so "landed" includes the common case where the job had no document
+	// to begin with — there is nothing to distinguish and nothing to retry.
+	CompleteSearchDeleteOutbox(ctx context.Context, ids []int64) error
 	// Promote a suggested link to a confirmed one: the suggestion becomes job_id with
 	// link_source 'manual'. No-op (0 rows) when there is no pending suggestion.
 	ConfirmEmailLink(ctx context.Context, arg ConfirmEmailLinkParams) (int64, error)
@@ -742,6 +822,12 @@ type Querier interface {
 	// Remove a user's company vote (toggle-clear or the DELETE endpoint). No-op when
 	// absent.
 	DeleteCompanyVote(ctx context.Context, arg DeleteCompanyVoteParams) error
+	// Housekeeping: drop dead-lettered entries older than the cutoff.
+	//
+	// Note what this does NOT reap: entries whose job row is gone. For search_outbox that is
+	// garbage, since a vanished job cannot be indexed. Here it is the whole point — cmd/prune
+	// hard-deletes jobs, and their documents still have to leave the index.
+	DeleteDeadSearchDeleteOutbox(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	// Unlink Discord. Returns the affected row count: 0 means there was no link.
 	DeleteDiscordLink(ctx context.Context, userID int64) (int64, error)
 	DeleteEmailClassificationOutbox(ctx context.Context, id int64) error
@@ -869,6 +955,10 @@ type Querier interface {
 	// independent of a prior view: it inserts the row (viewed_at defaults) or
 	// refreshes dismissed_at in place.
 	DismissJob(ctx context.Context, arg DismissJobParams) (DismissJobRow, error)
+	// The id range the owned-marker backfill walks, plus how many rows still need it. Exact count on
+	// purpose, like the folded-slug bounds beside it: the pass is run by hand and rarely, and a wrong
+	// "0 remaining" would end it early.
+	DuplicateMarkerOwnerBackfillBounds(ctx context.Context) (DuplicateMarkerOwnerBackfillBoundsRow, error)
 	// Transactional-outbox enqueue for the ingest write path: queue this one job for a full-
 	// description fetch, gated on it not having been hydrated already.
 	//
@@ -1601,6 +1691,14 @@ type Querier interface {
 	// Retracted rows are excluded, and the (user_id, job_id, kind) index is partial on exactly that
 	// predicate.
 	LastStageSetAt(ctx context.Context, arg LastStageSetAtParams) (pgtype.Timestamptz, error)
+	// created_at of the most recently added open, public job — the "is the pipeline
+	// still writing rows" signal for the public /status endpoint. Same predicate and
+	// ordering as ListJobs above, so it is served by the same jobs_open_created_idx
+	// (an index scan for one row, not the full scan CountCatalogueScale needs) and
+	// safe on a live request path. Wrapped in a scalar subquery so this always
+	// returns exactly one row — NULL for an empty catalogue — rather than the
+	// no-rows error a bare LIMIT 1 SELECT would give sqlc's :one on an empty table.
+	LatestOpenJobAddedAt(ctx context.Context) (pgtype.Timestamptz, error)
 	// Manually link (or relink) an email to a chosen application, overriding any
 	// auto-link or suggestion.
 	LinkEmailToJob(ctx context.Context, arg LinkEmailToJobParams) (int64, error)
@@ -1775,10 +1873,20 @@ type Querier interface {
 	// internal/handler/companies.go) — rating is not (yet) a Meili-sortable
 	// attribute, so routing there would silently drop the requested order.
 	ListCompanies(ctx context.Context, arg ListCompaniesParams) ([]ListCompaniesRow, error)
-	// The merge worker's input: every company that has an open job, with the count that elects
-	// the winner of its folded group. Grouping happens in Go because the fold is
-	// normalize.CompanyKey — a repeating legal-form strip no SQL expression should try to
-	// reproduce, since a second implementation of that rule is the bug this change removes.
+	// The merge worker's input: every company slug the JOBS table actually holds, with the display
+	// name and the open-job count that elects the winner of its folded group.
+	//
+	// READ FROM jobs, NOT FROM companies.job_count. That column counts the postings the SEARCH
+	// INDEX holds, not the rows this worker rewrites, and the two diverge exactly where it hurts:
+	// a slug a merge has already retired drops to 0 in the index while its unmoved rows stay in
+	// the table. Planning from the counter made those rows INVISIBLE to the planner — 8,375 of
+	// them on `jpmorganchase` alone, stranded permanently, because the better the merge worked the
+	// more reliably the remainder hid.
+	//
+	// The name is the most recent one seen for the slug, matching how SyncCompaniesFromJobs
+	// collapses a slug's name variants. Grouping into folded groups happens in Go because the fold
+	// is normalize.CompanyKey — a repeating legal-form strip no SQL expression should reproduce,
+	// since a second implementation of that rule is the bug this whole change removes.
 	ListCompaniesForMerge(ctx context.Context) ([]ListCompaniesForMergeRow, error)
 	// Keyset page of hiring companies (job_count > 0) for the companies search reindex,
 	// cursored by the slug primary key (first chunk keyed by the empty string, which
@@ -1817,6 +1925,15 @@ type Querier interface {
 	// rows that already hold industries, but the merge pass must also reach companies
 	// with none, and one query serving both keeps the two walks identical.
 	ListCompanyIndustriesPage(ctx context.Context, arg ListCompanyIndustriesPageParams) ([]ListCompanyIndustriesPageRow, error)
+	// The whole registry, folded key to canonical slug. cmd/backfill-derive loads it once per run
+	// and resolves in memory: it re-derives every job in the table, and jobderive is pure, so
+	// without this a backfill would silently move every merged posting back to the spelling its
+	// source happened to use — undoing the merges and taking role_fingerprint, which is computed
+	// from the company slug, with it.
+	//
+	// Ordered for the same reason ResolveCompanySlugAliases is: one canonical slug per folded key
+	// is the writer's invariant, and a violation should resolve identically every run.
+	ListCompanySlugAliases(ctx context.Context) ([]ListCompanySlugAliasesRow, error)
 	// Every company slug, unfiltered. cmd/import-yc loads this once into an
 	// in-memory set to resolve each yc-oss directory entry's current-name and
 	// former-name slug candidates, instead of one CompanyExists round trip per
@@ -2273,6 +2390,10 @@ type Querier interface {
 	// The caller's own notifications, newest first, standard offset/limit paging
 	// (matching every other /me/* list endpoint in this codebase).
 	ListUserNotifications(ctx context.Context, arg ListUserNotificationsParams) ([]ListUserNotificationsRow, error)
+	// excluded_skills for a batch of users, one round trip regardless of batch size. A user_id
+	// with no profile row simply produces no row here; the caller treats absence as an empty
+	// exclude set.
+	ListUserProfilesExcludedSkills(ctx context.Context, userIds []int64) ([]ListUserProfilesExcludedSkillsRow, error)
 	// Users whose stored structured résumé currently describes their stored CV, for the
 	// geography reconciler (cmd/backfill-resume-geo). Superseded structures are excluded:
 	// deriving geography from one would route around the staleness rule that governs the
@@ -2378,10 +2499,16 @@ type Querier interface {
 	// from the row's own applied_at, so a dated recording carries the mail's date
 	// into the ledger rather than now().
 	MarkJobApplied(ctx context.Context, arg MarkJobAppliedParams) (MarkJobAppliedRow, error)
-	// Point one row at its canon. The import path only: the batch passes recompute whole companies
-	// (RecomputeRoleDuplicatesForCompany, SuppressAggregatorDuplicatesForCompany) and must keep
-	// doing so — this marks the single row an import just wrote.
-	MarkJobDuplicateOf(ctx context.Context, arg MarkJobDuplicateOfParams) (int64, error)
+	// Point one row at its ROLE canon. The import path only: the batch passes recompute whole
+	// companies (RecomputeRoleDuplicatesForCompanies, SuppressAggregatorDuplicatesForCompanies) and
+	// must keep doing so — this marks the single row an import just wrote.
+	//
+	// Writes duplicate_of_role, not duplicate_of, and the name says so. Both callers
+	// (cmd/ingest/store.go, internal/linkimport) resolve their canon through
+	// jobdedup.CanonicalForRole, so this is the role verdict arriving early — the same clustering
+	// the batch pass would reach hours later. A write to duplicate_of itself would not survive:
+	// the derivation in migration 0115 recomputes it from the owned columns.
+	MarkJobDuplicateOfRole(ctx context.Context, arg MarkJobDuplicateOfRoleParams) (int64, error)
 	// Record one expired probe: increment the strike counter and, in the same write,
 	// close the job (closed_at) once it reaches the threshold the caller owns — the
 	// two-strike grace that absorbs a transient death signal. Returns the new strike
@@ -2593,6 +2720,10 @@ type Querier interface {
 	// The two parameter arrays are positionally paired. They are unnested separately and
 	// rejoined on ordinality because sqlc cannot infer the types of a multi-argument
 	// unnest over query parameters.
+	// A pruned job's document has to leave the facet index too, and this is the only place that
+	// knows it existed: after this statement the row is gone, so nothing downstream could work
+	// out that it was ever indexed. search_delete_outbox deliberately carries no foreign key to
+	// jobs, which is what lets this entry outlive the row it names — see migration 0113.
 	PruneJobs(ctx context.Context, arg PruneJobsParams) ([]int64, error)
 	// One row per company with its current open-count and the open-count as of @prev_ts,
 	// from a single scan of jobs over canonical rows only (same count(*) FILTER idiom as
@@ -2820,6 +2951,12 @@ type Querier interface {
 	// once attempts reach the max. claimed_at is left in place — its expiry gates the
 	// retry to a later pass and doubles as the crash reaper, mirroring subscription_matches.
 	RecordReminderDeliveryFailure(ctx context.Context, arg RecordReminderDeliveryFailureParams) error
+	// Record a failed attempt against one entry, dead-lettering it once it passes max_attempts so
+	// a permanently poisonous entry stops being reclaimed by the lease forever.
+	//
+	// Returns failed_at so the caller reads the dead-letter decision back rather than recomputing
+	// it, which is what keeps the threshold in one place. Mirrors RecordSearchOutboxFailure.
+	RecordSearchDeleteOutboxFailure(ctx context.Context, arg RecordSearchDeleteOutboxFailureParams) (pgtype.Timestamptz, error)
 	// Count a failed attempt: bump attempts, record the error, and dead-letter (set
 	// failed_at) once attempts reach the max. The lease (claimed_at) is intentionally
 	// left in place — its expiry gates the retry to a later run and doubles as the

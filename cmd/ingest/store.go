@@ -208,9 +208,9 @@ func (s *dbStore) save(ctx context.Context, j job.Job, form *applyform.Form) err
 	deduped := false
 	if clustersByRole(saved) {
 		if canon, ok := jobdedup.CanonicalForRole(ctx, qtx, params, saved.id); ok {
-			if _, err := qtx.MarkJobDuplicateOf(ctx, db.MarkJobDuplicateOfParams{
-				ID:          saved.id,
-				DuplicateOf: pgtype.Int8{Int64: canon.ID, Valid: true},
+			if _, err := qtx.MarkJobDuplicateOfRole(ctx, db.MarkJobDuplicateOfRoleParams{
+				ID:              saved.id,
+				DuplicateOfRole: pgtype.Int8{Int64: canon.ID, Valid: true},
 			}); err != nil {
 				return fmt.Errorf("mark job %d duplicate of %d: %w", saved.id, canon.ID, err)
 			}

@@ -102,7 +102,7 @@ func TestCanonicalJobForRole(t *testing.T) {
 		anchor := seed(t, "greenhouse", "acme:20", "anchor-role-acme", "fp-chain-anchor", false)
 		demoted := seed(t, "greenhouse", "acme:21", "demoted-role-acme", "fp-chain", false)
 		if _, err := pool.Exec(ctx,
-			`UPDATE jobs SET duplicate_of = $1 WHERE id = $2`, anchor, demoted); err != nil {
+			`UPDATE jobs SET duplicate_of_role = $1 WHERE id = $2`, anchor, demoted); err != nil {
 			t.Fatalf("demote the candidate: %v", err)
 		}
 		_, err := q.CanonicalJobForRole(ctx, CanonicalJobForRoleParams{
@@ -115,7 +115,7 @@ func TestCanonicalJobForRole(t *testing.T) {
 	})
 }
 
-func TestMarkJobDuplicateOf(t *testing.T) {
+func TestMarkJobDuplicateOfRole(t *testing.T) {
 	pool := startPostgres(t)
 	ctx := context.Background()
 	q := New(pool)
@@ -134,9 +134,9 @@ func TestMarkJobDuplicateOf(t *testing.T) {
 		t.Fatalf("seed the row to demote: %v", err)
 	}
 
-	n, err := q.MarkJobDuplicateOf(ctx, MarkJobDuplicateOfParams{
-		ID:          dupID,
-		DuplicateOf: pgtype.Int8{Int64: canonID, Valid: true},
+	n, err := q.MarkJobDuplicateOfRole(ctx, MarkJobDuplicateOfRoleParams{
+		ID:              dupID,
+		DuplicateOfRole: pgtype.Int8{Int64: canonID, Valid: true},
 	})
 	if err != nil || n != 1 {
 		t.Fatalf("MarkJobDuplicateOf = (%d, %v), want (1, nil)", n, err)

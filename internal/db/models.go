@@ -582,7 +582,10 @@ type Job struct {
 	SalaryCurrencySource  string             `json:"salary_currency_source"`
 	SalaryPeriodSource    string             `json:"salary_period_source"`
 	// company_slug with hyphens removed. Maintained by every write path that sets company_slug (enforced by a test); exists so the aggregator-suppression pass can filter on a column the planner can estimate instead of an expression it cannot.
-	CompanySlugFolded pgtype.Text `json:"company_slug_folded"`
+	CompanySlugFolded     pgtype.Text `json:"company_slug_folded"`
+	DuplicateOfAggregator pgtype.Int8 `json:"duplicate_of_aggregator"`
+	DuplicateOfRole       pgtype.Int8 `json:"duplicate_of_role"`
+	DuplicateOfFuzzy      pgtype.Int8 `json:"duplicate_of_fuzzy"`
 }
 
 type JobDailyStat struct {
@@ -829,6 +832,16 @@ type ScreeningAnswer struct {
 	WillingToRelocate     pgtype.Bool        `json:"willing_to_relocate"`
 	Age18OrOlder          pgtype.Bool        `json:"age_18_or_older"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SearchDeleteOutbox struct {
+	ID        int64              `json:"id"`
+	JobID     int64              `json:"job_id"`
+	Attempts  int32              `json:"attempts"`
+	ClaimedAt pgtype.Timestamptz `json:"claimed_at"`
+	FailedAt  pgtype.Timestamptz `json:"failed_at"`
+	LastError string             `json:"last_error"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type SearchOutbox struct {
