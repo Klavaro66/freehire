@@ -512,13 +512,19 @@ WHERE company_slug = sqlc.arg(company_slug)
 ORDER BY id
 LIMIT 1;
 
--- name: MarkJobDuplicateOf :execrows
--- Point one row at its canon. The import path only: the batch passes recompute whole companies
--- (RecomputeRoleDuplicatesForCompany, SuppressAggregatorDuplicatesForCompany) and must keep
--- doing so — this marks the single row an import just wrote.
+-- name: MarkJobDuplicateOfRole :execrows
+-- Point one row at its ROLE canon. The import path only: the batch passes recompute whole
+-- companies (RecomputeRoleDuplicatesForCompanies, SuppressAggregatorDuplicatesForCompanies) and
+-- must keep doing so — this marks the single row an import just wrote.
+--
+-- Writes duplicate_of_role, not duplicate_of, and the name says so. Both callers
+-- (cmd/ingest/store.go, internal/linkimport) resolve their canon through
+-- jobdedup.CanonicalForRole, so this is the role verdict arriving early — the same clustering
+-- the batch pass would reach hours later. A write to duplicate_of itself would not survive:
+-- the derivation in migration 0115 recomputes it from the owned columns.
 UPDATE jobs
-SET duplicate_of = sqlc.arg(duplicate_of),
-    updated_at   = now()
+SET duplicate_of_role = sqlc.arg(duplicate_of_role),
+    updated_at        = now()
 WHERE id = sqlc.arg(id);
 
 -- name: ListRoleClusterCopies :many
@@ -635,11 +641,11 @@ target AS (
     WHERE j.company_slug = ANY(sqlc.arg(companies)::text[]) AND j.closed_at IS NULL
 )
 UPDATE jobs j
-SET duplicate_of = t.new_dup,
-    updated_at   = now()
+SET duplicate_of_role = t.new_dup,
+    updated_at        = now()
 FROM target t
 WHERE j.id = t.id
-  AND j.duplicate_of IS DISTINCT FROM t.new_dup;
+  AND j.duplicate_of_role IS DISTINCT FROM t.new_dup;
 
 -- name: CompaniesWithAggregatorPostings :many
 -- Company slugs with at least one OPEN aggregator posting — the drive list for the
@@ -799,11 +805,11 @@ target AS (
     GROUP BY a.id
 )
 UPDATE jobs j
-SET duplicate_of = t.new_dup,
-    updated_at   = now()
+SET duplicate_of_aggregator = t.new_dup,
+    updated_at              = now()
 FROM target t
 WHERE j.id = t.id
-  AND j.duplicate_of IS DISTINCT FROM t.new_dup;
+  AND j.duplicate_of_aggregator IS DISTINCT FROM t.new_dup;
 
 -- name: PropagateCollectionsToJobs :execrows
 -- Denormalize each company's curated-collection set onto its jobs, so the search
@@ -1555,8 +1561,8 @@ ORDER BY id;
 -- meantime is left alone. The IS DISTINCT FROM guard makes a re-run free, and the standard
 -- recompute reverses everything here by recomputing duplicate_of from scratch.
 UPDATE jobs j
-SET duplicate_of = m.canon_id,
-    updated_at   = now()
+SET duplicate_of_fuzzy = m.canon_id,
+    updated_at         = now()
 FROM (
     SELECT unnest(sqlc.arg(ids)::bigint[]) AS id,
            unnest(sqlc.arg(canons)::bigint[]) AS canon_id
@@ -1564,7 +1570,7 @@ FROM (
 WHERE j.id = m.id
   AND j.company_slug = sqlc.arg(company)
   AND j.closed_at IS NULL
-  AND j.duplicate_of IS DISTINCT FROM m.canon_id;
+  AND j.duplicate_of_fuzzy IS DISTINCT FROM m.canon_id;
 
 -- name: OrphanAggregatorCompanies :many
 -- Companies the catalogue holds ONLY through aggregators — the worklist cmd/harvest-orphans
@@ -1619,4 +1625,58 @@ WHERE id >= sqlc.arg(from_id) AND id < sqlc.arg(to_id)
 SELECT COALESCE(min(id), 0)::bigint AS min_id,
        COALESCE(max(id), 0)::bigint AS max_id,
        count(*) FILTER (WHERE company_slug_folded IS DISTINCT FROM replace(company_slug, '-', ''))::bigint AS remaining
+FROM jobs;
+
+-- name: BackfillDuplicateMarkerOwnerChunk :execrows
+-- Seed the owned marker columns (0114) from the single duplicate_of that predates them, for one
+-- id range.
+--
+-- Provenance cannot be recovered: a marked row records WHERE it points, never which pass decided
+-- it. So the seed goes by shape — a marked row whose own source is an aggregator and whose canon's
+-- is not is the aggregator pass's; everything else is seeded as the role pass's.
+--
+-- Fuzzy markers are indistinguishable from role markers that way and land in the role column. That
+-- is self-correcting and cheap to reason about: the first role recompute clears the ones that are
+-- not role clusters, and the fuzzy pass re-sets them in its own column during the same run. One
+-- extra cycle of the churn this change removes, once.
+--
+-- Closed rows are seeded too, deliberately. The passes only consider open rows, so nothing would
+-- ever seed a closed row's columns — and then the first statement to touch any marker column on it
+-- would fire the derivation and silently clear a duplicate_of that prune still walks.
+--
+-- The "no owned column set yet" predicate is what makes re-runs free, and it is also the reconcile
+-- sweep: a row written between this chunk passing its range and the trigger existing still matches,
+-- so running the pass again after the trigger lands finishes the job. No separate mode needed.
+UPDATE jobs j
+SET duplicate_of_aggregator = CASE
+        WHEN j.source = ANY(sqlc.arg(aggregators)::text[])
+         AND NOT (c.source = ANY(sqlc.arg(aggregators)::text[]))
+        THEN j.duplicate_of
+    END,
+    duplicate_of_role = CASE
+        WHEN j.source = ANY(sqlc.arg(aggregators)::text[])
+         AND NOT (c.source = ANY(sqlc.arg(aggregators)::text[]))
+        THEN NULL
+        ELSE j.duplicate_of
+    END
+FROM jobs c
+WHERE c.id = j.duplicate_of
+  AND j.id >= sqlc.arg(from_id) AND j.id < sqlc.arg(to_id)
+  AND j.duplicate_of IS NOT NULL
+  AND j.duplicate_of_aggregator IS NULL
+  AND j.duplicate_of_role IS NULL
+  AND j.duplicate_of_fuzzy IS NULL;
+
+-- name: DuplicateMarkerOwnerBackfillBounds :one
+-- The id range the owned-marker backfill walks, plus how many rows still need it. Exact count on
+-- purpose, like the folded-slug bounds beside it: the pass is run by hand and rarely, and a wrong
+-- "0 remaining" would end it early.
+SELECT COALESCE(min(id), 0)::bigint AS min_id,
+       COALESCE(max(id), 0)::bigint AS max_id,
+       count(*) FILTER (
+           WHERE duplicate_of IS NOT NULL
+             AND duplicate_of_aggregator IS NULL
+             AND duplicate_of_role IS NULL
+             AND duplicate_of_fuzzy IS NULL
+       )::bigint AS remaining
 FROM jobs;
