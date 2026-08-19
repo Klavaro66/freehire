@@ -1,13 +1,14 @@
-// The five stages a posting passes through before it's searchable, in order — this is a
-// real pipeline, not a curated list, so the numbering is load-bearing rather than
-// decorative. Written from docs/architecture.md and the root AGENTS.md; kept in one file
-// so the page's copy and its illustration registry (pipeline/StageIllustration.svelte)
-// cannot name a stage that has no picture, or draw one nothing describes.
+// The stages a posting passes through before it's searchable, roughly in the order a
+// reader should follow them — "roughly" because it isn't a strict single-pass pipeline:
+// deduplicate (below) actually runs at two different points, which is why the page
+// doesn't number these. Written from docs/architecture.md and the root AGENTS.md; kept
+// in one file so the page's copy and its illustration registry
+// (pipeline/StageIllustration.svelte) cannot name a stage that has no picture, or draw
+// one nothing describes.
 export type StageKey = 'ingest' | 'derive' | 'enrich' | 'deduplicate' | 'reindex';
 
 export type Stage = {
   key: StageKey;
-  n: string;
   title: string;
   blurb: string;
   detail: string;
@@ -16,7 +17,6 @@ export type Stage = {
 export const PIPELINE_STAGES: Stage[] = [
   {
     key: 'ingest',
-    n: '01',
     title: 'Ingest',
     blurb: 'Crawled straight from the source, several times a day.',
     detail:
@@ -24,7 +24,6 @@ export const PIPELINE_STAGES: Stage[] = [
   },
   {
     key: 'derive',
-    n: '02',
     title: 'Derive',
     blurb: 'Tagged by a fixed dictionary — never guessed.',
     detail:
@@ -32,7 +31,6 @@ export const PIPELINE_STAGES: Stage[] = [
   },
   {
     key: 'enrich',
-    n: '03',
     title: 'Enrich',
     blurb: "An LLM reads what a dictionary can't tag.",
     detail:
@@ -40,15 +38,13 @@ export const PIPELINE_STAGES: Stage[] = [
   },
   {
     key: 'deduplicate',
-    n: '04',
     title: 'Deduplicate',
     blurb: 'Three boards, one listing.',
     detail:
-      "Postings cluster by role and company, and near-duplicate copies collapse into one — including the aggregator's copy of a job we already have straight from the source. You see one listing; where it's actually posted is still there for you to check.",
+      "This actually runs twice. Ingest itself never stores the same posting from the same source twice; separately, a later pass clusters near-duplicate postings by role and company across different boards and collapses them into one — including the aggregator's copy of a job we already have straight from the source. You see one listing; where it's actually posted is still there for you to check.",
   },
   {
     key: 'reindex',
-    n: '05',
     title: 'Reindex',
     blurb: 'Rebuilt and swapped in — search never goes down.',
     detail:

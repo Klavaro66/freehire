@@ -46,30 +46,27 @@
     <!-- A grid at five-abreast read as five similar boxes, not a sequence — a
          wrapping grid's reading order is still technically left-to-right-top-to-
          bottom, but nothing on the page said so. A vertical rail with one
-         continuous line threading every node is unambiguous at any width, and it's
-         the same idiom this line of work already reaches for (see NumberedGrid's
-         own numbered-list cousin) when order is the point rather than decoration. -->
+         continuous line threading every stage is unambiguous at any width.
+         Un-numbered on purpose: deduplication (below) is not a single pass this
+         line would place fourth — it happens at ingest too — so a literal 01-05
+         would assert an order truer than the real pipeline. -->
     <div class="flex max-w-3xl flex-col">
       {#each PIPELINE_STAGES as stage, i (stage.key)}
         <div class="flex gap-4 sm:gap-6">
           <div class="flex flex-col items-center">
-            <span
-              class="flex size-10 shrink-0 items-center justify-center rounded-full border border-border bg-background font-mono text-sm font-semibold sm:size-12"
-            >
-              {stage.n}
-            </span>
+            <span class="mt-2 size-3 shrink-0 rounded-full bg-foreground" aria-hidden="true"></span>
             {#if i < PIPELINE_STAGES.length - 1}
-              <span class="my-1 w-px flex-1 bg-border"></span>
+              <span class="my-2 w-px flex-1 bg-border"></span>
             {/if}
           </div>
           <div class="flex flex-1 flex-col gap-4 pb-10 sm:flex-row sm:gap-6 sm:pb-12">
             <div class="sm:w-56 sm:shrink-0">
-              <h3 class="pt-1.5 text-sm font-semibold tracking-tight sm:pt-2.5">{stage.title}</h3>
+              <h3 class="text-sm font-semibold tracking-tight">{stage.title}</h3>
               <div class="mt-3 rounded-md bg-secondary/40 p-3">
                 <StageIllustration stage={stage.key} />
               </div>
             </div>
-            <div class="flex flex-col gap-2 sm:pt-2.5">
+            <div class="flex flex-col gap-2">
               <p class="text-sm font-medium leading-snug">{stage.blurb}</p>
               <Disclosure summary="More detail" srSuffix={stage.title}>
                 <p class="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
