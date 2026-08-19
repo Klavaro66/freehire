@@ -98,7 +98,7 @@
           </span>
           <span class="text-xs text-muted-foreground">
             {discord.linked
-              ? `Run /contribute in the freehire Discord server for the same reward.`
+              ? 'Run /contribute in the freehire Discord server for the same reward.'
               : 'Link your account to run /contribute in the freehire Discord server for the same reward.'}
           </span>
         </div>
