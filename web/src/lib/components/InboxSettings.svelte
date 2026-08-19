@@ -1,12 +1,12 @@
 <script lang="ts">
-  // The inbox's Settings pane: the two ways to get mail in. It owns its own
-  // mutations (claim, release, disconnect) and the flags that go with them, and
-  // reports the outcome upward — the mail list, its filters and its pager live in
-  // InboxView and stay there.
+  // The inbox's Settings pane: the freehire mailbox, the one source it still owns
+  // (claim/release). It reports the outcome upward — the mail list, its filters and
+  // its pager live in InboxView and stay there.
   //
-  // `sync` is deliberately NOT owned here even though its button is. Syncing polls
-  // the listing repeatedly while Gmail catches up, and that loop belongs beside the
-  // pager it polls; this component only renders the button and its pending state.
+  // Gmail connect/disconnect/sync lives on the Integrations tab (/my/integrations),
+  // not here — this pane only shows a short status line pointing there, so a caller
+  // wondering "where did the Gmail card go" finds it in one click.
+  import { resolve } from '$app/paths';
   import { api } from '$lib/api';
   import type { GmailStatus, MailboxStatus, InboxSource } from '$lib/api';
   import { Badge, Button, ConfirmDialog } from '$lib/ui';
@@ -16,14 +16,6 @@
   interface Props {
     gmail: GmailStatus | null;
     mailbox: MailboxStatus | null;
-    /** True while the parent's sync poll is running. */
-    syncing: boolean;
-    /** Run the Gmail sync + the listing poll that follows it. */
-    onSync: () => void;
-    /** Open the first-time connect explainer. */
-    onConnect: () => void;
-    /** Send the browser to Google's consent screen (re-consent path). */
-    onReconnect: () => void;
     /**
      * A source was added or removed. `removed` names the account that went away, so
      * the parent can drop a filter pointing at it before reloading.
@@ -32,33 +24,12 @@
     onError: (message: string) => void;
   }
 
-  let {
-    gmail = $bindable(),
-    mailbox = $bindable(),
-    syncing,
-    onSync,
-    onConnect,
-    onReconnect,
-    onSourceChanged,
-    onError,
-  }: Props = $props();
+  let { gmail, mailbox = $bindable(), onSourceChanged, onError }: Props = $props();
 
   let claiming = $state(false);
-  let confirmDisconnectGmailOpen = $state(false);
   let confirmReleaseMailboxOpen = $state(false);
 
-  const hasGmail = $derived(!!gmail?.connected);
   const hasMailbox = $derived(!!mailbox?.address);
-
-  async function disconnectGmail() {
-    try {
-      await api.disconnectGmail();
-      gmail = { connected: false, available: gmail?.available };
-      onSourceChanged('gmail');
-    } catch (e) {
-      onError(errorMessage(e, 'Failed to disconnect.'));
-    }
-  }
 
   async function claimMailbox() {
     if (claiming) return;
@@ -87,37 +58,27 @@
   }
 </script>
 
-<!-- Sources: the two ways to get mail in — connect Gmail and/or claim a mailbox. -->
+<!-- Sources: the two ways to get mail in — Gmail (a status line, connected on
+     Integrations) and the freehire mailbox (owned here). -->
 <div class="grid gap-3 sm:grid-cols-2">
-  <!-- Gmail -->
+  <!-- Gmail: status only — the connect/disconnect/sync UI lives on Integrations. -->
   <div class="rounded-xl border border-border bg-card p-4">
     <div class="flex items-center gap-2 text-sm font-medium">
       <Mail class="h-4 w-4 text-muted-foreground" /> Gmail
-    </div>
-    {#if hasGmail}
-      <p class="mt-1 truncate text-xs text-muted-foreground">{gmail?.email}</p>
-      {#if gmail?.status === 'needs_reconsent'}
-        <Badge variant="outline" class="mt-2 border-destructive/40 text-destructive">Reconnect needed</Badge>
+      {#if gmail?.connected}
+        <Badge variant="outline" class="border-brand-ring/40 text-brand-strong">Connected</Badge>
       {/if}
-      <div class="mt-3 flex flex-wrap gap-2">
-        {#if gmail?.status === 'needs_reconsent'}
-          <Button variant="secondary" size="sm" onclick={onReconnect}>Reconnect</Button>
-        {/if}
-        <Button variant="secondary" size="sm" disabled={syncing} onclick={onSync}>
-          {syncing ? 'Syncing…' : 'Sync'}
-        </Button>
-        <Button variant="outline" size="sm" onclick={() => (confirmDisconnectGmailOpen = true)}>
-          Disconnect
-        </Button>
-      </div>
+    </div>
+    {#if gmail?.connected}
+      <p class="mt-1 truncate text-xs text-muted-foreground">{gmail?.email}</p>
     {:else if gmail?.available}
       <p class="mt-1 text-xs text-muted-foreground">Pull replies from your own Gmail (needs Google sign-in).</p>
-      <Button variant="primary" size="sm" class="mt-3" onclick={onConnect}>
-        Connect Gmail <Mail class="h-4 w-4" />
-      </Button>
     {:else}
       <p class="mt-1 text-xs text-muted-foreground">Not available yet.</p>
     {/if}
+    <Button variant="secondary" size="sm" class="mt-3" href={resolve('/my/integrations')}>
+      {gmail?.connected ? 'Manage in Integrations' : 'Connect in Integrations'}
+    </Button>
   </div>
 
   <!-- Hosted mailbox -->
@@ -146,14 +107,6 @@
     {/if}
   </div>
 </div>
-
-<ConfirmDialog
-  bind:open={confirmDisconnectGmailOpen}
-  title="Disconnect Gmail?"
-  description="Its synced mail is removed."
-  confirmLabel="Disconnect"
-  onConfirm={disconnectGmail}
-/>
 
 <ConfirmDialog
   bind:open={confirmReleaseMailboxOpen}

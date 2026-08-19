@@ -349,7 +349,9 @@
     {#if calendarConnected === false && connectAvailable}
       <!-- Said plainly rather than discovered at Google's consent screen. The OAuth app
            is not verified yet, so an account outside the test roster is simply refused
-           there — and a refusal with no explanation reads as a fault in freehire. -->
+           there — and a refusal with no explanation reads as a fault in freehire. The
+           connect action itself lives on Integrations, alongside Mail and every other
+           third-party connection, not inline here. -->
       <div class="rounded-lg border bg-card p-4">
         <p class="text-sm">
           Connect your calendar and the interviews you accept will appear here, on the day they
@@ -360,15 +362,9 @@
           calendar is read and discarded. While our Google app is awaiting verification the
           connection works for approved test accounts only.
         </p>
-        <!-- eslint-disable svelte/no-navigation-without-resolve -- an API route the browser must
-             navigate to so Google can redirect it back, not a SvelteKit page to resolve. The
-             block form because prettier puts href on its own line, past a next-line disable. -->
-        <a
-          href="/api/v1/me/calendar/connect"
-          class="mt-3 inline-block rounded-md border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
-          >Connect Google Calendar</a
-        >
-        <!-- eslint-enable svelte/no-navigation-without-resolve -->
+        <Button variant="outline" size="sm" class="mt-3" href={resolve('/my/integrations')}>
+          Connect in Integrations
+        </Button>
       </div>
     {/if}
 

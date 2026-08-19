@@ -189,6 +189,11 @@ const gmailStateCookieName = "hire_gmail_state"
 // one so two consents in flight cannot complete each other.
 const calendarStateCookieName = "hire_calendar_state"
 
+// integrationsPath is where both the mail and calendar OAuth callbacks land, success or
+// failure — the Integrations tab is the one surface that owns connect/disconnect for
+// every third-party account.
+const integrationsPath = "/my/integrations"
+
 // GmailConnect starts the "Connect Gmail" incremental-OAuth flow for the
 // signed-in user: it sets a CSRF state cookie and redirects to Google's consent
 // screen for gmail.readonly.
@@ -203,13 +208,14 @@ func (h *inboxHandlers) GmailConnect(c *fiber.Ctx) error {
 
 // GmailCallback finishes the flow: it verifies state, exchanges the code for a
 // refresh token + the connected address, stores the token encrypted, and
-// redirects back to the inbox. Failures redirect with ?gmail_error (never JSON);
-// the underlying cause is logged server-side first (like oauthFail), since the
-// generic redirect marker tells the user nothing.
+// redirects back to the Integrations tab — the surface the connect was started
+// from. Failures redirect with ?gmail_error (never JSON); the underlying cause
+// is logged server-side first (like oauthFail), since the generic redirect
+// marker tells the user nothing.
 func (h *inboxHandlers) GmailCallback(c *fiber.Ctx) error {
 	redirect := func(qs string, err error) error {
 		log.Printf("gmail connect: %s: %v", qs, err)
-		return c.Redirect(h.frontendOrigin+"/my/inbox?"+qs, fiber.StatusFound)
+		return c.Redirect(h.frontendOrigin+integrationsPath+"?"+qs, fiber.StatusFound)
 	}
 	userID, ok := auth.UserID(c)
 	if !ok {
@@ -242,7 +248,7 @@ func (h *inboxHandlers) GmailCallback(c *fiber.Ctx) error {
 			return redirect("gmail_error=exchange", err)
 		}
 	}
-	return c.Redirect(h.frontendOrigin+"/my/inbox?gmail=connected", fiber.StatusFound)
+	return c.Redirect(h.frontendOrigin+integrationsPath+"?gmail=connected", fiber.StatusFound)
 }
 
 // CalendarConnect starts the calendar consent. Its own state cookie: two flows in flight
@@ -260,12 +266,12 @@ func (h *inboxHandlers) CalendarConnect(c *fiber.Ctx) error {
 // that it now covers the calendar. Failures redirect with ?calendar_error and are logged
 // server-side first, exactly as the mail flow does — the marker tells the user nothing.
 //
-// It lands back on the tracking calendar rather than the inbox: that is the surface the
-// grant was given for.
+// It lands back on Integrations rather than the tracking calendar: that is the surface
+// the connect was started from, same as the mail flow.
 func (h *inboxHandlers) CalendarCallback(c *fiber.Ctx) error {
 	redirect := func(qs string, err error) error {
 		log.Printf("calendar connect: %s: %v", qs, err)
-		return c.Redirect(h.frontendOrigin+"/my/tracking/calendar?"+qs, fiber.StatusFound)
+		return c.Redirect(h.frontendOrigin+integrationsPath+"?"+qs, fiber.StatusFound)
 	}
 	userID, ok := auth.UserID(c)
 	if !ok {
@@ -294,7 +300,7 @@ func (h *inboxHandlers) CalendarCallback(c *fiber.Ctx) error {
 			return redirect("calendar_error=exchange", err)
 		}
 	}
-	return c.Redirect(h.frontendOrigin+"/my/tracking/calendar?calendar=connected", fiber.StatusFound)
+	return c.Redirect(h.frontendOrigin+integrationsPath+"?calendar=connected", fiber.StatusFound)
 }
 
 // GmailStatus reports whether the caller has connected Gmail.
@@ -315,7 +321,12 @@ func (h *inboxHandlers) GmailStatus(c *fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(fiber.Map{"data": fiber.Map{
-		"connected": true, "email": conn.Email, "status": conn.Status, "available": h.gmailReady(),
+		// The row's existence alone does not mean mail is connected: UpsertCalendarGrant
+		// inserts this same row with an empty address for a calendar-only consent (see its
+		// comment, and ListConnectedGmailUsers' matching `email <> ''` guard). Reporting
+		// `connected: true` for that row would show the SPA's Mail card as connected with
+		// no address behind it.
+		"connected": conn.Email != "", "email": conn.Email, "status": conn.Status, "available": h.gmailReady(),
 		// Whether this grant also covers the calendar. Read from the recorded scopes and
 		// not from the row's existence: the two consents are separate, so a connected
 		// mailbox says nothing about the calendar and a calendar grant may have no
