@@ -22,8 +22,8 @@
   const compactNf = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
   const companiesLabel = $derived(companies != null ? compactNf.format(companies) : null);
 
-  let container: HTMLDivElement;
-  let canvas: HTMLCanvasElement;
+  let container = $state<HTMLDivElement | undefined>(undefined);
+  let canvas = $state<HTMLCanvasElement | undefined>(undefined);
   let cleanup: (() => void) | undefined;
 
   onMount(() => {
@@ -294,16 +294,21 @@
       core.position.copy(fieldOffset);
       halo.position.copy(fieldOffset);
 
+      // This whole block runs from onMount, after bind:this has set container — but it's
+      // `let`, so TS won't carry that narrowing into the closures below without a `const`
+      // alias to hold onto.
+      const el = container;
+      if (!el) return;
       const resize = () => {
-        const w = container.clientWidth;
-        const h = container.clientHeight;
+        const w = el.clientWidth;
+        const h = el.clientHeight;
         renderer.setSize(w, h, false);
         camera.aspect = w / Math.max(1, h);
         camera.updateProjectionMatrix();
       };
       resize();
       const ro = new ResizeObserver(resize);
-      ro.observe(container);
+      ro.observe(el);
 
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       let raf = 0;
