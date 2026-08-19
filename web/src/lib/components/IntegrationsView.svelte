@@ -403,7 +403,7 @@
             {/if}
           </div>
           <p class="mt-1 text-xs text-muted-foreground">
-            Link your account to run <code class="rounded bg-secondary px-1 py-0.5 font-mono text-[11px]">/contribute</code>
+            Link your account to run <code class="rounded bg-secondary px-1 py-0.5 font-mono text-xs">/contribute</code>
             in the freehire Discord server — the same reward as pasting a link on
             <a href={resolve('/my/contributions')} class="font-medium underline underline-offset-2 hover:opacity-80">
               Contributions
@@ -439,7 +439,7 @@
         <div class="mt-3 rounded-md bg-secondary/40 p-3 text-xs">
           <p>Paste this command in the freehire Discord server:</p>
           <div class="mt-1 flex items-center gap-2">
-            <code class="flex-1 overflow-x-auto rounded bg-background px-2 py-1.5 font-mono text-[11px]"
+            <code class="flex-1 overflow-x-auto rounded bg-background px-2 py-1.5 font-mono text-xs"
               >{discordCommand}</code
             >
             <Button variant="secondary" size="sm" onclick={copyDiscordCommand}>
