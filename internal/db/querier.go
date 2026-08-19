@@ -848,6 +848,43 @@ type Querier interface {
 	// aged out.
 	DeleteExpiredTracerClicks(ctx context.Context, maxAge pgtype.Interval) (int64, error)
 	DeleteGmailConnection(ctx context.Context, userID int64) error
+	// Reap live entries ClaimEnrichmentBatch can never take: their job has closed, become a
+	// non-canonical repost, or gone. That query's inner join plus its closed/duplicate filter
+	// correctly skips them — a dead or hidden posting should not spend LLM budget — but until
+	// this existed nothing deleted them either, and they accumulated. The same gap
+	// DeleteIneligibleSearchOutbox closed for search_outbox, on the queue beside it.
+	//
+	// Measured on prod 2026-08-19, before the first run: of 1,118,601 entries, 486,178 sat
+	// behind a closed job, 216,283 behind a duplicate, and 19 behind no job at all. Only
+	// 484,651 were claimable — 57% of the queue was unreachable, and the depth gauge read it
+	// as work.
+	//
+	// Deleting is not lossy: EnqueuePendingJobs re-enqueues every open, non-duplicate,
+	// unenriched, tech job with a description, so an entry reaped here comes back on its own
+	// if the job becomes eligible again.
+	//
+	// Dead-lettered rows (failed_at set) are deliberately left alone, exactly as in the search
+	// reaper: they are a record of repeated failure, surfaced as freehire_queue_dead_letters,
+	// so reaping them would erase the evidence rather than the garbage.
+	//
+	// Bounded by max_rows so one enrich run cannot turn into an unbounded delete on the first
+	// pass over a long-accumulated backlog; the next run takes the next slice.
+	//
+	// There is a race here, and it is left unserialized deliberately. A job can become eligible
+	// again (reopened, or released from duplicate_of) while this statement runs: the enqueue that
+	// follows that lifecycle write hits ON CONFLICT DO NOTHING because this row still exists, and
+	// then this deletes it, leaving an eligible job with no entry. Three things bound it. The
+	// window is one statement, not a transaction — once the row is gone the next
+	// EnqueueJobEnrichment inserts normally. Runner.Run reaps BEFORE it enqueues, so its own
+	// EnqueuePendingJobs re-adds anything that became eligible up to that point. And
+	// EnqueuePendingJobs re-evaluates the whole catalogue at the start of every run, so the worst
+	// case is one cron period of delay for one job, not a lost posting.
+	//
+	// Serializing it would mean locking jobs rows from a housekeeping statement — contending with
+	// ingest on the hottest table in the schema to prevent an hour's delay on a job that is not
+	// yet enriched anyway. DeleteIneligibleSearchOutbox carries the identical race for the identical
+	// reason.
+	DeleteIneligibleEnrichmentOutbox(ctx context.Context, maxRows int32) (int64, error)
 	// Reap live entries ClaimSearchOutboxBatch can never take: their job has closed, become
 	// a non-canonical repost, or gone. That query's EXISTS requires open AND canonical, so
 	// these rows are correctly skipped — there is nothing left to index — but until this
