@@ -1,24 +1,25 @@
 <script lang="ts">
   import { Bell, Check, Mail, Smartphone } from '@lucide/svelte';
+  import { resolve } from '$app/paths';
   import { ApiError } from '$lib/api';
   import { notifications } from '$lib/notifications.svelte';
   import { ProviderIcon } from '$lib/ui';
 
   // The unified per-search alert control: one toggle chip per delivery channel
   // (Telegram, Email, Push) for an already-saved search. This is the single home of
-  // channel subscribe/unsubscribe logic — Telegram carries a connect step (link the
-  // bot, then recheck once); email and push subscribe/unsubscribe directly, with no
-  // linking step (push delivers to whatever device the mobile app has registered).
-  // Shared by the account page (/my/notifications/searches), the filter modal, and the
-  // sidebar's post-save state.
+  // channel subscribe/unsubscribe logic; email and push subscribe/unsubscribe
+  // directly, with no linking step (push delivers to whatever device the mobile app
+  // has registered). Connecting the Telegram bot itself lives on Integrations
+  // (/my/integrations) — this control only subscribes/unsubscribes an already-linked
+  // chat, and points to Integrations when it isn't linked yet. Shared by the account
+  // page (/my/notifications/searches), the filter modal, and the sidebar's post-save
+  // state.
   //
   // A chip is "on" when a subscription exists for that channel; tapping an on chip turns
   // it off. Telegram hides itself when the feature isn't configured server-side.
   let { savedSearchId, showLabel = true }: { savedSearchId: number; showLabel?: boolean } = $props();
 
   let busy = $state<'telegram' | 'email' | 'push' | null>(null);
-  // The Telegram deep link was opened; we await the user's "I've connected" recheck.
-  let connecting = $state(false);
   let error = $state<string | null>(null);
 
   const tg = $derived(notifications.telegram);
@@ -26,27 +27,15 @@
   const emailSub = $derived(notifications.forSavedSearch(savedSearchId, 'email'));
   const pushSub = $derived(notifications.forSavedSearch(savedSearchId, 'push'));
 
-  // Telegram: unsubscribe if on; else subscribe — linking the bot first when the chat
-  // isn't connected yet (the "I've connected" recheck then finishes the subscribe).
+  // Telegram: unsubscribe if on; else subscribe. Only ever called while linked — the
+  // chip renders as a link to Integrations instead of this button while it isn't.
   async function toggleTelegram() {
-    if (busy) return;
+    if (busy || !tg.linked) return;
     busy = 'telegram';
     error = null;
     try {
-      if (tgSub) {
-        await notifications.unsubscribe(tgSub.id);
-        return;
-      }
-      await notifications.ensureLoaded();
-      if (!notifications.telegram.linked) {
-        const url = await notifications.link();
-        window.open(url, '_blank', 'noopener');
-        connecting = true;
-        return;
-      }
-      if (!notifications.forSavedSearch(savedSearchId, 'telegram')) {
-        await notifications.subscribe(savedSearchId, 'telegram');
-      }
+      if (tgSub) await notifications.unsubscribe(tgSub.id);
+      else await notifications.subscribe(savedSearchId, 'telegram');
     } catch (e) {
       if (!(e instanceof ApiError) || e.status !== 409) {
         error = e instanceof ApiError ? e.message : 'Could not update the Telegram alert. Please try again.';
@@ -54,22 +43,6 @@
     } finally {
       busy = null;
     }
-  }
-
-  async function recheck() {
-    if (busy) return;
-    busy = 'telegram';
-    error = null;
-    try {
-      await notifications.refreshTelegram();
-      if (notifications.telegram.linked) connecting = false;
-      else error = 'Not connected yet — tap “Start” in Telegram, then retry.';
-    } catch {
-      error = 'Could not check the connection. Please try again.';
-    } finally {
-      busy = null;
-    }
-    if (notifications.telegram.linked) await toggleTelegram(); // linked now → subscribe
   }
 
   // Email: plain subscribe/unsubscribe — no linking, delivery goes to the account address.
@@ -123,14 +96,21 @@
     {/if}
 
     {#if tg.enabled}
-      <button type="button" onclick={toggleTelegram} disabled={busy !== null} aria-pressed={tgSub != null} class={chipClass(tgSub != null)}>
-        {#if tgSub}
-          <Check class="size-3.5" aria-hidden="true" />
-        {:else}
+      {#if tg.linked}
+        <button type="button" onclick={toggleTelegram} disabled={busy !== null} aria-pressed={tgSub != null} class={chipClass(tgSub != null)}>
+          {#if tgSub}
+            <Check class="size-3.5" aria-hidden="true" />
+          {:else}
+            <ProviderIcon provider="telegram" class="size-3.5" />
+          {/if}
+          Telegram
+        </button>
+      {:else}
+        <a href={resolve('/my/integrations')} class={chipClass(false)} title="Connect Telegram in Integrations first">
           <ProviderIcon provider="telegram" class="size-3.5" />
-        {/if}
-        Telegram
-      </button>
+          Telegram
+        </a>
+      {/if}
     {/if}
 
     <button type="button" onclick={toggleEmail} disabled={busy !== null} aria-pressed={emailSub != null} class={chipClass(emailSub != null)}>
@@ -151,15 +131,6 @@
       Push
     </button>
   </div>
-
-  {#if connecting}
-    <p class="text-xs text-muted-foreground">
-      Opened Telegram — tap “Start”, then
-      <button type="button" onclick={recheck} disabled={busy !== null} class="font-medium text-foreground underline underline-offset-2 hover:opacity-80">
-        I’ve connected
-      </button>.
-    </p>
-  {/if}
 
   {#if error}
     <p class="text-xs text-destructive">{error}</p>
