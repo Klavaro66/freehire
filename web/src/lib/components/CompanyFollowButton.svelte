@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Bell } from '@lucide/svelte';
+  import { resolve } from '$app/paths';
   import { ApiError } from '$lib/api';
   import { isAuthenticated } from '$lib/auth.svelte';
   import { openAuthDialog } from '$lib/auth-dialog.svelte';
@@ -12,14 +13,12 @@
   // Telegram digests, built entirely from the saved-search + filter-subscription
   // primitives. A follow is a saved search whose query is exactly
   // `company_slug=<slug>` (named after the company) plus a Telegram subscription on
-  // it. The Telegram connect flow mirrors SavedSearches.svelte.
+  // it. Connecting the bot itself lives on Integrations (/my/integrations) — while
+  // it isn't linked, this renders as a link there instead of a toggle.
   let { slug, companyName }: { slug: string; companyName: string } = $props();
 
   let busy = $state(false);
   let error = $state<string | null>(null);
-  // Set after opening the connect deep link, so we can offer an "I've connected"
-  // recheck that completes the follow the user intended.
-  let connecting = $state(false);
 
   // The canonical query standing for "only this company", produced the same way the
   // filters panel and cmd/notify build it — so a matching saved search is recognised.
@@ -54,6 +53,7 @@
       openAuthDialog();
       return;
     }
+    if (!telegram.linked) return; // the button renders as a link to Integrations instead
     busy = true;
     error = null;
     try {
@@ -70,12 +70,6 @@
   }
 
   async function follow() {
-    // Telegram must be linked before digests can be delivered; walk the connect
-    // flow first and let the recheck finish the follow.
-    if (!telegram.linked) {
-      await connectTelegram();
-      return;
-    }
     // Reuse a matching saved search (no duplicates, no unique-name clash); otherwise
     // create one named after the company — the name doubles as the digest title.
     const set = savedSearch ?? (await savedSearches.create(companyName, companyQuery));
@@ -92,43 +86,17 @@
       await savedSearches.remove(savedSearch.id);
     }
   }
-
-  // Open the one-time deep link in a new tab so the user can tap Start in Telegram.
-  async function connectTelegram() {
-    const url = await notifications.link();
-    window.open(url, '_blank', 'noopener');
-    connecting = true;
-  }
-
-  // After the user reports they tapped Start, re-read the link status and, if now
-  // linked, complete the follow they were in the middle of.
-  async function recheckLink() {
-    if (busy) return;
-    busy = true;
-    error = null;
-    try {
-      await notifications.refreshTelegram();
-      if (notifications.telegram.linked) {
-        connecting = false;
-        await follow();
-      }
-    } catch {
-      error = 'Could not check the connection. Please try again.';
-    } finally {
-      busy = false;
-    }
-  }
 </script>
 
 <!-- Hidden only for a signed-in user whose Telegram feature is off server-side
      (nothing to deliver). Signed-out users still see it and are routed to sign in. -->
 {#if !isAuthenticated() || telegram.enabled}
   <div class="flex flex-col items-end gap-1">
-    {#if connecting && !telegram.linked}
-      <Button variant="secondary" size="sm" onclick={recheckLink} disabled={busy}>
-        {busy ? 'Checking…' : 'I’ve connected'}
+    {#if isAuthenticated() && !telegram.linked}
+      <Button variant="outline" size="sm" href={resolve('/my/integrations')}>
+        <Bell class="size-4" aria-hidden="true" />
+        <span class="hidden sm:inline">Connect Telegram to follow</span>
       </Button>
-      <p class="text-xs text-muted-foreground">Opened Telegram — tap “Start”, then confirm.</p>
     {:else}
       <Button
         variant={subscribed ? 'secondary' : 'outline'}

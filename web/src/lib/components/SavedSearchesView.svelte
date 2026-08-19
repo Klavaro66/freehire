@@ -27,51 +27,10 @@
   const items = $derived(savedSearches.items);
   const profile = $derived(profileStore.profile);
 
-  // Telegram connection (moved here from the standalone notifications page).
+  // Telegram connection status. Connecting/disconnecting the bot itself lives on
+  // Integrations (/my/integrations) now — this page only reads the status to show
+  // beside the per-search toggles below.
   const telegram = $derived(notifications.telegram);
-  let connecting = $state(false);
-  let connectBusy = $state(false);
-
-  async function connect() {
-    connectBusy = true;
-    error = null;
-    try {
-      const url = await notifications.link();
-      window.open(url, '_blank', 'noopener');
-      connecting = true;
-    } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Could not start the connection. Please try again.';
-    } finally {
-      connectBusy = false;
-    }
-  }
-
-  async function recheckLink() {
-    connectBusy = true;
-    error = null;
-    try {
-      await notifications.refreshTelegram();
-      if (notifications.telegram.linked) connecting = false;
-    } catch {
-      error = 'Could not check the connection. Please try again.';
-    } finally {
-      connectBusy = false;
-    }
-  }
-
-  let confirmDisconnectOpen = $state(false);
-
-  async function disconnect() {
-    connectBusy = true;
-    error = null;
-    try {
-      await notifications.unlink();
-    } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Could not disconnect. Please try again.';
-    } finally {
-      connectBusy = false;
-    }
-  }
 
   // Share flow: clicking "Share" on a row reveals an optional author-label input for that
   // row (an inline per-row edit id); confirming publishes the board.
@@ -219,47 +178,27 @@
     {:else if status === 'error'}
       <States state="error" message="Couldn't load your saved searches." />
     {:else}
-      <!-- Telegram connection -->
-      <section class="flex items-center gap-3 rounded-xl border border-border p-4">
-        <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground">
-          <ProviderIcon provider="telegram" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <h2 class="text-sm font-semibold tracking-tight">Telegram</h2>
-          {#if !telegram.enabled}
-            <p class="text-xs text-muted-foreground">Not available on this server yet.</p>
-          {:else if telegram.linked}
-            <p class="flex items-center gap-1 text-xs font-medium text-green-600">
-              <Check class="size-3.5" aria-hidden="true" /> Connected
-            </p>
-          {:else if connecting}
-            <p class="text-xs text-muted-foreground">Tap “Start” in the bot, then confirm.</p>
-          {:else}
-            <p class="text-xs text-muted-foreground">Connect to receive your job alerts here.</p>
-          {/if}
-        </div>
-        {#if telegram.enabled}
-          {#if telegram.linked}
-            <Button
-              variant="ghost"
-              size="sm"
-              class="shrink-0"
-              onclick={() => (confirmDisconnectOpen = true)}
-              disabled={connectBusy}
-            >
-              Disconnect
-            </Button>
-          {:else if connecting}
-            <Button variant="secondary" size="sm" class="shrink-0" onclick={recheckLink} disabled={connectBusy}>
-              {connectBusy ? 'Checking…' : 'I’ve connected'}
-            </Button>
-          {:else}
-            <Button variant="primary" size="sm" class="shrink-0" onclick={connect} disabled={connectBusy}>
-              Connect
-            </Button>
-          {/if}
-        {/if}
-      </section>
+      <!-- Telegram connection: status only, pointing to Integrations for connect/disconnect. -->
+      {#if telegram.enabled}
+        <section class="flex items-center gap-3 rounded-xl border border-border p-4">
+          <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground">
+            <ProviderIcon provider="telegram" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-sm font-semibold tracking-tight">Telegram</h2>
+            {#if telegram.linked}
+              <p class="flex items-center gap-1 text-xs font-medium text-green-600">
+                <Check class="size-3.5" aria-hidden="true" /> Connected
+              </p>
+            {:else}
+              <p class="text-xs text-muted-foreground">Connect to receive your job alerts here.</p>
+            {/if}
+          </div>
+          <Button variant="secondary" size="sm" class="shrink-0" href={resolve('/my/integrations')}>
+            {telegram.linked ? 'Manage in Integrations' : 'Connect in Integrations'}
+          </Button>
+        </section>
+      {/if}
 
       {#if profile}
         <ProfileAlertToggle {profile} />
@@ -366,14 +305,6 @@
       {/if}
     {/if}
   </div>
-
-  <ConfirmDialog
-    bind:open={confirmDisconnectOpen}
-    title="Disconnect Telegram?"
-    description="You will stop receiving alerts."
-    confirmLabel="Disconnect"
-    onConfirm={disconnect}
-  />
 
   <ConfirmDialog
     bind:open={confirmRemoveOpen}

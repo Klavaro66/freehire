@@ -310,6 +310,24 @@
       const ro = new ResizeObserver(resize);
       ro.observe(el);
 
+      // `brand`/`coreMaterial`/`haloMaterial`/each ray's material were all set once
+      // from the theme active at mount — flipping the site's light/dark toggle
+      // (theme.svelte.ts: a `dark` class on <html>) never touched them, so the
+      // scene kept the old theme's colors until a full reload re-ran this whole
+      // block. Watching the class directly (rather than importing the theme store)
+      // keeps this in sync with whatever actually drives the CSS variables, not
+      // with one specific way of getting there.
+      const applyThemeColors = () => {
+        brand.copy(readCssColor('--brand'));
+        const foreground = readCssColor('--foreground');
+        coreMaterial.color.copy(foreground);
+        haloMaterial.color.copy(foreground);
+        for (const ray of rays) ray.material.color.copy(brand);
+        if (reduceMotion) renderer.render(scene, camera);
+      };
+      const themeObserver = new MutationObserver(applyThemeColors);
+      themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       let raf = 0;
       if (reduceMotion) {
@@ -345,6 +363,7 @@
       cleanup = () => {
         cancelAnimationFrame(raf);
         ro.disconnect();
+        themeObserver.disconnect();
         geometry.dispose();
         material.dispose();
         core.geometry.dispose();
