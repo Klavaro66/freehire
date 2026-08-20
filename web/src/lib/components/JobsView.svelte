@@ -134,6 +134,23 @@
     (c) => (counts = c),
   );
 
+  // The role distribution the header's suggestions are ranked and filtered by. Its own
+  // fetch, deliberately: `counts` above is scoped by the text query, and a suggestion
+  // list keyed off that would rank by "jobs matching what you have typed so far", lag
+  // it by one debounce, and drop roles in and out mid-word. One facet, no `q` — the
+  // rest of the filter scope stays, so the figure still answers what a click would
+  // give. Refreshed only when a non-text filter changes; typing does not touch it.
+  const roleScopeParams = () => {
+    const p = scopedParams();
+    p.delete('q');
+    return p;
+  };
+  let roleCounts = $state.raw<FacetCounts | null>(null);
+  const refreshRoleCounts = latestOnly(
+    () => api.facetCounts(roleScopeParams(), { facets: ['role'] }),
+    (c) => (roleCounts = c),
+  );
+
   // Minimum profile-match slider: a client-only post-filter over the already-fetched
   // page, not a search facet — the match percent depends on the viewer's own profile
   // skills, which the backend/index never sees, so there's nothing to send server-side
@@ -168,6 +185,13 @@
   // logged a search they had not performed. It went unnoticed while scrolling was
   // how anyone paged; the page links made it visible.
   let lastSearchKey = untrack(() => filtersToParams(filters.applied).toString());
+
+  // The filter scope the role distribution was last measured under, minus the text
+  // query it deliberately ignores. `null` rather than '' because '' is a REAL key —
+  // it is what an unfiltered feed serializes to, which is the commonest first paint
+  // of all, and seeding with it made the first measurement look like a repeat and
+  // never fire.
+  let lastRoleScopeKey: string | null = null;
 
   // Onboarding: the one-time nudge banner + wizard, standalone-only. The lifecycle
   // lives in localStorage (client-only); seed it at init on the client so a returning
@@ -283,6 +307,17 @@
       },
       setQuery: (q) => filters.setQuery(q),
       filterScope: { store: filters, counts: () => counts, variant: 'jobs' },
+      roleSuggest: {
+        counts: () => roleCounts,
+        active: () => filters.facet('role').include,
+        apply: (slug) => {
+          // Its own event, not a flag on `search`: the question this answers is how
+          // often the dropdown is what puts the role facet on, and the role facet
+          // measured 1.1% of searches before it existed.
+          track('role_suggestion', { role: slug });
+          filters.applyRole(slug);
+        },
+      },
       openFilters: () => (modalOpen = true),
       activeFilters: () => filters.active,
     });
@@ -364,6 +399,14 @@
     void filters.applied; // track the debounced snapshot
     untrack(() => {
       refreshCounts();
+      // The role distribution ignores the text query, so refetch it only when the rest
+      // of the scope moves — otherwise every settled keystroke would spend a request
+      // re-measuring something that did not change.
+      const roleScopeKey = roleScopeParams().toString();
+      if (roleScopeKey !== lastRoleScopeKey) {
+        lastRoleScopeKey = roleScopeKey;
+        refreshRoleCounts();
+      }
       const firstRun = !started;
       if (firstRun) {
         started = true;
