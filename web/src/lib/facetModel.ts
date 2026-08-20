@@ -31,6 +31,10 @@ export interface JobFilters {
    *  Serialized as `posted_within_days`; the backend turns it into a posted_ts
    *  range filter relative to request time. */
   postedWithinDays: number | null;
+  /** Keep only jobs asking for at most this many years of experience (null = any).
+   *  `0` is a real bound — the jobs stating no prior experience is required — so
+   *  every read of this field must test for null, never for falsiness. */
+  experienceYearsMax: number | null;
 }
 
 /** Splits every raw query value on comma and flattens the result, dropping
@@ -52,7 +56,14 @@ function emptyFacets(): Record<string, FacetState> {
 }
 
 export function emptyFilters(): JobFilters {
-  return { q: '', facets: emptyFacets(), visa: false, salaryMin: null, postedWithinDays: null };
+  return {
+    q: '',
+    facets: emptyFacets(),
+    visa: false,
+    salaryMin: null,
+    postedWithinDays: null,
+    experienceYearsMax: null,
+  };
 }
 
 // ---- URL serialization ----
@@ -72,6 +83,7 @@ export function filtersToParams(f: JobFilters): URLSearchParams {
   if (f.visa) p.set('visa_sponsorship', 'true');
   if (f.salaryMin != null) p.set('salary_min', String(f.salaryMin));
   if (f.postedWithinDays != null) p.set('posted_within_days', String(f.postedWithinDays));
+  if (f.experienceYearsMax != null) p.set('experience_years_max', String(f.experienceYearsMax));
   return p;
 }
 
@@ -99,6 +111,14 @@ export function filtersFromParams(p: URLSearchParams): JobFilters {
   // negative, non-numeric) reads as "any age", matching the backend's own guard.
   const days = Number(p.get('posted_within_days'));
   f.postedWithinDays = Number.isInteger(days) && days > 0 ? days : null;
+  // Zero IS a bound here — it selects the postings stating no prior experience is
+  // required — so the guard admits it and rejects only what cannot be a year count.
+  // The presence test is on the TRIMMED string, not the raw one: `Number('')` and
+  // `Number(' ')` are both 0 while `' '` is truthy, so a naive check would turn
+  // `?experience_years_max=%20` in a shared link into the entry-level filter.
+  const rawYears = p.get('experience_years_max')?.trim() ?? '';
+  const years = Number(rawYears);
+  f.experienceYearsMax = rawYears !== '' && Number.isInteger(years) && years >= 0 ? years : null;
   return f;
 }
 
@@ -112,6 +132,7 @@ export function activeFilterCount(f: JobFilters): number {
   if (f.visa) n += 1;
   if (f.salaryMin != null) n += 1;
   if (f.postedWithinDays != null) n += 1;
+  if (f.experienceYearsMax != null) n += 1;
   return n;
 }
 
