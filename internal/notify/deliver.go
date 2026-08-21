@@ -85,8 +85,25 @@ func (r *Runner) deliverOne(ctx context.Context, subID int64, jobIDs []int64, st
 		return
 	}
 
-	digest := buildDigest(info.SavedSearchName, jobs, r.cfg.DigestCap)
+	jobs, jobIDs = r.deferOverflow(ctx, subID, jobs, jobIDs)
+	digest := buildDigest(info.SavedSearchName, jobs)
+
+	// Record the in-app notification BEFORE sending, so the digest can carry its
+	// own row's id and each channel's "and N more" tail can link to the page
+	// that lists the full match set. A recording failure is not a delivery
+	// failure — the digest goes out with a zero id and the tail falls back to a
+	// generic destination.
+	digest.NotificationID = r.recordNotification(ctx, subID, info, digest)
+
 	if err := r.notifier.Send(ctx, info.Channel, dest, digest); err != nil {
+		// Withdraw on EVERY send error, including an ambiguous one (a timeout may
+		// mean the mail went out and only the acknowledgement was lost). Keeping
+		// the row on ambiguous errors would leave one behind per attempt, and the
+		// matches stay pending either way — so a channel outage would fill the
+		// history with up to MaxAttempts rows per digest nobody received, which is
+		// the failure this ordering exists to avoid. The cost of withdrawing is
+		// narrower: a mail that did slip out links to a page that 404s.
+		r.withdrawNotification(ctx, subID, digest.NotificationID)
 		// A channel with no registered notifier (e.g. email while SES is
 		// unconfigured) is not a delivery failure: soft-skip so the matches stay
 		// pending for a pass once the channel is provisioned, without burning an
@@ -126,26 +143,45 @@ func (r *Runner) deliverOne(ctx context.Context, subID int64, jobIDs []int64, st
 		}
 	}
 
-	title, body, slug := renderDigest(digest)
+	stats.Delivered++
+}
+
+// recordNotification writes the digest's in-app notification-center row and
+// returns its id, or zero if the write failed. A failure is a degraded read-side
+// feature (and a tail that falls back to a generic destination), never a reason
+// to hold back a digest that is otherwise ready to send.
+func (r *Runner) recordNotification(ctx context.Context, subID int64, info db.GetSubscriptionForDeliveryRow, d Digest) int64 {
+	title, body, slug := renderDigest(d)
 	var publicSlug pgtype.Text
 	if slug != "" {
 		publicSlug = pgtype.Text{String: slug, Valid: true}
 	}
-	if err := r.store.RecordNotification(ctx, db.RecordNotificationParams{
+	id, err := r.store.RecordNotification(ctx, db.RecordNotificationParams{
 		UserID:     info.UserID,
 		Kind:       "subscription_digest",
 		Title:      title,
 		Body:       body,
 		PublicSlug: publicSlug,
-		Jobs:       digestJobsSnapshot(digest),
-	}); err != nil {
-		// Delivered and stamped; only the in-app notification-center record
-		// failed. That's a degraded read-side feature, not a reason to fail a
-		// delivery that already succeeded.
+		Jobs:       digestJobsSnapshot(d),
+	})
+	if err != nil {
 		log.Printf("notify: record notification for subscription %d: %v", subID, err)
+		return 0
 	}
+	return id
+}
 
-	stats.Delivered++
+// withdrawNotification removes the row recordNotification wrote for a digest
+// that then failed to send. A failure here leaves one history row describing a
+// digest nobody received — logged, and strictly better than the alternative
+// reading of the same window, which would be to drop a delivery that succeeded.
+func (r *Runner) withdrawNotification(ctx context.Context, subID, id int64) {
+	if id == 0 {
+		return
+	}
+	if err := r.store.DeleteNotification(ctx, id); err != nil {
+		log.Printf("notify: withdraw notification %d for subscription %d: %v", id, subID, err)
+	}
 }
 
 // release drops the lease on a subscription's claimed matches so they are retried
@@ -159,14 +195,47 @@ func (r *Runner) release(ctx context.Context, subID int64, jobIDs []int64) {
 	}
 }
 
-// buildDigest assembles a capped digest: the first `limit` jobs are listed, but
-// Total reflects all matched jobs so the renderer can summarize the remainder.
-func buildDigest(name string, jobs []db.GetJobsForDigestRow, limit int) Digest {
-	d := Digest{SavedSearchName: name, Total: len(jobs)}
-	for i, j := range jobs {
-		if i >= limit {
-			break
+// deferOverflow trims a claimed set larger than one digest may carry, releasing
+// the excess back to the pending queue so a later pass delivers it.
+//
+// Truncating without releasing would stamp those matches notified while they
+// appeared in no message and in no recorded snapshot — the postings would leave
+// the alert having never been shown. Because GetJobsForDigest orders freshest
+// first, what is held back is the oldest of the claimed set.
+//
+// A claimed id with no job row (pruned between match and delivery) is NOT held
+// back: it stays in jobIDs and is stamped notified, or it would be re-claimed
+// every pass forever.
+func (r *Runner) deferOverflow(ctx context.Context, subID int64, jobs []db.GetJobsForDigestRow, jobIDs []int64) ([]db.GetJobsForDigestRow, []int64) {
+	if len(jobs) <= r.cfg.SnapshotCap {
+		return jobs, jobIDs
+	}
+
+	held := make(map[int64]bool, len(jobs)-r.cfg.SnapshotCap)
+	for _, j := range jobs[r.cfg.SnapshotCap:] {
+		held[j.ID] = true
+	}
+	deferred := make([]int64, 0, len(held))
+	kept := make([]int64, 0, len(jobIDs)-len(held))
+	for _, id := range jobIDs {
+		if held[id] {
+			deferred = append(deferred, id)
+			continue
 		}
+		kept = append(kept, id)
+	}
+	log.Printf("notify: subscription %d claimed %d matches, delivering %d and deferring %d", subID, len(jobIDs), len(kept), len(deferred))
+	r.release(ctx, subID, deferred)
+	return jobs[:r.cfg.SnapshotCap], kept
+}
+
+// buildDigest assembles a digest over the jobs this delivery carries. Total is
+// len(jobs) because deferOverflow has already held back anything that would not
+// fit, so a digest never announces a job it cannot show; the "and N more" tail a
+// renderer draws is the difference between Total and Digest.Listed.
+func buildDigest(name string, jobs []db.GetJobsForDigestRow) Digest {
+	d := Digest{SavedSearchName: name, Total: len(jobs)}
+	for _, j := range jobs {
 		d.Jobs = append(d.Jobs, DigestJob{
 			Title:          j.Title,
 			Company:        j.Company,
