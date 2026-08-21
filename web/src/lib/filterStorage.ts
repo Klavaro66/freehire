@@ -32,3 +32,45 @@ export function saveJobFilters(qs: string): void {
     // best-effort: private mode / quota / disabled storage
   }
 }
+
+// Whether this browser has already been offered the IP-derived opening scope. Its
+// own key, NOT a value inside the filter set, because `saveJobFilters('')` removes
+// JOB_FILTERS_KEY outright — so "storage is empty" cannot tell a browser that has
+// never filtered from one that just cleared its filters, and a guess keyed on that
+// would undo the clear on every subsequent visit.
+//
+// Only wiping browser storage re-arms the guess, which is the intended escape: at
+// that point the browser is indistinguishable from a new one.
+const GEO_SCOPE_KEY = 'hire.geoScopeOffered';
+
+/** Whether the derived scope has already been offered — and therefore must not be
+ *  offered again.
+ *
+ *  Unreachable storage reads as "offered", not "not yet". A marker that cannot be
+ *  written is a guess that re-applies on every load and cannot be dismissed; losing
+ *  the feature in private mode is the smaller failure. */
+export function geoScopeOffered(): boolean {
+  if (typeof localStorage === 'undefined') return true;
+  try {
+    return localStorage.getItem(GEO_SCOPE_KEY) !== null;
+  } catch {
+    return true;
+  }
+}
+
+/** Record that the derived scope was offered, reporting whether the record stuck.
+ *
+ *  The return value is not decoration. Reads and writes fail independently — a
+ *  quota-exhausted store answers `getItem` and throws on `setItem` — and in that
+ *  state a caller that shrugged off the failure would offer the guess again on
+ *  every visit, including to someone who had just cleared it. An unrecorded offer
+ *  is one the visitor cannot dismiss, so it must not be made. */
+export function markGeoScopeOffered(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    localStorage.setItem(GEO_SCOPE_KEY, '1');
+    return true;
+  } catch {
+    return false;
+  }
+}
