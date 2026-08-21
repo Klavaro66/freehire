@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"cmp"
 	"context"
 	"log"
 	"math"
@@ -261,6 +262,9 @@ type Config struct {
 	// runs on its own model (ASSISTANT_MODEL) — chosen for tool calling and context
 	// size rather than for cheap JSON extraction. Nil disables new turns.
 	AssistantLLM *llm.Client
+	// SearchIntentLLM backs the AI filter. Separate for latency, not capability — see
+	// config.SearchIntentModel.
+	SearchIntentLLM *llm.Client
 	// AssistantMaxSteps bounds the tool-calling rounds of one turn; zero uses the
 	// assistant package's default.
 	AssistantMaxSteps int
@@ -499,6 +503,9 @@ func Register(app *fiber.App, cfg Config) {
 	}
 	sitemapH := newSitemapHandlers(sitemapJobs, sitemapCompanies)
 	searchH := newSearchHandlers(jobSearch, facets, queries)
+	// The AI filter reads the same saved profile the assistant does, so a profile-seeded
+	// search and a profile-aware conversation cannot disagree about what it says.
+	intentH := newIntentHandlers(llmBinding{client: cmp.Or(cfg.SearchIntentLLM, cfg.LLM), keys: llmKeys})
 	companiesH := newCompaniesHandlers(queries, companySearch)
 	geoH := newGeoHandlers()
 	trackingH := newTrackingHandlers(queries, cfg.Pool, jobSearch)
@@ -632,6 +639,10 @@ func Register(app *fiber.App, cfg Config) {
 	// Job search surfaces first: their literal /jobs/* routes must precede the
 	// /jobs/:slug param route so they are not read as slugs (see searchHandlers).
 	searchH.register(api, mw)
+	// Beside the search it builds a filter for, though it shares none of its
+	// dependencies: interpretation needs a model and the caller's profile, not the
+	// index.
+	intentH.register(api, mw)
 	sitemapH.register(api)
 	jobsH.register(api, mw)
 	companiesH.register(api, mw)
