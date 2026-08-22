@@ -9,12 +9,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/gofiber/fiber/v2"
 

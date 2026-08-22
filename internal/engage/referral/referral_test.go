@@ -3,11 +3,12 @@ package referral
 import (
 	"context"
 	"errors"
-	"github.com/google/uuid"
 	"io"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/strelov1/freehire/internal/platform/blobstore"
 )

@@ -1,9 +1,10 @@
 package sources
 
 import (
-	"golang.org/x/net/html"
 	"strings"
 	"testing"
+
+	"golang.org/x/net/html"
 )
 
 // ldPage wraps a raw ld+json body in a minimal HTML page.

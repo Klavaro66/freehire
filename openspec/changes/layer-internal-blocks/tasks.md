@@ -43,9 +43,9 @@ it deliberately and confirm it fails, then restore.
 
 ## 5. Enforcement in CI
 
-- [ ] 5.1 Generate the `depguard` rules from the 1.1 layer table into `.golangci.yml` — one rule per block, denying every block at or above its layer. Set `run.build-tags: [integration, llmlive]` in the same file; without it `golangci-lint` never parses the 222 tagged files and the second guard is blind where the first one was.
-- [ ] 5.2 Prove both guards bite: add a deliberate upward import, confirm `golangci-lint run` fails on the line AND the layering test fails naming the pair. Revert.
-- [ ] 5.3 `golangci-lint run` clean on the branch. If `--new-from-merge-base` surfaces pre-existing findings on the moved lines, fix them here.
+- [x] 5.1 Generate the `depguard` rules from the 1.1 layer table into `.golangci.yml` — one rule per block, denying every block at or above its layer. Set `run.build-tags: [integration, llmlive]` in the same file; without it `golangci-lint` never parses the 222 tagged files and the second guard is blind where the first one was.
+- [x] 5.2 Prove both guards bite: add a deliberate upward import, confirm `golangci-lint run` fails on the line AND the layering test fails naming the pair. Revert.
+- [x] 5.3 `golangci-lint run` clean on the branch. If `--new-from-merge-base` surfaces pre-existing findings on the moved lines, fix them here.
 
 ## 6. Documentation
 
