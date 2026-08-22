@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 func unhealthyRow(provider, board, region string, fails int32, cooledUntil time.Time) db.ListUnhealthyBoardsRow {

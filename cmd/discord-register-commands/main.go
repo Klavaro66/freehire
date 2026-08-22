@@ -11,7 +11,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/strelov1/freehire/internal/discordbot"
+	"github.com/strelov1/freehire/internal/engage/discordbot"
 )
 
 func main() {

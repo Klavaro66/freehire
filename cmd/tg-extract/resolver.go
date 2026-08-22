@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 
-	"github.com/strelov1/freehire/internal/linksource"
-	"github.com/strelov1/freehire/internal/telegram"
+	"github.com/strelov1/freehire/internal/ingest/linksource"
+	"github.com/strelov1/freehire/internal/ingest/telegram"
 )
 
 // linkResolver adapts the linksource registry to telegram.LinkResolver: it follows a

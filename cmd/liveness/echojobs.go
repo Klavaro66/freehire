@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/liveness"
+	"github.com/strelov1/freehire/internal/job/liveness"
 )
 
 // echojobsJobURL is echojobs.io's own per-posting detail page — already used live for
-// description backfill (see internal/sources/echojobs.go). Unlike jobs.url for this source (the
+// description backfill (see internal/ingest/sources/echojobs.go). Unlike jobs.url for this source (the
 // employer's own ATS link — Workday, Greenhouse, and others, with wildly variable per-company
 // reliability across a ~330k-posting catalogue), this is the single site echojobs.io itself, and
 // a removed posting answers with a plain 404 rather than whatever the employer's own ATS
@@ -25,7 +25,7 @@ const echojobsJobURL = "https://echojobs.io/job/%s"
 
 // checkEchoJobsLive queries echojobs.io's own job page for one posting's slug (its ExternalID,
 // minus the boardless ":" prefix UpsertJob stores boardless external ids with — see
-// internal/sources/source.go) and reports whether it is still listed.
+// internal/ingest/sources/source.go) and reports whether it is still listed.
 func checkEchoJobsLive(ctx context.Context, client *http.Client, externalID string) (liveness.Verdict, string) {
 	return checkEchoJobsLiveAt(ctx, client, echojobsJobURL, trimEchoJobsHandle(externalID))
 }
@@ -39,7 +39,7 @@ func trimEchoJobsHandle(externalID string) string {
 // checkEchoJobsLiveAt is checkEchoJobsLive with the job URL template as a parameter (already-
 // stripped slug), so a test can point it at a stub server. The page's plain HTTP status is the
 // liveness signal: 200 means still listed, 404 or 410 means removed (the same pair the shared
-// liveness.Classify treats as "gone" — see internal/liveness/liveness.go); anything else is
+// liveness.Classify treats as "gone" — see internal/job/liveness/liveness.go); anything else is
 // Uncertain, the same under-closing-biased default every other adapter's liveness check falls
 // back to.
 func checkEchoJobsLiveAt(ctx context.Context, client *http.Client, jobURLTemplate, slug string) (liveness.Verdict, string) {

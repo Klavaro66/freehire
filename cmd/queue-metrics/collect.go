@@ -9,12 +9,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // metricsQueries is the slice of *db.Queries this worker needs, declared here so the
 // assembly and its error handling are testable against a fake rather than a container.
-// Narrow by intent, matching internal/worker's FullScanQueries.
+// Narrow by intent, matching internal/platform/worker's FullScanQueries.
 type metricsQueries interface {
 	SearchOutboxMetrics(context.Context) (db.SearchOutboxMetricsRow, error)
 	EnrichmentOutboxMetrics(context.Context) (db.EnrichmentOutboxMetricsRow, error)

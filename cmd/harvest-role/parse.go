@@ -7,8 +7,8 @@ import (
 
 	"golang.org/x/net/html"
 
-	"github.com/strelov1/freehire/internal/atsdetect"
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/atsdetect"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 )
 
 // locTag captures the URL inside each <loc> element of a sitemap or sitemap index, in

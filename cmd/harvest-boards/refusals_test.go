@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/net/html"
 
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 )
 
 // erroringClient answers every verb with a canned error, standing in for a platform that

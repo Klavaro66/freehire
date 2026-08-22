@@ -2,7 +2,7 @@
 // fleet health, catalogue freshness — and publishes it as Prometheus gauges through the
 // node_exporter textfile collector. Schedule it every minute.
 //
-// The per-run metrics every worker already writes (internal/worker/metrics.go) answer
+// The per-run metrics every worker already writes (internal/platform/worker/metrics.go) answer
 // whether a worker is alive; these answer whether it is keeping up. Measuring here, on
 // its own timer, rather than from a collector on the API's /metrics listener, keeps the
 // cost fixed at one pass per minute instead of one per scrape per deployed colour — see
@@ -16,8 +16,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // textfileName is the collector file this worker owns. It deliberately does NOT follow

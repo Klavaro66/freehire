@@ -23,23 +23,23 @@ Each removes a block cycle that would otherwise make the layering rule unstateab
 
 ## 3. The move
 
-- [ ] 3.1 Write the move script: read `go list` for the true package list, `git mv` each into `internal/<block>/<pkg>` per the 1.1 table, and rewrite import paths by exact package-path match. A textual find/replace is not acceptable — package names are substrings of one another (`job`, `jobview`, `jobhash`).
-- [ ] 3.2 Run the move. `provider` → `dict/provider`, `silence` → `job/silence`, `submission` and `moderation` → `ingest`, plus the five other non-obvious placements from the design.
-- [ ] 3.3 Flip the 1.3 assertion on: the real-graph violation list MUST be empty. This is the task that proves the move.
-- [ ] 3.4 `gofmt -w` every touched path; `gofmt -l .` must print nothing. `go build ./...` and `go vet ./...` clean.
+- [x] 3.1 Write the move script: read `go list` for the true package list, `git mv` each into `internal/<block>/<pkg>` per the 1.1 table, and rewrite import paths by exact package-path match. A textual find/replace is not acceptable — package names are substrings of one another (`job`, `jobview`, `jobhash`).
+- [x] 3.2 Run the move. `provider` → `dict/provider`, `silence` → `job/silence`, `submission` and `moderation` → `ingest`, plus the five other non-obvious placements from the design.
+- [x] 3.3 Flip the 1.3 assertion on: the real-graph violation list MUST be empty. This is the task that proves the move.
+- [x] 3.4 `gofmt -w` every touched path; `gofmt -l .` must print nothing. `go build ./...` and `go vet ./...` clean.
 
 ## 4. Paths that are strings, not imports
 
 These compile and pass whether or not their path is right. For each: repoint it, then break
 it deliberately and confirm it fails, then restore.
 
-- [ ] 4.1 `internal/llmkey/scope_test.go:29-32` — the map of background entrypoints (`enrich`, `telegram`, `mailclassify`, `embed`) to `../../internal/<pkg>`. This is the guard that background work never spends a user's LLM credit.
-- [ ] 4.2 `internal/normalize/legal_form_rule_test.go:16` — `canonicalFormList`, the guard keeping one legal-form vocabulary in the module.
-- [ ] 4.3 `internal/pgerr/pgerr_test.go:117` — the `"internal/pgerr/"` path check.
-- [ ] 4.4 `cmd/gen-cities/main.go:44` — `outputPath = "internal/location/cities1000.tsv"`.
-- [ ] 4.5 `.github/workflows/perf.yml:60` — the change filter hardcoding `internal/handler/`, `internal/search/`, `internal/jobview/`. A stale filter silently stops running the perf job.
-- [ ] 4.6 `sqlc.yaml:5,9` — `queries:` and `out:`. Run `make sqlc` and confirm it regenerates in place with no diff beyond the path.
-- [ ] 4.7 Sweep for any remaining `"internal/` string literal or `./internal/<pkg>` in a comment; update the `go test -tags=integration ./internal/<pkg>/` header comments.
+- [x] 4.1 `internal/llmkey/scope_test.go:29-32` — the map of background entrypoints (`enrich`, `telegram`, `mailclassify`, `embed`) to `../../internal/<pkg>`. This is the guard that background work never spends a user's LLM credit.
+- [x] 4.2 `internal/normalize/legal_form_rule_test.go:16` — `canonicalFormList`, the guard keeping one legal-form vocabulary in the module.
+- [x] 4.3 `internal/pgerr/pgerr_test.go:117` — the `"internal/pgerr/"` path check.
+- [x] 4.4 `cmd/gen-cities/main.go:44` — `outputPath = "internal/location/cities1000.tsv"`.
+- [x] 4.5 `.github/workflows/perf.yml:60` — the change filter hardcoding `internal/handler/`, `internal/search/`, `internal/jobview/`. A stale filter silently stops running the perf job.
+- [x] 4.6 `sqlc.yaml:5,9` — `queries:` and `out:`. Run `make sqlc` and confirm it regenerates in place with no diff beyond the path.
+- [x] 4.7 Sweep for any remaining `"internal/` string literal or `./internal/<pkg>` in a comment; update the `go test -tags=integration ./internal/<pkg>/` header comments.
 
 ## 5. Enforcement in CI
 

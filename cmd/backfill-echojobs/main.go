@@ -1,7 +1,7 @@
 // Command backfill-echojobs fills the description of echojobs jobs whose original ingest never
 // hydrated one — either from the pre-hydration era (the adapter originally read only the list
 // endpoint, which omitted the posting body entirely) or from echojobs.io retiring its public
-// JSON API around 2026-08-13 (see internal/sources/echojobs.go), which left every newly-
+// JSON API around 2026-08-13 (see internal/ingest/sources/echojobs.go), which left every newly-
 // discovered posting from that point with an empty description until the adapter was rewritten.
 // Either way the result is the same: a blank, broken job page, reported live on freehire.me.
 // This one-off worker pages every source='echojobs' row, re-fetches the posting's detail (GET
@@ -27,11 +27,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/backfillpage"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobhash"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/job/jobhash"
+	"github.com/strelov1/freehire/internal/platform/backfillpage"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // jobStore is the slice of the data layer the backfill needs: page one provider's rows by keyset

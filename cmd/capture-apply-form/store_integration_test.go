@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/applyform"
-	"github.com/strelov1/freehire/internal/testdb"
+	"github.com/strelov1/freehire/internal/ingest/applyform"
+	"github.com/strelov1/freehire/internal/platform/testdb"
 )
 
 // queueOne inserts a posting and queues a capture for it, returning both ids.

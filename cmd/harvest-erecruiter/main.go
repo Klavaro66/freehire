@@ -24,7 +24,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 )
 
 func main() { os.Exit(run()) }

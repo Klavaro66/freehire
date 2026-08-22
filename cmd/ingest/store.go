@@ -12,13 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/adzunadesc"
-	"github.com/strelov1/freehire/internal/applyform"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/externalid"
-	"github.com/strelov1/freehire/internal/job"
-	"github.com/strelov1/freehire/internal/jobdedup"
-	"github.com/strelov1/freehire/internal/pipeline"
+	"github.com/strelov1/freehire/internal/ingest/adzunadesc"
+	"github.com/strelov1/freehire/internal/ingest/applyform"
+	"github.com/strelov1/freehire/internal/ingest/pipeline"
+	"github.com/strelov1/freehire/internal/job/job"
+	"github.com/strelov1/freehire/internal/job/jobdedup"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/externalid"
 )
 
 // dbStore adapts the generated queries + connection pool to pipeline.Store. Save runs

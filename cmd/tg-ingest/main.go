@@ -14,11 +14,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/linksource"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/telegram"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/linksource"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/ingest/telegram"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {

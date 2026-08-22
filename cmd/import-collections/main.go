@@ -1,5 +1,5 @@
 // Command import-collections populates the company-tag membership defined in
-// internal/collections. For each entry it resolves the member companies — a static
+// internal/job/collections. For each entry it resolves the member companies — a static
 // hand list (e.g. bigtech), a remote dataset (e.g. yc, unicorn), or a public
 // register (the UK and NL visa-sponsor credentials) — matches them onto our
 // companies, applies the entry's gate where it has one, writes
@@ -37,10 +37,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/strelov1/freehire/internal/collections"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/safehttp"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/job/collections"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/safehttp"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // fetchTimeout bounds each dataset download so a stalled endpoint can't hang the run.
@@ -191,7 +191,7 @@ func resolveAll(ctx context.Context) (map[string][]collections.Record, error) {
 // proxiedCollectionSlugs are collections whose register blocks the prod datacenter
 // IP outright, confirmed for us-h1b-sponsor on 2026-08-05: uscis.gov 403s a direct
 // request even with a browser User-Agent, so it is IP reputation rather than a bot-
-// detection header — the same class of problem internal/sources/proxy.go already
+// detection header — the same class of problem internal/ingest/sources/proxy.go already
 // solves for several board providers via the same SOURCES_PROXY_URL. Membership is
 // opt-in; every other collection stays on the direct client.
 var proxiedCollectionSlugs = map[string]struct{}{
@@ -214,7 +214,7 @@ func clientFor(slug string, direct, proxied *http.Client) *http.Client {
 // proxiedClient builds an http.Client egressing through SOURCES_PROXY_URL, or
 // returns nil when the variable is unset. An unparseable value is a fail-fast
 // error rather than a silent fallback to the direct (blocked) IP — the same
-// discipline as internal/sources/proxy.go's ApplyProxyEgress.
+// discipline as internal/ingest/sources/proxy.go's ApplyProxyEgress.
 func proxiedClient(timeout time.Duration) (*http.Client, error) {
 	raw := strings.TrimSpace(os.Getenv("SOURCES_PROXY_URL"))
 	if raw == "" {

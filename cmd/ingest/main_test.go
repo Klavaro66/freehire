@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strelov1/freehire/internal/pipeline"
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/pipeline"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 )
 
 // The shared custom.yml must load and pass validation against the real adapter registry,

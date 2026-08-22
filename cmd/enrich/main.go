@@ -9,10 +9,10 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/enrich"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ai/enrich"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {

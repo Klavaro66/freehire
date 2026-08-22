@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // fakeCandidates serves the catalogue one keyset page at a time, exactly as the query

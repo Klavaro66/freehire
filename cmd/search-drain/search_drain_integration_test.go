@@ -24,10 +24,10 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/searchdrain"
-	"github.com/strelov1/freehire/internal/testdb"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/testdb"
+	"github.com/strelov1/freehire/internal/search/search"
+	"github.com/strelov1/freehire/internal/search/searchdrain"
 )
 
 func startMeili(t *testing.T) (url, key string) {

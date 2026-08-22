@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/collections"
-	"github.com/strelov1/freehire/internal/mailclassify"
-	"github.com/strelov1/freehire/internal/userjob"
+	"github.com/strelov1/freehire/internal/application/mailclassify"
+	"github.com/strelov1/freehire/internal/application/userjob"
+	"github.com/strelov1/freehire/internal/job/collections"
 )
 
 // emitVocab renders one closed vocabulary as a frozen value array plus a string-union

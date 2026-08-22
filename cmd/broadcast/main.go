@@ -19,10 +19,10 @@ import (
 	"log"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/broadcast"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/emailnotify"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/engage/broadcast"
+	"github.com/strelov1/freehire/internal/engage/emailnotify"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 var (

@@ -11,12 +11,12 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/linksource"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/telegram"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/linksource"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/ingest/telegram"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {

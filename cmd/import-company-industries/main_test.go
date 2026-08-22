@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // fakeStore is the companies table reduced to what the two walks touch: a slug to

@@ -10,11 +10,11 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/mailclassify"
-	"github.com/strelov1/freehire/internal/maillink"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/application/mailclassify"
+	"github.com/strelov1/freehire/internal/application/maillink"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {

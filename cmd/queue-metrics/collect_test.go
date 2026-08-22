@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // fakeQueries answers each query from a canned value, so collect's assembly and error

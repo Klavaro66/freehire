@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 	"golang.org/x/net/html"
 )
 
@@ -293,10 +293,10 @@ type icimsProber struct{}
 
 // icimsJobLocPattern matches an iCIMS job-posting URL's /jobs/<id>/ segment, the same shape
 // the adapter keys off. It is duplicated here (a small literal) rather than exported from
-// internal/sources, to avoid widening that package's API for a dev tool.
+// internal/ingest/sources, to avoid widening that package's API for a dev tool.
 var icimsJobLocPattern = regexp.MustCompile(`/jobs/\d+/`)
 
-// icimsHost mirrors internal/sources/icims.go: a board containing a dot IS the careers host, and
+// icimsHost mirrors internal/ingest/sources/icims.go: a board containing a dot IS the careers host, and
 // anything else is a bare slug the host is rebuilt from. Probing every candidate as the rebuilt
 // form asks for "careers-<host>.icims.com" whenever the board is a vanity one, which resolves
 // nowhere — so every vanity board would be reported dead instead of probed.

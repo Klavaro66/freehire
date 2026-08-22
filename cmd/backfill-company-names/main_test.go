@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/companyname"
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/dict/companyname"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // stubResolver returns a canned candidate per board, standing in for a real ATS

@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/jobhash"
-	"github.com/strelov1/freehire/internal/pgconv"
+	"github.com/strelov1/freehire/internal/job/jobderive"
+	"github.com/strelov1/freehire/internal/job/jobhash"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/pgconv"
 )
 
 // fakeStore serves one page of jobs (keyset paging: AfterID 0 returns all, then

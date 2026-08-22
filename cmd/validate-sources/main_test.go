@@ -42,7 +42,7 @@ channels:
 	}
 }
 
-// A board entered twice under different casing is exactly what internal/sources'
+// A board entered twice under different casing is exactly what internal/ingest/sources'
 // dedupeBoards silently drops at ingest time; the validator's job is to fail loudly on
 // it instead so it never reaches main.
 func TestRunCatchesCaseVariantDuplicateBoard(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/strelov1/freehire/internal/normalize"
+	"github.com/strelov1/freehire/internal/dict/normalize"
 	"gopkg.in/yaml.v3"
 )
 

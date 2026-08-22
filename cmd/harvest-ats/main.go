@@ -26,8 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/strelov1/freehire/internal/collections"
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/job/collections"
 )
 
 // resolveWorkers bounds the concurrent careers-page fetch fan-out. The shared

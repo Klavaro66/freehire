@@ -3,7 +3,7 @@ package main
 import (
 	"sort"
 
-	"github.com/strelov1/freehire/internal/normalize"
+	"github.com/strelov1/freehire/internal/dict/normalize"
 )
 
 // minCandidate is the shortest candidate board id worth probing. A one- or two-character id

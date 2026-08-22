@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/normalize"
+	"github.com/strelov1/freehire/internal/dict/normalize"
 )
 
 // hit is one (provider, board) the resolve step wants written to a seed: either detected on a

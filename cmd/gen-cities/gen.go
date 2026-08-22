@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/strelov1/freehire/internal/stringset"
+	"github.com/strelov1/freehire/internal/platform/stringset"
 )
 
 // stoplist holds lowercase aliases that must never resolve to a city: the parser's
@@ -13,7 +13,7 @@ import (
 // a location token like "Remote" or "Europe" stays a work-mode / region signal
 // rather than misfiring a city.
 //
-// These mirror the marker sets in internal/location (noiseTokenWords, workModeMarkers,
+// These mirror the marker sets in internal/dict/location (noiseTokenWords, workModeMarkers,
 // nameToRegion). They are duplicated deliberately: this is a build-time dev tool and
 // cannot import that package's unexported maps. A miss is contained — the parser's
 // country-agreement guard already rejects a region-word token that carries no country —

@@ -8,7 +8,7 @@ package main
 // M-W-F schedules) and "part time" above every real role, and they alone accounted
 // for most of the apparent coverage. No word group may contain one, anywhere.
 //
-// The doctrine matches internal/classify: curated, never inferred, deliberately
+// The doctrine matches internal/dict/classify: curated, never inferred, deliberately
 // conservative. A word here silently removes every group containing it, so a term
 // that is part of a real role phrase would hide that whole family from mining
 // rather than merely filter it — "home" would cost "home health aide", "call" would

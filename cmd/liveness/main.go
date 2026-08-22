@@ -36,11 +36,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/liveness"
-	"github.com/strelov1/freehire/internal/safehttp"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/job/liveness"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/safehttp"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 const (
@@ -58,7 +58,7 @@ const (
 	// orphan seconds apart would collapse the "two consecutive expired reads" grace
 	// into one burst — closing a job on a transient blip. A second run that can't take
 	// the lock exits cleanly. The value is an arbitrary constant unique to this worker.
-	lockKey = 0x66686c76 // "fhlv" — freehire liveness; the key list lives in internal/migrate
+	lockKey = 0x66686c76 // "fhlv" — freehire liveness; the key list lives in internal/platform/migrate
 )
 
 // unsignalledSources carry no close signal at all: no re-crawl that could stop seeing
@@ -119,7 +119,7 @@ const staleCutoff = sources.DefaultSweepGrace
 // budget structurally can never re-reach.
 //
 // A prefix, not a source list: whatjobs runs one CPC account PER COUNTRY
-// (internal/sources/whatjobs.go's whatjobsMarkets — ~50 as of writing), each its own
+// (internal/ingest/sources/whatjobs.go's whatjobsMarkets — ~50 as of writing), each its own
 // registered provider ("whatjobs" for the bare US market, "whatjobs-<cc>" for every
 // other), all sharing the identical unprobeable-URL shape. Matching by prefix against the
 // live registry (see the derivation in run()) means a newly onboarded market is covered

@@ -17,12 +17,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobview"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/job/jobview"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 // reindexBatchSize bounds how many jobs are read from Postgres and pushed to

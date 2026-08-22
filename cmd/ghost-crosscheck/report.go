@@ -4,7 +4,7 @@ import (
 	"log"
 	"sort"
 
-	"github.com/strelov1/freehire/internal/ghost"
+	"github.com/strelov1/freehire/internal/job/ghost"
 )
 
 // report accumulates what a run did, or would do. It exists because the rollout

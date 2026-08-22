@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/liveness"
+	"github.com/strelov1/freehire/internal/job/liveness"
 )
 
 func TestCheckEchoJobsLiveOnLivePosting(t *testing.T) {
@@ -40,7 +40,7 @@ func TestCheckEchoJobsLiveOnRemovedPosting(t *testing.T) {
 }
 
 // 410 Gone is the same "removed" signal as 404 for every other liveness probe in this worker
-// (see internal/liveness.Classify) — echojobs' own probe must not treat it as merely Uncertain.
+// (see internal/job/liveness.Classify) — echojobs' own probe must not treat it as merely Uncertain.
 func TestCheckEchoJobsLiveOnGonePosting(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(410)

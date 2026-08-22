@@ -12,7 +12,7 @@ import (
 // oracleProber validates an Oracle Recruiting Cloud board "<host>/<site>" by listing one
 // requisition from its public candidate-experience API. Oracle exposes no employer name
 // (the host is an opaque tenant code), so it returns an empty name and leans on the
-// seed-supplied company; see internal/sources/oracle.go for the board-id shape.
+// seed-supplied company; see internal/ingest/sources/oracle.go for the board-id shape.
 type oracleProber struct{}
 
 // dedupKey folds an Oracle board's site segment to lower case. Oracle answers a requisition

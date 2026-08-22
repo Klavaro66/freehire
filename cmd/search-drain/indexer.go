@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobview"
-	"github.com/strelov1/freehire/internal/search"
+	"github.com/strelov1/freehire/internal/job/jobview"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 // searchIndexer adapts the search client to searchdrain.Indexer: build each job's
@@ -101,7 +101,7 @@ func (ix searchIndexer) IndexBatch(ctx context.Context, jobs []db.Job) error {
 		// for the same rules applied to the full-rebuild path. This skips rather than
 		// deletes: if the row is a rare pre-existing index entry from before these rules
 		// existed, it goes stale here the same way a closed job's does between drain
-		// waves (internal/searchdrain/AGENTS.md) — the next full reindex swap is the
+		// waves (internal/search/searchdrain/AGENTS.md) — the next full reindex swap is the
 		// reconciler for both.
 		if search.CategoryUnresolved(job) || search.DescriptionMissing(job) {
 			continue

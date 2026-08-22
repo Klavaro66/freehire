@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/applyform"
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/ingest/applyform"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // dbStore adapts the generated queries + pool to applyform.Store. It is the only place the
