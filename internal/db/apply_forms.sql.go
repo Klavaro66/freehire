@@ -57,7 +57,7 @@ type ClaimApplyFormBatchRow struct {
 //
 // The claim returns the job's source, external_id and url because the worker builds its
 // fetch from the row alone: external_id is the board-namespaced posting id
-// (sources.NamespaceExternalID), which carries both halves the platform APIs need, and
+// (externalid.Namespace), which carries both halves the platform APIs need, and
 // the url carries the regional host for a platform that has more than one. Lever serves
 // its European tenants from a separate host and answers 404 on the other — the same code
 // it uses for a posting that is gone, so the host cannot be discovered by trying.

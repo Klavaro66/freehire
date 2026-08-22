@@ -14,7 +14,7 @@ import (
 	"github.com/strelov1/freehire/internal/auth"
 	"github.com/strelov1/freehire/internal/jobtracking"
 	"github.com/strelov1/freehire/internal/jobview"
-	"github.com/strelov1/freehire/internal/userjob"
+	"github.com/strelov1/freehire/internal/silence"
 )
 
 // silenceRepo serves a fixed page of tracked rows, so the test pins what the
@@ -108,9 +108,9 @@ func TestTrackingSilenceFieldsOnApplications(t *testing.T) {
 		days  int
 		state string
 	}{
-		{30, userjob.SilenceSilent},
-		{5, userjob.SilenceActive},
-		{13, userjob.SilenceSilent},
+		{30, silence.Silent},
+		{5, silence.Active},
+		{13, silence.Silent},
 	}
 	for i, w := range want {
 		got := rows[i]
@@ -152,8 +152,8 @@ func TestTrackingSilenceUnconfirmed(t *testing.T) {
 	if len(rows) != 1 || rows[0].SilenceState == nil {
 		t.Fatalf("unexpected listing: %+v", rows)
 	}
-	if *rows[0].SilenceState != userjob.SilenceUnconfirmed {
-		t.Errorf("silence_state = %q, want %q", *rows[0].SilenceState, userjob.SilenceUnconfirmed)
+	if *rows[0].SilenceState != silence.Unconfirmed {
+		t.Errorf("silence_state = %q, want %q", *rows[0].SilenceState, silence.Unconfirmed)
 	}
 }
 
@@ -176,7 +176,7 @@ func TestTrackingCarriesTheChaseBesideTheSilence(t *testing.T) {
 	if !rows[0].FollowedUpAt.Equal(at) {
 		t.Errorf("followed_up_at = %v, want %v", rows[0].FollowedUpAt, at)
 	}
-	if rows[0].SilenceState == nil || *rows[0].SilenceState != userjob.SilenceSilent {
+	if rows[0].SilenceState == nil || *rows[0].SilenceState != silence.Silent {
 		t.Errorf("a chased application is no longer silent: %+v", rows[0])
 	}
 	if rows[0].DaysSilent == nil || *rows[0].DaysSilent != 30 {

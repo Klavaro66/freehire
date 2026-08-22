@@ -3,7 +3,7 @@ package ghost
 import (
 	"time"
 
-	"github.com/strelov1/freehire/internal/userjob"
+	"github.com/strelov1/freehire/internal/silence"
 )
 
 // Application is one candidate application: an application whose owner has a
@@ -70,8 +70,8 @@ func Aggregate(now time.Time, apps []Application, reports []Report) map[int64]Ev
 		// terminal stage, reads an unset stage as `applied`, softens a silence
 		// into a question when unconfirmed mail contradicts it, and applies the
 		// stage's own threshold. Only an outright `silent` is a fact.
-		state := userjob.SilenceStateFor(app.Stage, userjob.DaysSilent(now, app.LastActivityAt), app.HasPendingSuggestion)
-		if state != userjob.SilenceSilent {
+		state := silence.StateFor(app.Stage, silence.Days(now, app.LastActivityAt), app.HasPendingSuggestion)
+		if state != silence.Silent {
 			continue
 		}
 		record(app.JobID, app.UserID, func(ev *Evidence) { ev.SilentApplications++ })
@@ -79,7 +79,7 @@ func Aggregate(now time.Time, apps []Application, reports []Report) map[int64]Ev
 
 	for _, report := range reports {
 		threshold, ok := appliedThresholdDays()
-		if !ok || userjob.DaysSilent(now, report.AppliedOn) <= threshold {
+		if !ok || silence.Days(now, report.AppliedOn) <= threshold {
 			continue
 		}
 		record(report.JobID, report.UserID, func(ev *Evidence) { ev.Reports++ })
@@ -99,5 +99,5 @@ func Aggregate(now time.Time, apps []Application, reports []Report) map[int64]Ev
 // application, so it must clear the same bar — measured at 21 days over 92
 // observed applications.
 func appliedThresholdDays() (int, bool) {
-	return userjob.SilenceThresholdDays("applied")
+	return silence.ThresholdDays("applied")
 }

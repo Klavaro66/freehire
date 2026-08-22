@@ -12,7 +12,7 @@ import (
 
 // Claimed is one capture leased to this run. Provider and ExternalID come straight off the
 // posting's row, which is everything a fetch needs — the external id is the board and the
-// platform's posting id joined by sources.NamespaceExternalID.
+// platform's posting id joined by externalid.Namespace.
 type Claimed struct {
 	OutboxID   int64
 	JobID      int64

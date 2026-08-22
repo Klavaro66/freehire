@@ -11,7 +11,7 @@ import (
 	"github.com/strelov1/freehire/internal/db"
 	"github.com/strelov1/freehire/internal/followup"
 	"github.com/strelov1/freehire/internal/matchanalysis"
-	"github.com/strelov1/freehire/internal/userjob"
+	"github.com/strelov1/freehire/internal/silence"
 )
 
 // followUpDraftResponse is the wire shape for a chase the candidate sends themselves. Recipient is
@@ -27,7 +27,7 @@ type followUpDraftResponse struct {
 // GetApplicationFollowUp assembles a follow-up draft for a silent application.
 //
 // The gate is the same verdict the board's badge renders: a draft is offered only where
-// userjob.SilenceStateFor says `silent`, so the offer and the badge cannot disagree about which
+// silence.StateFor says `silent`, so the offer and the badge cannot disagree about which
 // applications qualify. Nothing here sends mail — the draft is handed to the candidate.
 func (h *inboxHandlers) GetApplicationFollowUp(c *fiber.Ctx) error {
 	userID, err := requireUserID(c)
@@ -45,9 +45,9 @@ func (h *inboxHandlers) GetApplicationFollowUp(c *fiber.Ctx) error {
 
 	days := 0
 	if app.LastActivityAt.Valid {
-		days = userjob.DaysSilent(time.Now(), app.LastActivityAt.Time)
+		days = silence.Days(time.Now(), app.LastActivityAt.Time)
 	}
-	if userjob.SilenceStateFor(pgStr(app.Stage), days, app.HasPendingSuggestion) != userjob.SilenceSilent {
+	if silence.StateFor(pgStr(app.Stage), days, app.HasPendingSuggestion) != silence.Silent {
 		return fiber.NewError(fiber.StatusConflict, "this application is not waiting on a reply")
 	}
 

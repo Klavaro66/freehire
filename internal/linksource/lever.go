@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
@@ -14,7 +15,7 @@ import (
 // lever resolves Lever-hosted vacancies. Lever is multi-tenant, so a TG link points at an
 // arbitrary company's board — many of which sources/lever.yml does not list. The adapter
 // writes the SAME identity the ingest pipeline would (source="lever", external_id
-// "<board>:<posting id>" via sources.NamespaceExternalID, the URL's company slug being the
+// "<board>:<posting id>" via externalid.Namespace, the URL's company slug being the
 // board), so UpsertJob's ON CONFLICT dedups against an already-crawled company and a
 // not-yet-crawled one is added under the canonical key rather than a thin telegram dup.
 type lever struct {
@@ -88,7 +89,7 @@ func (l lever) Resolve(ctx context.Context, raw string) (sources.Job, bool, erro
 	body.WriteString(p.Additional)
 
 	return sources.Job{
-		ExternalID:  sources.NamespaceExternalID(company, p.ID),
+		ExternalID:  externalid.Namespace(company, p.ID),
 		URL:         p.HostedURL,
 		Title:       p.Text,
 		Company:     humanizeBoard(company), // the per-posting API carries no company name

@@ -1,6 +1,6 @@
 // Package nudge is the lifecycle-notification decision layer: it watches tracked
 // applications and drives three one-shot nudges — follow-up (an application has
-// gone silent past its stage's tolerated threshold, per userjob.SilenceStateFor),
+// gone silent past its stage's tolerated threshold, per silence.StateFor),
 // interview-prep (a stage_set moved an application into `interview`), and
 // job-closed (a listing the candidate is still actively tracking closed) — over
 // the same account-level notification_settings rule internal/reminder reads.
@@ -35,7 +35,7 @@ import (
 	"github.com/strelov1/freehire/internal/deliverywindow"
 	"github.com/strelov1/freehire/internal/notify"
 	"github.com/strelov1/freehire/internal/pgconv"
-	"github.com/strelov1/freehire/internal/userjob"
+	"github.com/strelov1/freehire/internal/silence"
 )
 
 // Nudge kinds. Also the CHECK constraint on application_nudges.kind (migrations
@@ -212,8 +212,8 @@ func (r *Runner) match(ctx context.Context, stats *Stats) error {
 		if c.Stage.Valid {
 			stage = c.Stage.String
 		}
-		days := userjob.DaysSilent(r.now(), c.LastActivityAt.Time)
-		if userjob.SilenceStateFor(stage, days, c.HasPendingSuggestion) != userjob.SilenceSilent {
+		days := silence.Days(r.now(), c.LastActivityAt.Time)
+		if silence.StateFor(stage, days, c.HasPendingSuggestion) != silence.Silent {
 			continue
 		}
 		affected, err := r.store.RecordNudge(ctx, db.RecordNudgeParams{
@@ -256,7 +256,7 @@ func (r *Runner) match(ctx context.Context, stats *Stats) error {
 		if c.Stage.Valid {
 			stage = c.Stage.String
 		}
-		if _, active := userjob.SilenceThresholdDays(stage); !active {
+		if _, active := silence.ThresholdDays(stage); !active {
 			continue // a settled application does not care that the listing closed
 		}
 		affected, err := r.store.RecordNudge(ctx, db.RecordNudgeParams{
@@ -330,7 +330,7 @@ func (r *Runner) fire(ctx context.Context, id int64, stats *Stats) {
 
 	msg := Message{Kind: info.Kind, JobTitle: info.Title, Company: info.Company, Slug: info.PublicSlug, URL: info.URL}
 	if info.Kind == KindFollowUp && info.LastActivityAt.Valid {
-		msg.DaysSilent = userjob.DaysSilent(r.now(), info.LastActivityAt.Time)
+		msg.DaysSilent = silence.Days(r.now(), info.LastActivityAt.Time)
 	}
 	delivered, failedErr := r.deliverChannels(ctx, info, msg)
 
@@ -381,16 +381,16 @@ func (r *Runner) actionable(info db.GetNudgeForDeliveryRow) bool {
 		}
 		days := 0
 		if info.LastActivityAt.Valid {
-			days = userjob.DaysSilent(r.now(), info.LastActivityAt.Time)
+			days = silence.Days(r.now(), info.LastActivityAt.Time)
 		}
-		return userjob.SilenceStateFor(stage, days, info.HasPendingSuggestion) == userjob.SilenceSilent
+		return silence.StateFor(stage, days, info.HasPendingSuggestion) == silence.Silent
 	case KindInterviewPrep:
 		return info.JobOpen && info.ApplicationExists && stage == "interview"
 	case KindJobClosed:
 		if !info.ApplicationExists {
 			return false
 		}
-		_, active := userjob.SilenceThresholdDays(stage)
+		_, active := silence.ThresholdDays(stage)
 		return active
 	default:
 		return false

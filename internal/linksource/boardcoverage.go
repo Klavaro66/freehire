@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/strelov1/freehire/internal/atsboard"
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -109,7 +110,7 @@ func ResolveOnBoard(ctx context.Context, reg map[string]sources.Source, source, 
 	}
 	// Namespace the id by board exactly as the ingest pipeline does, so a later crawl of this
 	// board dedups onto the row this import writes instead of adding a second posting.
-	job.ExternalID = sources.NamespaceExternalID(board, job.ExternalID)
+	job.ExternalID = externalid.Namespace(board, job.ExternalID)
 	return job, true, nil
 }
 

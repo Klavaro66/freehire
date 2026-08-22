@@ -13,8 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/externalid"
 )
 
 // farFuture is a hydration cutoff every row predates, which reduces the seen-set to its
@@ -76,7 +75,7 @@ func TestExistingExternalIDsScopedToBoard(t *testing.T) {
 	}
 	for board, ids := range boards {
 		for _, id := range ids {
-			p := ingestParams(sources.NamespaceExternalID(board, id), "Engineer")
+			p := ingestParams(externalid.Namespace(board, id), "Engineer")
 			p.Source = "workday"
 			// The refresh path judges the catalogue filter on the row's stored evidence, so
 			// the seen-set carries it: mark the first posting of each board technical.
@@ -98,7 +97,7 @@ func TestExistingExternalIDsScopedToBoard(t *testing.T) {
 	} {
 		rows, err := q.ExistingExternalIDsByBoard(ctx, ExistingExternalIDsByBoardParams{
 			Source:          "workday",
-			Pattern:         sources.BoardIDPattern(tc.board),
+			Pattern:         externalid.BoardPattern(tc.board),
 			HydrationCutoff: farFuture(),
 		})
 		if err != nil {
@@ -185,7 +184,7 @@ func TestExistingExternalIDsByBoardWithholdsUnhydratedRows(t *testing.T) {
 
 	rows, err := q.ExistingExternalIDsByBoard(ctx, ExistingExternalIDsByBoardParams{
 		Source:          "workday",
-		Pattern:         sources.BoardIDPattern("acme"),
+		Pattern:         externalid.BoardPattern("acme"),
 		HydrationCutoff: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true},
 	})
 	if err != nil {

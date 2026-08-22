@@ -1,8 +1,11 @@
 package userjob
 
 import (
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/strelov1/freehire/internal/silence"
 )
 
 // TestEveryStageIsRankedOrTerminal is the direction the old cross-package test lacked. It checked
@@ -46,14 +49,19 @@ func TestEveryStageIsRankedOrTerminal(t *testing.T) {
 // stage without a threshold makes it tolerate silence forever; adding a threshold without a rank
 // makes it unreachable.
 func TestSilenceThresholdsCoverExactlyTheActiveStages(t *testing.T) {
+	// The ladder lives in internal/silence, below this package, because the ghost signal
+	// needs it too. The invariant tying it to the stage pipeline stays here, where
+	// activeRank is: a stage that advances but tolerates no measured silence would never
+	// report as silent, and a threshold for a stage that does not exist is dead weight.
+	covered := silence.Stages()
 	for stage := range activeRank {
-		if _, ok := silenceThresholds[stage]; !ok {
+		if !slices.Contains(covered, stage) {
 			t.Errorf("active stage %q has no silence threshold, so it never reports as silent", stage)
 		}
 	}
-	for stage := range silenceThresholds {
+	for _, stage := range covered {
 		if _, ok := activeRank[stage]; !ok {
-			t.Errorf("silenceThresholds has %q, which is not an active stage", stage)
+			t.Errorf("silence.Stages has %q, which is not an active stage", stage)
 		}
 	}
 }
@@ -110,8 +118,8 @@ func TestDaysSilent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := DaysSilent(now, tt.last); got != tt.want {
-				t.Errorf("DaysSilent(%v) = %d, want %d", tt.last, got, tt.want)
+			if got := silence.Days(now, tt.last); got != tt.want {
+				t.Errorf("silence.Days(%v) = %d, want %d", tt.last, got, tt.want)
 			}
 		})
 	}

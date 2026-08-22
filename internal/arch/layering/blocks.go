@@ -40,7 +40,7 @@ var blocks = map[string][]string{
 	// holding one function. The classification was wrong, not the code.
 	"platform": {
 		"arch/layering", "backfillpage", "blobstore", "cache", "config", "database", "db",
-		"flexjson", "htmltext", "isoweek", "linktoken", "llm", "llmschema", "migrate",
+		"externalid", "flexjson", "htmltext", "isoweek", "linktoken", "llm", "llmschema", "migrate",
 		"observability", "outbox", "pgconv", "pgerr", "safehttp", "stringset", "testdb",
 		"tokencrypt", "tracerlink", "worker",
 	},
@@ -63,7 +63,7 @@ var blocks = map[string][]string{
 		"matchanalysis", "pii", "resume", "resumeextract",
 	},
 	"job": {
-		"collections", "ghost", "ghostreport", "job", "jobdedup", "jobderive", "jobfacts",
+		"applydate", "collections", "ghost", "ghostreport", "job", "jobdedup", "jobderive", "jobfacts",
 		"jobhash", "jobreality", "jobview", "liveness", "outboundurl", "privatejob",
 		"silence", "verdict", "ycdir",
 	},

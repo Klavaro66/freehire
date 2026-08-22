@@ -92,7 +92,7 @@ func Fetchers(t Transport) map[string]Fetcher {
 }
 
 // splitBoardPosting splits a stored external_id back into the board and the platform's own
-// posting id. sources.NamespaceExternalID composes it as "board:id" with the board first,
+// posting id. externalid.Namespace composes it as "board:id" with the board first,
 // so the split is on the FIRST colon: a board name is an ATS slug and carries none, while
 // a posting id might.
 func splitBoardPosting(externalID string) (board, posting string, ok bool) {

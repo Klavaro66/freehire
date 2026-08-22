@@ -1,4 +1,4 @@
-package userjob
+package applydate
 
 import (
 	"strings"
@@ -25,7 +25,7 @@ func TestValidateAppliedOn(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateAppliedOn(tc.day, now)
+			err := Validate(tc.day, now)
 			if tc.wantErr && err == nil {
 				t.Error("err = nil, want an error")
 			}
@@ -40,11 +40,11 @@ func TestValidateAppliedOn(t *testing.T) {
 // 400 and "invalid date" tells them nothing about how to fix it.
 func TestValidateAppliedOnSaysWhich(t *testing.T) {
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	if err := ValidateAppliedOn(now.AddDate(0, 0, 1), now); err == nil ||
+	if err := Validate(now.AddDate(0, 0, 1), now); err == nil ||
 		!strings.Contains(err.Error(), "future") {
 		t.Errorf("err = %v, want it to mention the future", err)
 	}
-	if err := ValidateAppliedOn(now.AddDate(0, 0, -400), now); err == nil ||
+	if err := Validate(now.AddDate(0, 0, -400), now); err == nil ||
 		!strings.Contains(err.Error(), "year") {
 		t.Errorf("err = %v, want it to mention the year bound", err)
 	}

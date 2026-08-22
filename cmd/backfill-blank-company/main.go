@@ -25,6 +25,7 @@ import (
 	"log"
 
 	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/normalize"
 	"github.com/strelov1/freehire/internal/sources"
 	"github.com/strelov1/freehire/internal/worker"
@@ -60,7 +61,7 @@ func run() int {
 			if e.Company == "" || e.Board == "" {
 				continue // Validate already guarantees this in production; defensive only
 			}
-			pattern := sources.BoardIDPattern(e.Board)
+			pattern := externalid.BoardPattern(e.Board)
 			boards++
 
 			if *dryRun {

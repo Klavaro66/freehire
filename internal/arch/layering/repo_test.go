@@ -140,7 +140,7 @@ func TestEveryPackageInTheRepoIsAssignedToABlock(t *testing.T) {
 // from the repo AND absent here fails, and a package that now exists but is still listed
 // here fails too. So creating silence (task 2.4) without deleting
 // its line is a test failure, and the list cannot quietly outlive its purpose.
-var pendingExtraction = []string{"silence"}
+var pendingExtraction []string
 
 func TestBlockTableNamesNoPackageThatDoesNotExist(t *testing.T) {
 	present := make(map[string]bool)
@@ -199,16 +199,12 @@ func remapped(t *testing.T) map[string][]string {
 	return out
 }
 
-// plannedViolations are the upward edges the prerequisite extractions exist to remove, each
-// tagged with the task that removes it. The test below asserts the post-move graph has
+// plannedViolations are the upward edges still awaiting a prerequisite extraction, each
+// tagged with the task that removes it. Empty: every one has landed, so the block table
+// now describes a graph that already layers cleanly, before a single directory has moved. The test below asserts the post-move graph has
 // EXACTLY these and no others, in both directions: a new upward edge fails, and an edge
 // that has been fixed without being struck off this list fails too.
-var plannedViolations = map[string]string{
-	"job/ghost -> application/userjob":       "2.4 carve the silence model out of userjob",
-	"job/ghostreport -> application/userjob": "2.4 carve the silence model out of userjob",
-	"platform/db -> dict/normalize":          "2.6 drop normalize.JobSlug from the db integration tests",
-	"platform/db -> ingest/sources":          "2.7 drop sources.* from the db integration tests",
-}
+var plannedViolations = map[string]string{}
 
 func TestPostMoveGraphHasOnlyThePlannedViolations(t *testing.T) {
 	seen := map[string]bool{}

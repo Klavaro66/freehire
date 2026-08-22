@@ -65,7 +65,7 @@ type Querier interface {
 	BackfillApplicationEventLinks(ctx context.Context, batchSize int32) (int64, error)
 	// Fills company/company_slug/company_slug_folded for rows still blank under one board of a
 	// provider whose adapter sets Company statically per board (see cmd/backfill-blank-company for
-	// which providers qualify and why). board_pattern is sources.BoardIDPattern(board) — the
+	// which providers qualify and why). board_pattern is externalid.BoardPattern(board) — the
 	// board's external_id namespace, so only this board's rows move. Also enqueues every touched
 	// OPEN job into search_outbox, mirroring UpsertJob/EnqueueSearchOutbox's denormalized
 	// job_posted_at, since this write bypasses the normal ingest path that would do it inline.
@@ -197,7 +197,7 @@ type Querier interface {
 	//
 	// The claim returns the job's source, external_id and url because the worker builds its
 	// fetch from the row alone: external_id is the board-namespaced posting id
-	// (sources.NamespaceExternalID), which carries both halves the platform APIs need, and
+	// (externalid.Namespace), which carries both halves the platform APIs need, and
 	// the url carries the regional host for a platform that has more than one. Lever serves
 	// its European tenants from a separate host and answers 404 on the other — the same code
 	// it uses for a posting that is gone, so the host cannot be discovered by trying.
@@ -1160,7 +1160,7 @@ type Querier interface {
 	// text_pattern_ops), whose operator class compares byte-wise. A range predicate over the plain
 	// index (external_id >= 'board:' AND < 'board;') looks equivalent and is NOT: under the database's
 	// collation punctuation carries only a secondary weight, so that range returns nothing at all.
-	// The caller passes an escaped pattern (sources.BoardIDPattern) — a board name may contain LIKE
+	// The caller passes an escaped pattern (externalid.BoardPattern) — a board name may contain LIKE
 	// syntax, and an unescaped underscore would match a sibling board.
 	//
 	// hydration_cutoff withholds a still-body-less row from the seen-set so its detail is retried;
@@ -1425,7 +1425,7 @@ type Querier interface {
 	// distinguishes "no applications row at all" (untracked since MATCH) from "row
 	// exists with a NULL stage" — the LEFT JOIN alone leaves stage NULL in both
 	// cases, which would otherwise be judged as the active `applied` stage by
-	// userjob.SilenceThresholdDays.
+	// silence.ThresholdDays.
 	GetNudgeForDelivery(ctx context.Context, id int64) (GetNudgeForDeliveryRow, error)
 	// Public read of a shared board by its slug — no auth, no owner-scoping. Exposes only
 	// the board's display fields; owner columns (user_id) are never selected. A NULL slug
@@ -2085,7 +2085,7 @@ type Querier interface {
 	// Active applications, for users with notifications enabled, whose last activity
 	// falls inside the recency window (bounds the scan to an index range rather than
 	// the whole table, and keeps a first deploy from detonating the entire historical
-	// backlog as nudges). Returns the raw ingredients for userjob.SilenceStateFor —
+	// backlog as nudges). Returns the raw ingredients for silence.StateFor —
 	// the silence verdict itself is a Go-side decision, not a SQL one, same as every
 	// other silence-state reader in this codebase.
 	ListFollowUpCandidates(ctx context.Context, windowDays int32) ([]ListFollowUpCandidatesRow, error)
@@ -2162,7 +2162,7 @@ type Querier interface {
 	// is a caller-validated date_trunc field (day/week/month), never raw user input.
 	ListJobActivity(ctx context.Context, arg ListJobActivityParams) ([]ListJobActivityRow, error)
 	// Jobs that closed recently while the tracking user still has an application in a
-	// non-terminal stage on them (any stage userjob.SilenceThresholdDays accrues
+	// non-terminal stage on them (any stage silence.ThresholdDays accrues
 	// silence for — the same active/terminal split every other silence reader uses).
 	// Bounded to a recency window on closed_at for the same first-deploy reason as
 	// the other two candidate scans.

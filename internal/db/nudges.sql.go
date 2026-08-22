@@ -146,7 +146,7 @@ type GetNudgeForDeliveryRow struct {
 // distinguishes "no applications row at all" (untracked since MATCH) from "row
 // exists with a NULL stage" — the LEFT JOIN alone leaves stage NULL in both
 // cases, which would otherwise be judged as the active `applied` stage by
-// userjob.SilenceThresholdDays.
+// silence.ThresholdDays.
 func (q *Queries) GetNudgeForDelivery(ctx context.Context, id int64) (GetNudgeForDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getNudgeForDelivery, id)
 	var i GetNudgeForDeliveryRow
@@ -207,7 +207,7 @@ type ListFollowUpCandidatesRow struct {
 // Active applications, for users with notifications enabled, whose last activity
 // falls inside the recency window (bounds the scan to an index range rather than
 // the whole table, and keeps a first deploy from detonating the entire historical
-// backlog as nudges). Returns the raw ingredients for userjob.SilenceStateFor —
+// backlog as nudges). Returns the raw ingredients for silence.StateFor —
 // the silence verdict itself is a Go-side decision, not a SQL one, same as every
 // other silence-state reader in this codebase.
 func (q *Queries) ListFollowUpCandidates(ctx context.Context, windowDays int32) ([]ListFollowUpCandidatesRow, error) {
@@ -295,7 +295,7 @@ type ListJobClosedCandidatesRow struct {
 }
 
 // Jobs that closed recently while the tracking user still has an application in a
-// non-terminal stage on them (any stage userjob.SilenceThresholdDays accrues
+// non-terminal stage on them (any stage silence.ThresholdDays accrues
 // silence for — the same active/terminal split every other silence reader uses).
 // Bounded to a recency window on closed_at for the same first-deploy reason as
 // the other two candidate scans.

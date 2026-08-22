@@ -89,7 +89,7 @@ func ParseRawEntries(provider string, data []byte) ([]CompanyEntry, error) {
 // board ids are case-insensitive at the platform — SmartRecruiters serves the same tenant for
 // "SopraSteria1" and "soprasteria1") and, on some platforms, the FORM of the id (see
 // boardIdentity). Either way the pipeline namespaces external_id with the literal board string
-// (see NamespaceExternalID), so a case-variant duplicate crawls identical postings yet
+// (see externalid.Namespace), so a case-variant duplicate crawls identical postings yet
 // stores them as a SECOND row-set under a different namespace but the SAME company_slug.
 // The post-run unseen sweep is scoped by company_slug (not board), so whenever a run
 // refreshes one variant but not the other, it closes the un-refreshed variant's still-live

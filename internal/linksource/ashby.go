@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -61,7 +62,7 @@ func (a ashby) Resolve(ctx context.Context, raw string) (sources.Job, bool, erro
 		// produce identical facets; only the identity differs (namespaced id, and the
 		// company humanized from the board slug — the per-board API carries no name).
 		job := sources.MapAshbyPosting(j)
-		job.ExternalID = sources.NamespaceExternalID(board, id)
+		job.ExternalID = externalid.Namespace(board, id)
 		if job.URL == "" {
 			job.URL = "https://jobs.ashbyhq.com/" + board + "/" + id
 		}

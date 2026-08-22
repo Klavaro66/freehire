@@ -1,21 +1,29 @@
-package userjob
+// Package silence holds the ladder of how long an application may go unanswered at each
+// stage, and the arithmetic under it. It lives apart from internal/userjob because the
+// ghost signal judges a POSTING by how long the applications against it have been silent,
+// and a posting is not an application — so the ladder has to sit below both.
+package silence
 
-import "time"
+import (
+	"maps"
+	"slices"
+	"time"
+)
 
 // Silence states. An application reports one of these, or the empty string when
 // it is settled and so waiting on nobody — a caller must be able to tell "not
 // waiting" from "waiting and fine", which a reassuring `active` would hide.
 const (
-	// SilenceActive is an application inside its stage's tolerated silence.
-	SilenceActive = "active"
-	// SilenceSilent is an application past it.
-	SilenceSilent = "silent"
-	// SilenceUnconfirmed is an application that would read as silent but has mail
+	// Active is an application inside its stage's tolerated silence.
+	Active = "active"
+	// Silent is an application past it.
+	Silent = "silent"
+	// Unconfirmed is an application that would read as silent but has mail
 	// awaiting the user's confirmation — a question to answer, not a verdict.
-	SilenceUnconfirmed = "unconfirmed"
+	Unconfirmed = "unconfirmed"
 )
 
-// silenceThresholds is how many days of silence each active stage tolerates,
+// thresholds is how many days of silence each active stage tolerates,
 // growing stricter as the application advances (TestSilenceThresholdsGrowStricter
 // pins that direction). Terminal stages are absent: a settled application never
 // accrues silence.
@@ -49,7 +57,7 @@ const (
 // the shortest span that always contains two working days, while three can be
 // consumed entirely by a weekend. Going below five needs business-day
 // arithmetic — its own calendar, holidays and employer time zone.
-var silenceThresholds = map[string]int{
+var thresholds = map[string]int{
 	"preparing": 21,
 	"applied":   21,
 	"screening": 18,
@@ -58,7 +66,7 @@ var silenceThresholds = map[string]int{
 	"offer":     5,
 }
 
-// DaysSilent is whole days between last and now, floored at zero.
+// Days is whole days between last and now, floored at zero.
 //
 // Part-days do not count and a negative is impossible: clock skew, or a last-activity stamp a
 // moment in the future, must not report negative silence. It lives here beside the ladder it
@@ -66,26 +74,26 @@ var silenceThresholds = map[string]int{
 // each had their own copy, held together by comments naming one another. The ladder was already
 // shared; the arithmetic under it was not, and a day's disagreement between the badge and the
 // offer is exactly what the shared ladder exists to prevent.
-func DaysSilent(now, last time.Time) int {
+func Days(now, last time.Time) int {
 	if d := int(now.Sub(last).Hours() / 24); d > 0 {
 		return d
 	}
 	return 0
 }
 
-// SilenceThresholdDays returns how many days of silence `stage` tolerates, and
+// ThresholdDays returns how many days of silence `stage` tolerates, and
 // whether it accrues silence at all. An unset stage is judged as `applied`: an
 // application with no stage recorded is still an application. Terminal and
 // unknown stages report false.
-func SilenceThresholdDays(stage string) (int, bool) {
+func ThresholdDays(stage string) (int, bool) {
 	if stage == "" {
 		stage = "applied"
 	}
-	days, ok := silenceThresholds[stage]
+	days, ok := thresholds[stage]
 	return days, ok
 }
 
-// SilenceStateFor maps an application's stage, its elapsed silence, and whether
+// StateFor maps an application's stage, its elapsed silence, and whether
 // any unconfirmed suggestion points at it, to a silence state — or "" when the
 // stage never accrues silence.
 //
@@ -93,16 +101,21 @@ func SilenceThresholdDays(stage string) (int, bool) {
 // pending suggestion only ever softens a silence claim into a question: mail
 // awaiting confirmation on an application that is answering promptly is not a
 // problem to report, so it never turns `active` into anything.
-func SilenceStateFor(stage string, daysSilent int, pendingSuggestion bool) string {
-	threshold, ok := SilenceThresholdDays(stage)
+func StateFor(stage string, daysSilent int, pendingSuggestion bool) string {
+	threshold, ok := ThresholdDays(stage)
 	if !ok {
 		return ""
 	}
 	if daysSilent <= threshold {
-		return SilenceActive
+		return Active
 	}
 	if pendingSuggestion {
-		return SilenceUnconfirmed
+		return Unconfirmed
 	}
-	return SilenceSilent
+	return Silent
 }
+
+// Stages returns the stages that accrue silence. internal/userjob cross-checks it against
+// its own active-stage ranking: a stage that advances but tolerates no measured silence
+// would never report as silent, and a threshold for a stage that does not exist is dead.
+func Stages() []string { return slices.Sorted(maps.Keys(thresholds)) }

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/strelov1/freehire/internal/jobtracking"
-	"github.com/strelov1/freehire/internal/userjob"
+	"github.com/strelov1/freehire/internal/silence"
 )
 
 // tracked builds a tracked row with the silence inputs the repository supplies.
@@ -51,11 +51,11 @@ func TestSilenceCountsWholeDays(t *testing.T) {
 		wantDays  int
 		wantState string
 	}{
-		{"fresh application", "applied", now.Add(-10 * 24 * time.Hour), 10, userjob.SilenceActive},
-		{"part of a day does not count", "applied", now.Add(-10*24*time.Hour - 13*time.Hour), 10, userjob.SilenceActive},
-		{"exactly at the threshold", "applied", now.Add(-21 * 24 * time.Hour), 21, userjob.SilenceActive},
-		{"past the threshold", "applied", now.Add(-22 * 24 * time.Hour), 22, userjob.SilenceSilent},
-		{"same wait, later stage", "interview", now.Add(-13 * 24 * time.Hour), 13, userjob.SilenceSilent},
+		{"fresh application", "applied", now.Add(-10 * 24 * time.Hour), 10, silence.Active},
+		{"part of a day does not count", "applied", now.Add(-10*24*time.Hour - 13*time.Hour), 10, silence.Active},
+		{"exactly at the threshold", "applied", now.Add(-21 * 24 * time.Hour), 21, silence.Active},
+		{"past the threshold", "applied", now.Add(-22 * 24 * time.Hour), 22, silence.Silent},
+		{"same wait, later stage", "interview", now.Add(-13 * 24 * time.Hour), 13, silence.Silent},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -83,12 +83,12 @@ func TestSilencePendingSuggestion(t *testing.T) {
 	applied := now.Add(-30 * 24 * time.Hour)
 
 	past := now.Add(-22 * 24 * time.Hour)
-	if got := tracked("applied", &applied, &past, true).Silence(now); got == nil || got.State != userjob.SilenceUnconfirmed {
-		t.Errorf("past the threshold with a pending suggestion = %+v, want %q", got, userjob.SilenceUnconfirmed)
+	if got := tracked("applied", &applied, &past, true).Silence(now); got == nil || got.State != silence.Unconfirmed {
+		t.Errorf("past the threshold with a pending suggestion = %+v, want %q", got, silence.Unconfirmed)
 	}
 	inside := now.Add(-3 * 24 * time.Hour)
-	if got := tracked("applied", &applied, &inside, true).Silence(now); got == nil || got.State != userjob.SilenceActive {
-		t.Errorf("inside the threshold with a pending suggestion = %+v, want %q", got, userjob.SilenceActive)
+	if got := tracked("applied", &applied, &inside, true).Silence(now); got == nil || got.State != silence.Active {
+		t.Errorf("inside the threshold with a pending suggestion = %+v, want %q", got, silence.Active)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestSilenceFallsBackToAppliedAt(t *testing.T) {
 	if got.DaysSilent != 25 {
 		t.Errorf("DaysSilent = %d, want 25", got.DaysSilent)
 	}
-	if got.State != userjob.SilenceSilent {
-		t.Errorf("State = %q, want %q", got.State, userjob.SilenceSilent)
+	if got.State != silence.Silent {
+		t.Errorf("State = %q, want %q", got.State, silence.Silent)
 	}
 }

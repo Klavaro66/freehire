@@ -1,6 +1,10 @@
 package userjob
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/strelov1/freehire/internal/silence"
+)
 
 func TestStagesOrder(t *testing.T) {
 	want := []string{"preparing", "applied", "screening", "responded", "interview", "offer", "accepted", "rejected", "withdrawn", "expired"}
@@ -47,7 +51,7 @@ func TestExpiredIsASettledOutcomeInClosed(t *testing.T) {
 	if got := Label("expired"); got != "Expired" {
 		t.Errorf("Label(\"expired\") = %q, want \"Expired\"", got)
 	}
-	if _, ok := SilenceThresholdDays("expired"); ok {
-		t.Error("SilenceThresholdDays(\"expired\") reports a threshold: a settled application waits on nobody")
+	if _, ok := silence.ThresholdDays("expired"); ok {
+		t.Error("silence.ThresholdDays(\"expired\") reports a threshold: a settled application waits on nobody")
 	}
 }

@@ -1,4 +1,4 @@
-package userjob
+package silence
 
 import "testing"
 
@@ -23,9 +23,9 @@ func TestSilenceThresholdDays(t *testing.T) {
 		{"banana", 0, false},
 	}
 	for _, c := range cases {
-		days, ok := SilenceThresholdDays(c.stage)
+		days, ok := ThresholdDays(c.stage)
 		if ok != c.wantOK || days != c.wantDays {
-			t.Errorf("SilenceThresholdDays(%q) = (%d, %v), want (%d, %v)",
+			t.Errorf("ThresholdDays(%q) = (%d, %v), want (%d, %v)",
 				c.stage, days, ok, c.wantDays, c.wantOK)
 		}
 	}
@@ -38,7 +38,7 @@ func TestSilenceThresholdsGrowStricter(t *testing.T) {
 	ordered := []string{"applied", "screening", "responded", "interview", "offer"}
 	prev := 1 << 30
 	for _, stage := range ordered {
-		days, ok := SilenceThresholdDays(stage)
+		days, ok := ThresholdDays(stage)
 		if !ok {
 			t.Fatalf("stage %q has no threshold", stage)
 		}
@@ -59,15 +59,15 @@ func TestSilenceStateForBoundary(t *testing.T) {
 		days  int
 		want  string
 	}{
-		{"well inside", "applied", 10, SilenceActive},
-		{"exactly at the threshold", "applied", 21, SilenceActive},
-		{"one day past", "applied", 22, SilenceSilent},
-		{"interview well past", "interview", 18, SilenceSilent},
+		{"well inside", "applied", 10, Active},
+		{"exactly at the threshold", "applied", 21, Active},
+		{"one day past", "applied", 22, Silent},
+		{"interview well past", "interview", 18, Silent},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := SilenceStateFor(c.stage, c.days, false); got != c.want {
-				t.Errorf("SilenceStateFor(%q, %d, false) = %q, want %q",
+			if got := StateFor(c.stage, c.days, false); got != c.want {
+				t.Errorf("StateFor(%q, %d, false) = %q, want %q",
 					c.stage, c.days, got, c.want)
 			}
 		})
@@ -78,11 +78,11 @@ func TestSilenceStateForBoundary(t *testing.T) {
 // reason the ladder exists at all.
 func TestSilenceStateForIsStageAware(t *testing.T) {
 	const days = 13
-	if got := SilenceStateFor("applied", days, false); got != SilenceActive {
-		t.Errorf("applied at %d days = %q, want %q", days, got, SilenceActive)
+	if got := StateFor("applied", days, false); got != Active {
+		t.Errorf("applied at %d days = %q, want %q", days, got, Active)
 	}
-	if got := SilenceStateFor("interview", days, false); got != SilenceSilent {
-		t.Errorf("interview at %d days = %q, want %q", days, got, SilenceSilent)
+	if got := StateFor("interview", days, false); got != Silent {
+		t.Errorf("interview at %d days = %q, want %q", days, got, Silent)
 	}
 }
 
@@ -91,11 +91,11 @@ func TestSilenceStateForIsStageAware(t *testing.T) {
 // waiting" from "waiting and fine".
 func TestSilenceStateForTerminalStages(t *testing.T) {
 	for _, stage := range []string{"accepted", "rejected", "withdrawn"} {
-		if got := SilenceStateFor(stage, 365, false); got != "" {
-			t.Errorf("SilenceStateFor(%q, 365, false) = %q, want the empty state", stage, got)
+		if got := StateFor(stage, 365, false); got != "" {
+			t.Errorf("StateFor(%q, 365, false) = %q, want the empty state", stage, got)
 		}
-		if got := SilenceStateFor(stage, 365, true); got != "" {
-			t.Errorf("SilenceStateFor(%q, 365, true) = %q, want the empty state", stage, got)
+		if got := StateFor(stage, 365, true); got != "" {
+			t.Errorf("StateFor(%q, 365, true) = %q, want the empty state", stage, got)
 		}
 	}
 }
@@ -104,11 +104,11 @@ func TestSilenceStateForTerminalStages(t *testing.T) {
 // must not raise one: mail awaiting confirmation on an application that is
 // answering promptly is not a problem to report.
 func TestSilenceStateForPendingSuggestion(t *testing.T) {
-	if got := SilenceStateFor("applied", 22, true); got != SilenceUnconfirmed {
-		t.Errorf("past threshold with a pending suggestion = %q, want %q", got, SilenceUnconfirmed)
+	if got := StateFor("applied", 22, true); got != Unconfirmed {
+		t.Errorf("past threshold with a pending suggestion = %q, want %q", got, Unconfirmed)
 	}
-	if got := SilenceStateFor("applied", 10, true); got != SilenceActive {
-		t.Errorf("inside threshold with a pending suggestion = %q, want %q", got, SilenceActive)
+	if got := StateFor("applied", 10, true); got != Active {
+		t.Errorf("inside threshold with a pending suggestion = %q, want %q", got, Active)
 	}
 }
 
@@ -117,8 +117,8 @@ func TestSilenceStateForPendingSuggestion(t *testing.T) {
 // second name for silence: the moment the candidate records the outcome, the clock goes quiet.
 func TestExpiredReportsNoSilenceState(t *testing.T) {
 	for _, days := range []int{0, 21, 400} {
-		if got := SilenceStateFor("expired", days, false); got != "" {
-			t.Errorf("SilenceStateFor(\"expired\", %d, false) = %q, want \"\"", days, got)
+		if got := StateFor("expired", days, false); got != "" {
+			t.Errorf("StateFor(\"expired\", %d, false) = %q, want \"\"", days, got)
 		}
 	}
 }

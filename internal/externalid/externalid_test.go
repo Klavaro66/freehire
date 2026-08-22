@@ -1,4 +1,4 @@
-package sources
+package externalid
 
 import "testing"
 
@@ -13,8 +13,8 @@ func TestNamespaceExternalID(t *testing.T) {
 		{"boardless source uses empty board prefix", "", "1000166598", ":1000166598"},
 	}
 	for _, tc := range cases {
-		if got := NamespaceExternalID(tc.board, tc.id); got != tc.want {
-			t.Errorf("%s: NamespaceExternalID(%q, %q) = %q, want %q", tc.name, tc.board, tc.id, got, tc.want)
+		if got := Namespace(tc.board, tc.id); got != tc.want {
+			t.Errorf("%s: Namespace(%q, %q) = %q, want %q", tc.name, tc.board, tc.id, got, tc.want)
 		}
 	}
 }
@@ -34,8 +34,8 @@ func TestBoardIDPattern(t *testing.T) {
 		{"backslash is escaped first, so its own escape is not re-read", `a\b`, `a\\b:%`},
 	}
 	for _, tc := range cases {
-		if got := BoardIDPattern(tc.board); got != tc.want {
-			t.Errorf("%s: BoardIDPattern(%q) = %q, want %q", tc.name, tc.board, got, tc.want)
+		if got := BoardPattern(tc.board); got != tc.want {
+			t.Errorf("%s: BoardPattern(%q) = %q, want %q", tc.name, tc.board, got, tc.want)
 		}
 	}
 }

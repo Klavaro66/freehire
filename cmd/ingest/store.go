@@ -15,10 +15,10 @@ import (
 	"github.com/strelov1/freehire/internal/adzunadesc"
 	"github.com/strelov1/freehire/internal/applyform"
 	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/job"
 	"github.com/strelov1/freehire/internal/jobdedup"
 	"github.com/strelov1/freehire/internal/pipeline"
-	"github.com/strelov1/freehire/internal/sources"
 )
 
 // dbStore adapts the generated queries + connection pool to pipeline.Store. Save runs
@@ -350,11 +350,11 @@ func (s *dbStore) ExistingExternalIDs(ctx context.Context, source, board string)
 		}
 		return set, nil
 	}
-	// The pattern is escaped by sources.BoardIDPattern: a board name may contain LIKE syntax,
+	// The pattern is escaped by externalid.BoardPattern: a board name may contain LIKE syntax,
 	// and a third of the workday board names carry an underscore.
 	rows, err := s.q.ExistingExternalIDsByBoard(ctx, db.ExistingExternalIDsByBoardParams{
 		Source:          source,
-		Pattern:         sources.BoardIDPattern(board),
+		Pattern:         externalid.BoardPattern(board),
 		HydrationCutoff: cutoff,
 	})
 	if err != nil {

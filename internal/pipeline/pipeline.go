@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/strelov1/freehire/internal/applyform"
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/job"
 	"github.com/strelov1/freehire/internal/jobderive"
 	"github.com/strelov1/freehire/internal/normalize"
@@ -839,7 +840,7 @@ func (r Runner) fetchBoard(ctx context.Context, e sources.CompanyEntry, src sour
 		set = nil
 	}
 	seen := func(externalID string) bool {
-		_, ok := set[sources.NamespaceExternalID(e.Board, externalID)]
+		_, ok := set[externalid.Namespace(e.Board, externalID)]
 		return ok
 	}
 	// An adapter that can spend its hydration budget better when it knows which employers the
@@ -1016,7 +1017,7 @@ func (r Runner) ingestStream(ctx context.Context, e sources.CompanyEntry, ss sou
 // the upsert (via normalizeJob) and the stream-driven close derive identity here, so a
 // removal closes exactly the row a live emit would have upserted.
 func jobIdentity(e sources.CompanyEntry, j sources.Job) (source, externalID string) {
-	return e.Provider, sources.NamespaceExternalID(e.Board, j.ExternalID)
+	return e.Provider, externalid.Namespace(e.Board, j.ExternalID)
 }
 
 // normalizeJob turns a raw posting into the Job aggregate through the factory: the

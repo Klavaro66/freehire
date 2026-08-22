@@ -12,8 +12,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/strelov1/freehire/internal/normalize"
 )
 
 func TestJobPublicSlug(t *testing.T) {
@@ -22,7 +20,10 @@ func TestJobPublicSlug(t *testing.T) {
 	ctx := context.Background()
 	truncate(t, pool)
 
-	slug := normalize.JobSlug("Senior Go Developer", "Acme", "manual", "42")
+	// Literal rather than normalize.JobSlug(...): this package is the bottom of the
+	// dependency graph and must not reach up into the facet dictionaries, and a test that
+	// recomputes the slug with the production function asserts nothing about its format.
+	const slug = "senior-go-developer-acme-t35nijto"
 	upsert := func(description string) (Job, error) {
 		return ingestUpsert(ctx, q, UpsertJobParams{
 			Source:      "manual",
@@ -83,7 +84,7 @@ func TestGetJobIDBySlug(t *testing.T) {
 	ctx := context.Background()
 	truncate(t, pool)
 
-	slug := normalize.JobSlug("Staff Engineer", "Globex", "manual", "7")
+	const slug = "staff-engineer-globex-vcm4o3gv"
 	job, err := ingestUpsert(ctx, q, UpsertJobParams{
 		Source:      "manual",
 		ExternalID:  "7",

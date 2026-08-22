@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/strelov1/freehire/internal/applydate"
 	"github.com/strelov1/freehire/internal/jobview"
 	"github.com/strelov1/freehire/internal/userjob"
 )
@@ -358,14 +359,14 @@ func (s *Service) MarkAppliedAt(ctx context.Context, userID int64, slug string, 
 // instant it is stored at. Those differ by the storage hour, and bounding the instant refuses
 // "today" for the whole UTC morning.
 func (s *Service) MarkAppliedOn(ctx context.Context, userID int64, slug string, day, now time.Time, source string) (Interaction, error) {
-	if err := userjob.ValidateAppliedOn(day, now); err != nil {
+	if err := applydate.Validate(day, now); err != nil {
 		return Interaction{}, err
 	}
 	jobID, err := s.repo.JobIDBySlug(ctx, slug)
 	if err != nil {
 		return Interaction{}, err
 	}
-	return s.repo.MarkAppliedOn(ctx, userID, jobID, userjob.AppliedOnInstant(day), source)
+	return s.repo.MarkAppliedOn(ctx, userID, jobID, applydate.Instant(day), source)
 }
 
 // SaveJob resolves slug → jobID then delegates to the repository.

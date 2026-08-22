@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/strelov1/freehire/internal/userjob"
+	"github.com/strelov1/freehire/internal/applydate"
 )
 
 // Sentinel errors mapped to HTTP statuses by the handler.
@@ -103,7 +103,7 @@ func (s *Service) Retract(ctx context.Context, userID, jobID int64) error {
 // the mapping onto this package's 400-sentinel stays here, so a claim and a tracked application
 // cannot come to disagree about which dates are believable.
 func validateAppliedOn(appliedOn, now time.Time) error {
-	if err := userjob.ValidateAppliedOn(appliedOn, now); err != nil {
+	if err := applydate.Validate(appliedOn, now); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalid, err)
 	}
 	return nil

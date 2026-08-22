@@ -9,10 +9,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/strelov1/freehire/internal/appevent"
+	"github.com/strelov1/freehire/internal/applydate"
 	"github.com/strelov1/freehire/internal/db"
 	"github.com/strelov1/freehire/internal/jobtracking"
 	"github.com/strelov1/freehire/internal/reminder"
-	"github.com/strelov1/freehire/internal/userjob"
 )
 
 // trackingHandlers serves the per-user job interactions (view/apply/save/dismiss/
@@ -123,7 +123,7 @@ func trackingError(err error) error {
 		return fiber.NewError(fiber.StatusBadRequest, "provide stage and/or notes")
 	case errors.Is(err, jobtracking.ErrApplicationNotFound):
 		return fiber.NewError(fiber.StatusNotFound, "application not found")
-	case errors.Is(err, userjob.ErrAppliedOnOutOfRange):
+	case errors.Is(err, applydate.ErrOutOfRange):
 		// The message names which bound was crossed; it is the service's words, not a second
 		// copy of the rule stated here.
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())

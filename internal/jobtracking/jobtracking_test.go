@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/strelov1/freehire/internal/appevent"
+	"github.com/strelov1/freehire/internal/applydate"
 	"github.com/strelov1/freehire/internal/jobtracking"
 	"github.com/strelov1/freehire/internal/userjob"
 )
@@ -826,7 +827,7 @@ func TestMarkAppliedOn_RefusesADateOutsideTheWindow(t *testing.T) {
 			svc := jobtracking.New(repo)
 
 			_, err := svc.MarkAppliedOn(ctx(), userID, slug, day, now, appevent.SourceUser)
-			if !errors.Is(err, userjob.ErrAppliedOnOutOfRange) {
+			if !errors.Is(err, applydate.ErrOutOfRange) {
 				t.Errorf("err = %v, want ErrAppliedOnOutOfRange", err)
 			}
 			if !repo.redatedAt.IsZero() {

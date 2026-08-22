@@ -7,13 +7,14 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
 // workable resolves Workable-hosted vacancies. Workable is multi-tenant, so a TG link points
 // at an arbitrary account's board. The adapter writes the SAME identity the ingest pipeline
-// would (source="workable", external_id "<account>:<shortcode>" via sources.NamespaceExternalID,
+// would (source="workable", external_id "<account>:<shortcode>" via externalid.Namespace,
 // the URL's account being the board), so UpsertJob's ON CONFLICT dedups against an
 // already-crawled account rather than writing a thin telegram duplicate.
 type workable struct {
@@ -73,7 +74,7 @@ func (w workable) Resolve(ctx context.Context, raw string) (sources.Job, bool, e
 			continue
 		}
 		return sources.Job{
-			ExternalID:  sources.NamespaceExternalID(account, j.Shortcode),
+			ExternalID:  externalid.Namespace(account, j.Shortcode),
 			URL:         j.URL,
 			Title:       j.Title,
 			Company:     humanizeBoard(account), // the widget API carries no company name

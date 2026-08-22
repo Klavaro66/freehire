@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -61,7 +62,7 @@ func TestBoardCoverageResolvesAVacancyWithNoDedicatedAdapter(t *testing.T) {
 	}
 	// The identity must be the one the ingest crawl of this board would write, so a later
 	// crawl dedups onto this row instead of creating a second posting.
-	if want := sources.NamespaceExternalID("acme", "222"); job.ExternalID != want {
+	if want := externalid.Namespace("acme", "222"); job.ExternalID != want {
 		t.Errorf("ExternalID = %q, want %q — the ingest namespacing", job.ExternalID, want)
 	}
 	// One adapter serves many platforms, so the stored identity comes from the link, not from

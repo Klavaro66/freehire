@@ -3,7 +3,7 @@ package jobtracking
 import (
 	"time"
 
-	"github.com/strelov1/freehire/internal/userjob"
+	"github.com/strelov1/freehire/internal/silence"
 )
 
 // Silence is how long an application has been waiting and what that means at the
@@ -16,7 +16,7 @@ type Silence struct {
 	LastActivityAt time.Time
 	// DaysSilent is the whole days elapsed since. A part-day does not count.
 	DaysSilent int
-	// State is one of userjob.SilenceActive / SilenceSilent / SilenceUnconfirmed.
+	// State is one of silence.Active / SilenceSilent / SilenceUnconfirmed.
 	State string
 }
 
@@ -37,7 +37,7 @@ func (j TrackedJob) Silence(now time.Time) *Silence {
 	if j.Stage != nil {
 		stage = *j.Stage
 	}
-	if _, accrues := userjob.SilenceThresholdDays(stage); !accrues {
+	if _, accrues := silence.ThresholdDays(stage); !accrues {
 		return nil
 	}
 
@@ -45,10 +45,10 @@ func (j TrackedJob) Silence(now time.Time) *Silence {
 	if j.LastActivityAt != nil && j.LastActivityAt.After(last) {
 		last = *j.LastActivityAt
 	}
-	days := userjob.DaysSilent(now, last)
+	days := silence.Days(now, last)
 	return &Silence{
 		LastActivityAt: last,
 		DaysSilent:     days,
-		State:          userjob.SilenceStateFor(stage, days, j.HasPendingSuggestion),
+		State:          silence.StateFor(stage, days, j.HasPendingSuggestion),
 	}
 }

@@ -86,6 +86,7 @@ func TestEveryPackageIsAssignedExactlyOnce(t *testing.T) {
 func TestCarvedOutPackagesArePlaced(t *testing.T) {
 	for pkg, block := range map[string]string{
 		"silence":       "job",
+		"applydate":     "job",
 		"arch/layering": "platform",
 	} {
 		if got := layering.Assignment[pkg]; got != block {

@@ -47,7 +47,7 @@ type BackfillBoardCompanyRow struct {
 
 // Fills company/company_slug/company_slug_folded for rows still blank under one board of a
 // provider whose adapter sets Company statically per board (see cmd/backfill-blank-company for
-// which providers qualify and why). board_pattern is sources.BoardIDPattern(board) — the
+// which providers qualify and why). board_pattern is externalid.BoardPattern(board) — the
 // board's external_id namespace, so only this board's rows move. Also enqueues every touched
 // OPEN job into search_outbox, mirroring UpsertJob/EnqueueSearchOutbox's denormalized
 // job_posted_at, since this write bypasses the normal ingest path that would do it inline.
@@ -811,7 +811,7 @@ type ExistingExternalIDsByBoardRow struct {
 // text_pattern_ops), whose operator class compares byte-wise. A range predicate over the plain
 // index (external_id >= 'board:' AND < 'board;') looks equivalent and is NOT: under the database's
 // collation punctuation carries only a secondary weight, so that range returns nothing at all.
-// The caller passes an escaped pattern (sources.BoardIDPattern) — a board name may contain LIKE
+// The caller passes an escaped pattern (externalid.BoardPattern) — a board name may contain LIKE
 // syntax, and an unescaped underscore would match a sibling board.
 //
 // hydration_cutoff withholds a still-body-less row from the seen-set so its detail is retried;

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/strelov1/freehire/internal/externalid"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -66,7 +67,7 @@ func (g greenhouse) Resolve(ctx context.Context, raw string) (sources.Job, bool,
 	// produce identical facets; only the identity differs (namespaced id, and the company
 	// from the API's company_name — the board list endpoint does not serve it).
 	job := sources.MapGreenhousePosting(j)
-	job.ExternalID = sources.NamespaceExternalID(board, id)
+	job.ExternalID = externalid.Namespace(board, id)
 	job.Company = j.CompanyName
 	return job, true, nil
 }

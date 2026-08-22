@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/strelov1/freehire/internal/externalid"
 )
 
 // PostingRef is a catalog identity — the (source, external_id) key jobs are
@@ -67,7 +69,7 @@ func greenhousePosting(board, jobID string) (PostingRef, bool) {
 	if board == "" || jobID == "" || !isDigits(jobID) {
 		return PostingRef{}, false
 	}
-	return PostingRef{Source: "greenhouse", ExternalID: NamespaceExternalID(board, jobID)}, true
+	return PostingRef{Source: "greenhouse", ExternalID: externalid.Namespace(board, jobID)}, true
 }
 
 func isDigits(s string) bool {
