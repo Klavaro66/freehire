@@ -1,4 +1,4 @@
-# internal/industrytag — curated industry vocabulary for companies
+# internal/dict/industrytag — curated industry vocabulary for companies
 
 Date: 2026-08-15
 Status: design approved, not implemented
@@ -22,7 +22,7 @@ tags, of which the top 500 already cover 95.9% of companies.
 
 ## Why not just widen `domains`
 
-`domains` is a deliberately coarse 20-value vertical vocabulary in `internal/vocab`
+`domains` is a deliberately coarse 20-value vertical vocabulary in `internal/dict/vocab`
 (`fintech`, `healthcare`, `devtools`, `climatetech`, …). Its design notes record
 that synonyms were folded on purpose (`web3`→`crypto`, `biotech`→`healthcare`) and
 that `saas` was dropped for being a business model rather than a vertical.
@@ -49,7 +49,7 @@ makes it safe to write.
 
 ### The package
 
-`internal/industrytag`, shaped after `internal/skilltag`:
+`internal/dict/industrytag`, shaped after `internal/dict/skilltag`:
 
 | File | Contents |
 |---|---|

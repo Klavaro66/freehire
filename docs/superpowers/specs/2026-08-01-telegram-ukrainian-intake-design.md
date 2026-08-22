@@ -9,7 +9,7 @@ The Telegram crawl covers 88 channels, all Russian- or English-language. The Ukr
 segment is absent from the catalogue, and the reason is not that no channels exist — it is
 that the extraction queue's prefilter cannot recognise a Ukrainian vacancy.
 
-`internal/telegram/prefilter.go` carries hiring markers in RU and EN only. Ukrainian
+`internal/ingest/telegram/prefilter.go` carries hiring markers in RU and EN only. Ukrainian
 "вакансія" does not match the RU alternative `ваканси`: Cyrillic `і` (U+0456) and `и`
 (U+0438) are distinct runes. A post that says «Шукаємо Golang розробника» reaches the
 prefilter, fails it, is stored as done with zero vacancies, and never reaches the LLM.
@@ -32,7 +32,7 @@ are onboarded, which is exactly what this change does.
 
 A second gap sits downstream. `Львів`, `Харків`, `Одеса`, `Дніпро` resolve to a city name but
 carry no country and no region, while `Berlin`, `Warsaw`, `Kraków` carry both. This is not a
-bug in the parser: `internal/location/location.go:78-82` documents the contract that the
+bug in the parser: `internal/dict/location/location.go:78-82` documents the contract that the
 generated GeoNames `cityDict` supplies the canonical *name* only, never a country, so an
 ambiguous city can never guess a geography. Country comes from the curated map in
 `dictionaries.go`, which holds `kyiv`/`киев`/`київ` and no other Ukrainian entry. Without
@@ -101,13 +101,13 @@ news channels, counting only posts the current prefilter rejects:
 Adopted: the first six. Dropped: `наймаємо` (never fires), `зарплатн` (never fires — the RU
 marker `зарплат` is already its prefix), `потрібен` and `відгук` (1:1 signal to noise).
 
-The asymmetry that settles the borderline cases: `internal/telegram/AGENTS.md` states the LLM
+The asymmetry that settles the borderline cases: `internal/ingest/telegram/AGENTS.md` states the LLM
 is the real classifier. A false positive costs one LLM call returning `{"jobs": []}`. A false
 negative loses a vacancy permanently and silently. Recall is worth more than precision here.
 
 ### 3. Ukrainian geography goes into the curated map, not the generated one
 
-Two additions to `nameToCountry` in `internal/location/dictionaries.go`, in the blocks that
+Two additions to `nameToCountry` in `internal/dict/location/dictionaries.go`, in the blocks that
 already hold `kyiv` and `київ`:
 
 - Latin, beside line 98: `lviv`, `kharkiv`, `odesa`, `odessa`, `dnipro`, `vinnytsia`,
@@ -137,7 +137,7 @@ Verified 2026-08-01 — public `t.me/s` preview enabled and a post within the la
 
 The DOU verticals are `authored`, not `board`: they publish digests where one post can carry
 several roles, which is precisely what `KindAuthored` instructs the model to split
-(`internal/telegram/llm.go:104`).
+(`internal/ingest/telegram/llm.go:104`).
 
 Source: [nikit0ns/Ukrainian_IT_Communities](https://github.com/nikit0ns/Ukrainian_IT_Communities),
 192 entries — 97 group chats, 68 channels, 12 websites, 15 other platforms. Of the 68 channel
@@ -150,10 +150,10 @@ days, 8 carry vacancies, and 7 also clear the freshness gate.
 
 | File | Change |
 |---|---|
-| `internal/telegram/prefilter.go` | UA marker block; `грн\|₴` in the currency alternation |
-| `internal/telegram/prefilter_test.go` | UA pass and reject cases |
-| `internal/location/dictionaries.go` | Ukrainian cities and country, Latin + Cyrillic |
-| `internal/location/location_test.go` | `Львів`, `Lviv, Ukraine` → `ua` / `eu` / `Lviv` |
+| `internal/ingest/telegram/prefilter.go` | UA marker block; `грн\|₴` in the currency alternation |
+| `internal/ingest/telegram/prefilter_test.go` | UA pass and reject cases |
+| `internal/dict/location/dictionaries.go` | Ukrainian cities and country, Latin + Cyrillic |
+| `internal/dict/location/location_test.go` | `Львів`, `Lviv, Ukraine` → `ua` / `eu` / `Lviv` |
 | `sources/telegram.yml` | 7 channels under two commented headings |
 | `docs/telegram-channels.md` | new dated section; header count 88 → 95 (17 authored, 78 board) |
 
@@ -167,7 +167,7 @@ today (88 table rows against 88 YAML entries) and must stay so in the same commi
   грн». Reject: «Дайджест новин тижня», «Знижка на курс — встигни записатись».
 - `location_test.go` gains cases mirroring the existing `Київ` one: `Львів` and
   `Lviv, Ukraine` → `Geo{Countries: ["ua"], Regions: ["eu"], Cities: ["Lviv"]}`.
-- `go test ./...` and `go test -tags=integration ./internal/db/` both before push.
+- `go test ./...` and `go test -tags=integration ./internal/platform/db/` both before push.
 - Before/after measurement on live previews: `naymarnya` rises from 3/18, `halepnyirecruiting`
   from 0/18, and the eight RU channels already in production show **no change**. Extending an
   alternation can only add matches, so the only way to do harm is to start admitting noise in

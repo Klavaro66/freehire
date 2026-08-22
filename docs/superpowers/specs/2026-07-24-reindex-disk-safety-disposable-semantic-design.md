@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-24
 **Status:** approved (design)
-**Scope:** `cmd/reindex`, `internal/search`, `internal/config` (freehire); one systemd timer/script (freehire-ops)
+**Scope:** `cmd/reindex`, `internal/search`, `internal/platform/config` (freehire); one systemd timer/script (freehire-ops)
 
 ## Problem
 
@@ -73,7 +73,7 @@ path is removed — a from-PG rebuild via swap has no benefit and is exactly wha
 the disk pressure. (`NewSemanticRebuild` — the TEI-embedding swap rebuild — is retained
 for a from-scratch re-embed if ever needed, and is covered by the Component 2 guard.)
 
-### Component 2 — Pre-flight disk guard + defer-cleanup (`cmd/reindex`, `internal/search`, `internal/config`)
+### Component 2 — Pre-flight disk guard + defer-cleanup (`cmd/reindex`, `internal/search`, `internal/platform/config`)
 
 For the FACET reindex (which must swap — no Postgres shortcut, needs atomicity for the
 live search index) and any TEI swap rebuild:

@@ -15,7 +15,7 @@ timestamp". A reader has no way to know that. They see dates in a row and read a
 
 It is also nearly empty. It draws three timestamps from `user_jobs`, so an application with seven
 linked emails, two stage changes and a follow-up shows none of them. The facts exist: every
-movement is written to `application_events`, and `internal/apptimeline` already reads that ledger
+movement is written to `application_events`, and `internal/application/apptimeline` already reads that ledger
 for the Calendar tab. Nothing reads it for one application.
 
 ## Goals
@@ -37,7 +37,7 @@ for the Calendar tab. Nothing reads it for one application.
 
 ### Reading one application's ledger
 
-A new query beside the calendar's, in `internal/db/queries/application_events.sql`:
+A new query beside the calendar's, in `internal/platform/db/queries/application_events.sql`:
 
 ```sql
 -- name: ListApplicationEvents :many
@@ -52,9 +52,9 @@ the role title and the message subject — and the same reason for each, so the 
 disagree about what an event is. It is served by the existing partial index
 `application_events_app_idx (user_id, job_id, kind) WHERE retracted_at IS NULL`.
 
-`internal/apptimeline` gains `ForApplication`. The package is already "the ledger's first dated
+`internal/application/apptimeline` gains `ForApplication`. The package is already "the ledger's first dated
 reader"; this is its second shape of read, and it belongs there rather than in a handler for the
-reason `internal/inbox` states — the in-app assistant calls services directly and never passes
+reason `internal/application/inbox` states — the in-app assistant calls services directly and never passes
 through Fiber, so "what happened to this application" put in a handler is a question it cannot
 ask.
 

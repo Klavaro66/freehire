@@ -21,14 +21,14 @@ column labelled `Closed`, and is counted in a bucket called `rejected` — while
 seven bucket names (`in_progress`, `declined`) appear nowhere else in the product. None of
 the three vocabularies is a subset of another, and each is defined in its own place:
 
-- `internal/userjob/stages.go` — the 8 stages (the stored truth)
+- `internal/application/userjob/stages.go` — the 8 stages (the stored truth)
 - `web/src/lib/board.ts` — `STAGE_COLUMN` + `BOARD_COLUMNS`, the 4 columns
-- `internal/userjob/buckets.go` + `web/src/lib/pipeline.ts` — the 7 buckets
+- `internal/application/userjob/buckets.go` + `web/src/lib/pipeline.ts` — the 7 buckets
 - `web/src/lib/components/HomeFunnel.svelte` — a **fourth** copy of the bucket vocabulary
 - `web/src/lib/stages.ts` — `STAGE_LABELS`, the labels
 
 A fourth vocabulary — the mail classifier's 9 status signals — maps into stages through a
-private table in `internal/mailclassify`, and the mapping is invisible in the UI. Mail that
+private table in `internal/application/mailclassify`, and the mapping is invisible in the UI. Mail that
 plainly announces a rejection moves nothing, by design, and says so nowhere: the candidate
 sets the stage by hand and cannot tell why.
 
@@ -51,7 +51,7 @@ sets the stage by hand and cannot tell why.
 
 ## Design
 
-### 1. `internal/userjob` gains the group table
+### 1. `internal/application/userjob` gains the group table
 
 The package already holds three tables keyed on the stage vocabulary: `activeRank` and
 `terminalStages` (`pipeline.go`), and `silenceThresholds` (`silence.go`). Groups join them:
@@ -84,8 +84,8 @@ here fails the build rather than rendering as a blank column.
 vocabulary, and the point of this change is that it stops existing.
 
 Labels live in Go rather than staying in `stages.ts` because the vocabulary has a second
-reader that is not a browser: the in-app assistant calls `internal/jobtracking` directly with
-the session owner's id and never passes through Fiber. This is the rule `internal/inbox`
+reader that is not a browser: the in-app assistant calls `internal/application/jobtracking` directly with
+the session owner's id and never passes through Fiber. This is the rule `internal/application/inbox`
 states for mail — a rule enforced in a handler is a rule the in-process reader never meets.
 
 ### 2. The contract carries stages, not buckets
@@ -117,7 +117,7 @@ Every frontend copy of the vocabulary becomes derived:
 `applications`) rather than from buckets. Same arithmetic, one fewer indirection.
 
 Also updated: `docs/API.md`, `web/src/lib/docs/api-spec.ts`,
-`internal/handler/me_pipeline_integration_test.go`, `internal/jobtracking/repository.go`, and a
+`internal/api/handler/me_pipeline_integration_test.go`, `internal/application/jobtracking/repository.go`, and a
 MODIFIED delta against `openspec/specs/application-pipeline/spec.md`, which currently pins the
 seven bucket keys as a SHALL.
 
@@ -139,7 +139,7 @@ existing `EMAIL_STATUS_SIGNAL_VALUES`. Each message in the drawer's Emails tab r
 signal and what it implies: `Acknowledgement → Applied`, or `Rejection → does not move the
 stage`.
 
-**Divergence suggestion.** `internal/jobtracking` computes a `stage_suggestion` on
+**Divergence suggestion.** `internal/application/jobtracking` computes a `stage_suggestion` on
 `TrackedApplication` when the newest classified linked email implies a stage that differs from
 the current one:
 

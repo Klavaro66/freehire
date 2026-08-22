@@ -5,7 +5,7 @@ belonging to *that* application and offers them as suggestions.
 
 ## The gap
 
-Linking mail to an application is a **push**: a message arrives, `internal/maillink`
+Linking mail to an application is a **push**: a message arrives, `internal/application/maillink`
 asks which application it belongs to, and either links it (deterministic tier) or
 files a suggestion (LLM tier). There is no pull. Every existing surface starts from
 a message — `?link=suggested`, `?link=unlinked`, `POST /me/emails/:id/link` — so a
@@ -27,7 +27,7 @@ One button, in the Emails tab of an application's drawer. It runs a three-step p
 [Find this application's mail]
    │
    ▼  POST /me/tracking/:slug/mail-recall
-internal/mailrecall
+internal/application/mailrecall
    ├─ 1. Net (deterministic, no model)
    │     ListEmailsForRecall: application_id IS NULL,
    │     received_at >= applied_at - 7d, capped at 40
@@ -105,7 +105,7 @@ migration; and an agent's body-bearing page is capped at 10 messages because a t
 result replays into context on every later turn. A single batched call has none of
 these properties.
 
-`internal/mailrecall` is a service with no Fiber and no pgx, like `internal/jobtracking`.
+`internal/application/mailrecall` is a service with no Fiber and no pgx, like `internal/application/jobtracking`.
 Exposing it as an assistant tool later is additive and is not part of this change.
 
 ## Wire
@@ -132,13 +132,13 @@ already draws. `invitations` counts the suggested ones carrying an `ical_uid`.
 
 ## Spend
 
-The call goes out on the **caller's own gateway credential** (`internal/llmkey`),
+The call goes out on the **caller's own gateway credential** (`internal/ai/llmkey`),
 tagged `feature:mail-recall`. Searching a candidate's mailbox is work that belongs to
 them, not to the service credential that pays for enrichment. Attribution fails open,
 per the package's rule: an unmintable credential falls back to the service one and the
 call completes.
 
-No credit debit. `internal/credits` knows `match` and `tailor`, both expensive
+No credit debit. `internal/ai/credits` knows `match` and `tailor`, both expensive
 one-shot actions; this is one call to a cheap model over metadata and truncated
 bodies. The store stays the seam — a price set before the spend distribution is known
 is a guess, the same reasoning that leaves `LLM_USER_MAX_BUDGET` unset.
@@ -157,7 +157,7 @@ These are the injection defence and the cost ceiling at once:
 
 ## Code
 
-**No migration.** Two queries in `internal/db/queries/mail_linking.sql`, then `make sqlc`:
+**No migration.** Two queries in `internal/platform/db/queries/mail_linking.sql`, then `make sqlc`:
 
 - `ListEmailsForRecall` — owner, `deleted_at IS NULL`, `application_id IS NULL`,
   `received_at >= $since`, limit. A query of its own rather than new parameters on
@@ -165,7 +165,7 @@ These are the injection defence and the cost ceiling at once:
 - `SuggestApplicationForEmail` — sets `suggested_job_id` + `match_confidence` where
   `application_id IS NULL`.
 
-**New package** `internal/mailrecall`: a narrow `Store` (the two queries), an
+**New package** `internal/application/mailrecall`: a narrow `Store` (the two queries), an
 `llm.Provider`, and the pure part — building the net from an application and
 adjudicating the model's answer against the batch.
 

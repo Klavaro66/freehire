@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-22
 **Status:** design — spike VALIDATED, ready to plan
-**Scope:** `internal/pii` (new), `internal/matchanalysis`, `internal/resumeextract`, plus a co-located `openai/privacy-filter` span-detection endpoint.
+**Scope:** `internal/candidate/pii` (new), `internal/candidate/matchanalysis`, `internal/candidate/resumeextract`, plus a co-located `openai/privacy-filter` span-detection endpoint.
 
 ## Goal & threat model
 
@@ -59,10 +59,10 @@ used plain argmax and still succeeded.
 
 ## Architecture
 
-### New package `internal/pii`
+### New package `internal/candidate/pii`
 
 Pure orchestration + the deterministic detectors; the model call is behind a small
-client interface so `internal/pii` stays testable without the sidecar.
+client interface so `internal/candidate/pii` stays testable without the sidecar.
 
 ```
 type Contacts struct{ FullName, Email, Phone string; Links []string } // known, authoritative
@@ -109,7 +109,7 @@ masking/restoring in Go — NOT a litellm masking guardrail. Rationale:
 - **Shape:** a small HTTP detection service that returns PII spans (`{start,end,kind}`) for a
   text. Co-located on the litellm box (`204.168.137.149`) so the weights "live" beside the
   gateway, but freehire calls it directly — it is NOT on the litellm proxy request path.
-  `internal/pii`'s model `Detector` is the HTTP client. One call per CV per analysis / upload.
+  `internal/candidate/pii`'s model `Detector` is the HTTP client. One call per CV per analysis / upload.
 - **Configuration:** a new env (e.g. `PII_FILTER_URL`) on the server/worker config. When
   unset the detector is considered unconfigured (→ fail-closed, below).
 
@@ -161,7 +161,7 @@ sufficient for the name, so regex-only is not a fallback.
 
 ## Testing
 
-- `internal/pii` (no sidecar): table tests over email/phone/URL/@handle, `YYYY-YYYY`
+- `internal/candidate/pii` (no sidecar): table tests over email/phone/URL/@handle, `YYYY-YYYY`
   phone guard, numbered multi-value placeholders, word-boundary replacement,
   `Restore(Redact(x))` round-trip, over-redaction guard. Model `Detector` is faked.
 - `matchanalysis`: assert known PII never appears in the Stage 1/2/3 prompt strings, and

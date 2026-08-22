@@ -10,7 +10,7 @@ infrastructure for hybrid search is already live and unused by default:
 - `jobs_semantic` Meili index has 100% embedding coverage (1,021,471 / 1,021,471 docs
   as of 2026-08-13).
 - `semantic_ratio` is wired end-to-end: SPA → `/api/v1/jobs/search?semantic_ratio=` →
-  `internal/handler/search.go` → `search.SearchParams.SemanticRatio` →
+  `internal/api/handler/search.go` → `search.SearchParams.SemanticRatio` →
   `internal/search/client.go`'s `Search`.
 - Already used elsewhere (unaffected by this change): `/jobs/:slug/similar` and
   `/recommendations`, both pure semantic (ratio effectively 1) for their own use case.
@@ -40,7 +40,7 @@ is assumed, not proven, but the safety ceiling is measured.
 
 0.5 itself does not trip the cliff, but it sits with zero margin against a threshold
 that is a property of today's data/model and could shift (catalogue growth, embedder
-model migration — see `internal/embed/AGENTS.md`). It also was not evaluated for
+model migration — see `internal/ai/embed/AGENTS.md`). It also was not evaluated for
 ranking-order quality (only total-hit count), so it would be a much larger behavior
 change than its "still under the cliff" status suggests. Chose the smaller, safer nudge
 instead — see Decision.

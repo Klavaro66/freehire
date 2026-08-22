@@ -81,7 +81,7 @@ unnecessary for a first reader.
   already use, for the same reason: a discovery aid must not break the page.
 - A Svelte component renders the list.
 
-`internal/jobview` is deliberately untouched. That projection is also what goes
+`internal/job/jobview` is deliberately untouched. That projection is also what goes
 into the Meilisearch documents, so a field added there would inflate every indexed
 job for the sake of one page — and keeping it out leaves a future filter as its own
 clean piece of work.

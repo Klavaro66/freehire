@@ -48,7 +48,7 @@ reporter had no endpoint to read. Once it is quoted in the mail it is user-facin
 the UI must say so at the point of entry — otherwise a moderator will one day write an
 internal aside into a field that gets mailed to a stranger.
 
-Two query changes in `internal/db/queries/job_reports.sql` (then `make sqlc`):
+Two query changes in `internal/platform/db/queries/job_reports.sql` (then `make sqlc`):
 
 - `GetReport` joins `users` and `jobs` so the decision path has the reporter's email and the
   job's slug and title without a second round trip.
@@ -58,7 +58,7 @@ Two query changes in `internal/db/queries/job_reports.sql` (then `make sqlc`):
 `report.PendingReport` is renamed `report.ReportDetail` — with `Get` returning it, the type
 is no longer specific to the pending queue. `ListPending` returns the same type.
 
-## Domain (`internal/report`)
+## Domain (`internal/engage/report`)
 
 A second narrow seam beside `JobCloser`, following the `referral.ChannelPinger` precedent:
 
@@ -119,7 +119,7 @@ never fail the operation it decorates.
 `Service` gains the notifier through a `WithNotifier` option rather than a fourth `New`
 parameter, so tests and the no-SES wiring construct the service unchanged.
 
-## Mail (`internal/report/notifier.go`)
+## Mail (`internal/engage/report/notifier.go`)
 
 `MailNotifier` implements `ReporterNotifier` over a locally declared one-method
 `EmailSender`, exactly as `referral` does, so the domain package never imports the AWS
@@ -167,7 +167,7 @@ the decision was recorded but the email did not go out.
 `api.resolveReport` / `api.dismissReport` and the `Report` type in `web/src/lib/types.ts`
 pick up the new fields.
 
-## Wiring (`internal/handler/handler.go`)
+## Wiring (`internal/api/handler/handler.go`)
 
 The SES client is already built in the referral block and shared with `AuthMailer`. The same
 client is handed to the report service there. Without SES the service is constructed exactly
@@ -189,7 +189,7 @@ Mail rendering, with a fake sender: the three outcomes produce their subjects an
 empty note degrades to the generic sentence, and HTML in a note or in the reporter's details
 is escaped.
 
-Handler integration (`internal/handler/reports_integration_test.go`): the decision responses
+Handler integration (`internal/api/handler/reports_integration_test.go`): the decision responses
 carry `notified`, and the note lands in `review_reason` for both resolve and dismiss.
 
 ## Announcement
