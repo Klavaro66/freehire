@@ -17,7 +17,9 @@ Each removes a block cycle that would otherwise make the layering rule unstateab
 - [ ] 2.2 Extract the provider vocabulary from `internal/sources` into a new `internal/provider`: `Taxonomy`, `AggregatorProviders`, `BoardKeyedProviders`. Move their tests with them. Repoint `internal/catalogstats` and `internal/privatejob`.
 - [ ] 2.3 Move `sources.SanitizeHTML` into `internal/htmltext`, with its tests. Repoint the callers found in 2.2.
 - [ ] 2.4 Extract the silence model from `internal/userjob` into a new `internal/silence`: `DaysSilent`, `SilenceSilent`, `SilenceStateFor`, `SilenceThresholdDays`, `ValidateAppliedOn`. Move their tests. Repoint `internal/ghost` and `internal/ghostreport`. Verify neither imports `internal/userjob` any more.
-- [ ] 2.5 Confirm the block graph is now acyclic: run the 1.3 entry point against the flat tree with a temporary block table that maps flat package names, and check that the only remaining violations are "package not under a block" — no cycles.
+- [ ] 2.6 Drop `normalize.JobSlug` from `internal/db/jobs_slug_integration_test.go:25,86`. It is an in-package (`package db`) test, so this is a real `db` → `normalize` edge: platform (layer 1) → dict (layer 2). Use a literal slug — a db test that recomputes the slug with the production function cannot catch a slug-format change anyway.
+- [ ] 2.7 Drop `sources.NamespaceExternalID` and `sources.BoardIDPattern` from `internal/db/jobs_existing_ids_integration_test.go:79,101,188`. Also `package db`, so it is a real platform (1) → ingest (7) edge — the worst one in the repo. Note this is NOT fixed by task 2.2: 2.2 extracts `Taxonomy`/`AggregatorProviders`/`BoardKeyedProviders`, which these tests do not use.
+- [ ] 2.5 Confirm the extraction plan is complete: `TestPostMoveGraphHasOnlyThePlannedViolations` must be green with `plannedViolations` empty. Strike each entry off as its task lands — the test fails both when a new upward edge appears and when a fixed edge is left on the list.
 
 ## 3. The move
 
@@ -41,7 +43,7 @@ it deliberately and confirm it fails, then restore.
 
 ## 5. Enforcement in CI
 
-- [ ] 5.1 Generate the `depguard` rules from the 1.1 layer table into `.golangci.yml` — one rule per block, denying every block at or above its layer.
+- [ ] 5.1 Generate the `depguard` rules from the 1.1 layer table into `.golangci.yml` — one rule per block, denying every block at or above its layer. Set `run.build-tags: [integration, llmlive]` in the same file; without it `golangci-lint` never parses the 222 tagged files and the second guard is blind where the first one was.
 - [ ] 5.2 Prove both guards bite: add a deliberate upward import, confirm `golangci-lint run` fails on the line AND the layering test fails naming the pair. Revert.
 - [ ] 5.3 `golangci-lint run` clean on the branch. If `--new-from-merge-base` surfaces pre-existing findings on the moved lines, fix them here.
 

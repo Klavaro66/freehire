@@ -74,6 +74,29 @@ create a dependency the production build never reveals.
 - **WHEN** a `_test.go` file in a lower block imports a package from a higher block
 - **THEN** the layering test fails
 
+### Requirement: Both guards SHALL see the build-tagged files
+
+The repo carries 222 files behind `//go:build integration` and 2 behind `//go:build
+llmlive`, and `internal/db`'s tagged tests are in-package (`package db`), so their imports
+constrain `db` itself. Both the layering test's `go list` invocation and `golangci-lint`
+SHALL be configured with those tags. An untagged guard passes over exactly the case
+`CLAUDE.md` warns about: green in every local command except the tagged `vet`, then a
+failure in CI, which runs `go test -tags=integration ./...` over the whole module.
+
+Adding the tags is sound rather than merely convenient: the repo has no negated build
+constraint and no legacy `// +build` line, so the tagged build is a strict superset of the
+untagged one and no file drops out.
+
+#### Scenario: A cross-layer import exists only in an integration-tagged test
+
+- **WHEN** an in-package file behind `//go:build integration` imports a package from a higher block
+- **THEN** the layering test fails, and `golangci-lint` reports the import line
+
+#### Scenario: The tag list omits a constraint the repo uses
+
+- **WHEN** a new build constraint is introduced without being added to the guard's tag list
+- **THEN** the files behind it are invisible to both guards, so the tag list is maintained alongside any new constraint
+
 ### Requirement: Module guards that locate their target by string path SHALL resolve
 
 Four existing guards find their target by string path rather than by import, so a stale

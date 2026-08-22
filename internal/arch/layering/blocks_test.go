@@ -1,6 +1,7 @@
 package layering_test
 
 import (
+	"maps"
 	"slices"
 	"testing"
 
@@ -28,6 +29,19 @@ func TestEveryBlockHasALayer(t *testing.T) {
 		if !slices.Contains(layering.BlockNames(), b) {
 			t.Errorf("layer table names %q, which owns no packages", b)
 		}
+	}
+}
+
+// The layer table verbatim from the spec. Pinning only "1..8 are all occupied" would let
+// job and application swap layers with every test still green — and that swap is exactly
+// the kind of edit that reintroduces a cycle.
+func TestLayerTableMatchesTheSpec(t *testing.T) {
+	want := map[string]int{
+		"platform": 1, "dict": 2, "ai": 3, "identity": 3, "candidate": 4,
+		"job": 5, "application": 6, "search": 6, "engage": 7, "ingest": 7, "api": 8,
+	}
+	if !maps.Equal(layering.Layers, want) {
+		t.Errorf("layer table drifted from the spec:\n got %v\nwant %v", layering.Layers, want)
 	}
 }
 

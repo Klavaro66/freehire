@@ -125,6 +125,50 @@ func TestNonInternalImportsAreIgnored(t *testing.T) {
 	}
 }
 
+func TestEmptyGraphYieldsNoViolations(t *testing.T) {
+	if got := layering.Check(map[string][]string{}, testLayers); len(got) != 0 {
+		t.Fatalf("empty graph must be clean, got %v", got)
+	}
+}
+
+// Not hypothetical: go list puts a package's own path in XTestImports for every
+// `package foo_test` file, so every externally-tested package self-imports in this graph.
+func TestSelfImportIsNotAViolation(t *testing.T) {
+	graph := map[string][]string{
+		mod + "bottom/db": {mod + "bottom/db"},
+	}
+	if got := layering.Check(graph, testLayers); len(got) != 0 {
+		t.Fatalf("a package importing itself must be clean, got %v", got)
+	}
+}
+
+// The same import arrives twice when a package appears in both .Imports and .TestImports.
+func TestDuplicateImportIsReportedOnce(t *testing.T) {
+	graph := map[string][]string{
+		mod + "bottom/db": {mod + "top/handler", mod + "top/handler", mod + "top/handler"},
+	}
+	if got := layering.Check(graph, testLayers); len(got) != 1 {
+		t.Fatalf("want one violation for a repeated import, got %d: %v", len(got), got)
+	}
+}
+
+func TestViolationMessagesNameTheProblem(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		v    layering.Violation
+		want string
+	}{
+		{"unassigned", layering.Violation{Kind: layering.KindUnassigned, From: "x/internal/orphan"}, "directly under internal/"},
+		{"unknown block", layering.Violation{Kind: layering.KindUnknownBlock, From: "x/internal/q/r", Block: "q"}, `unknown block "q"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.v.String(); !strings.Contains(got, tc.want) || !strings.Contains(got, tc.v.From) {
+				t.Errorf("message %q must contain %q and the package name", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestViolationsAreDeterministicallyOrdered(t *testing.T) {
 	graph := map[string][]string{
 		mod + "bottom/z": {mod + "top/handler"},
