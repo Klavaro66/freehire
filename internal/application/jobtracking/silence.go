@@ -16,7 +16,7 @@ type Silence struct {
 	LastActivityAt time.Time
 	// DaysSilent is the whole days elapsed since. A part-day does not count.
 	DaysSilent int
-	// State is one of silence.Active / SilenceSilent / SilenceUnconfirmed.
+	// State is one of silence.Active / silence.Silent / silence.Unconfirmed.
 	State string
 }
 

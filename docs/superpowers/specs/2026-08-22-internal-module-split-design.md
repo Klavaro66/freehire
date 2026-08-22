@@ -51,21 +51,24 @@ Eleven blocks. `internal/<pkg>` becomes `internal/<block>/<pkg>`.
 
 | Block | Packages |
 |---|---|
-| `platform` | `db` `database` `migrate` `worker` `outbox` `cache` `config` `observability` `safehttp` `blobstore` `pgconv` `pgerr` `flexjson` `stringset` `isoweek` `htmltext` `testdb` `backfillpage` `tracerlink` `tokencrypt` `linktoken` `llm`※ `llmschema`※ |
-| `dict` | `normalize` `location` `skilltag` `classify` `industrytag` `roletag` `roletype` `vocab` `wordmatch` `lang` `skilladjacency` `skillbundle` `companyname` `provider`※ |
-| `ai` | `llmkey` `enrich` `embed` `assistant` `aiarchetype` `speech` `autofillagent` `credits` `browsertools` |
-| `identity` | `accounts` `auth` `auth/apple` `auth/applejobs` `auth/mobileauth` `auth/oauth` `auth/recentauth` `accountdelete` `userprofile` |
-| `candidate` | `cv` `cvedit` `cvsection` `cvmatch` `resume` `resumeextract` `experience` `atscheck` `pii` `headshot` `jobmatch` `hardconstraint` `hardconstraint/credentials` `matchanalysis` |
-| `job` | `job` `jobhash` `jobderive` `jobfacts` `jobdedup` `jobview` `jobreality` `privatejob` `outboundurl` `catalogstats` `ycdir` `collections` `ghost` `ghostreport` `liveness` `verdict` `silence`※ |
-| `application` | `userjob` `jobtracking` `appevent` `apptimeline` `followup` `mailrecall` `viewlog` `mailbox` `mailclassify` `mailingest` `maillink` `mailmatch` `mailtpl` `gmailsync` `inbox` `calsync` `calmatch` `ical` `deliverywindow` |
-| `search` | `search` `searchdrain` `similarjobs` `savedsearch` `facetsnapshot` `searchintent` |
-| `ingest` | `sources` `pipeline` `atsboard` `atsdetect` `boardresolve` `linksource` `linkimport` `contribution` `telegram` `adzunadesc` `applyform` `jdresolve` `screeninganswers` `submission` `moderation` |
-| `engage` | `notify` `emailnotify` `pushnotify` `telegramnotify` `discordbot` `broadcast` `nudge` `reminder` `onboarding` `subscription` `community` `referral` `vote` `companyfeedback` `report` `mailpreview` |
+| `platform` | `arch/layering`※ `backfillpage` `blobstore` `cache` `config` `database` `db` `externalid`※ `flexjson` `htmltext` `isoweek` `linktoken` `llm` `llmschema` `migrate` `modroot`※ `observability` `outbox` `pgconv` `pgerr` `safehttp` `stringset` `testdb` `tokencrypt` `tracerlink` `worker` |
+| `dict` | `classify` `companyname` `industrytag` `lang` `location` `normalize` `roletag` `roletype` `skilladjacency` `skillbundle` `skilltag` `vocab` `wordmatch` |
+| `ai` | `aiarchetype` `assistant` `autofillagent` `browsertools` `credits` `embed` `enrich` `llmkey` `speech` |
+| `identity` | `accountdelete` `accounts` `auth` `auth/apple` `auth/applejobs` `auth/mobileauth` `auth/oauth` `auth/recentauth` `userprofile` |
+| `candidate` | `atscheck` `cv` `cvedit` `cvmatch` `cvsection` `experience` `hardconstraint` `hardconstraint/credentials` `headshot` `jobmatch` `matchanalysis` `pii` `resume` `resumeextract` |
+| `job` | `applydate`※ `collections` `ghost` `ghostreport` `job` `jobdedup` `jobderive` `jobfacts` `jobhash` `jobreality` `jobview` `liveness` `outboundurl` `privatejob` `silence`※ `verdict` `ycdir` |
+| `application` | `appevent` `apptimeline` `calmatch` `calsync` `deliverywindow` `followup` `gmailsync` `ical` `inbox` `jobtracking` `mailbox` `mailclassify` `mailingest` `maillink` `mailmatch` `mailrecall` `mailtpl` `userjob` `viewlog` |
+| `search` | `facetsnapshot` `savedsearch` `search` `searchdrain` `searchintent` `similarjobs` |
+| `ingest` | `adzunadesc` `applyform` `atsboard` `atsdetect` `boardresolve` `catalogstats` `contribution` `jdresolve` `linkimport` `linksource` `moderation` `pipeline` `screeninganswers` `sources` `submission` `telegram` |
+| `engage` | `broadcast` `community` `companyfeedback` `discordbot` `emailnotify` `mailpreview` `notify` `nudge` `onboarding` `pushnotify` `referral` `reminder` `report` `subscription` `telegramnotify` `vote` |
 | `api` | `handler` `ogimage` `ratelimit` `realtime` |
 
-※ `dict/provider` and `job/silence` are new packages carved out by prerequisite edits 3
-and 4 below. `platform/llm` and `platform/llmschema` are reclassifications made during
-implementation — see edit 2.
+※ Packages that did not exist when this was written. `job/silence` and `job/applydate`
+were carved out of `userjob` by edit 4; `platform/externalid` by edit 3, which turned out
+to be about the stored key's format rather than the provider vocabulary; `platform/modroot`
+and `platform/arch/layering` are the guard itself. `dict/provider` was planned and never
+created — see edit 3. `platform/llm` and `platform/llmschema` are reclassifications made
+during implementation — see edit 2, and `ingest/catalogstats` likewise.
 
 ### Layering
 

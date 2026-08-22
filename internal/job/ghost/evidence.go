@@ -66,7 +66,7 @@ func Aggregate(now time.Time, apps []Application, reports []Report) map[int64]Ev
 	}
 
 	for _, app := range apps {
-		// SilenceStateFor is the whole judgement: it returns no state for a
+		// silence.StateFor is the whole judgement: it returns no state for a
 		// terminal stage, reads an unset stage as `applied`, softens a silence
 		// into a question when unconfirmed mail contradicts it, and applies the
 		// stage's own threshold. Only an outright `silent` is a fact.

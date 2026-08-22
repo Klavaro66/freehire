@@ -118,7 +118,7 @@ type TrackedJob struct {
 	//
 	// The board shows it BESIDE the silence state, never instead of it: "they have not answered in
 	// 24 days" and "somebody opened the CV yesterday" are two readings of the same application, and
-	// the second does not soften the first. It is kept out of SilenceStateFor's inputs for the same
+	// the second does not soften the first. It is kept out of silence.StateFor's inputs for the same
 	// reason FollowedUpAt is — see internal/application/userjob.
 	CVOpenedAt *time.Time
 }
