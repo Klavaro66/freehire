@@ -204,7 +204,6 @@ func remapped(t *testing.T) map[string][]string {
 // EXACTLY these and no others, in both directions: a new upward edge fails, and an edge
 // that has been fixed without being struck off this list fails too.
 var plannedViolations = map[string]string{
-	"platform/config -> ai/llm":              "2.1 move the llm.Settings conversion out of config",
 	"job/catalogstats -> ingest/sources":     "2.2 carve the provider vocabulary out of sources",
 	"job/privatejob -> ingest/sources":       "2.2 carve the provider vocabulary out of sources",
 	"job/ghost -> application/userjob":       "2.4 carve the silence model out of userjob",

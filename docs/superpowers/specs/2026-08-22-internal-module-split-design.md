@@ -51,9 +51,9 @@ Eleven blocks. `internal/<pkg>` becomes `internal/<block>/<pkg>`.
 
 | Block | Packages |
 |---|---|
-| `platform` | `db` `database` `migrate` `worker` `outbox` `cache` `config` `observability` `safehttp` `blobstore` `pgconv` `pgerr` `flexjson` `stringset` `isoweek` `htmltext` `testdb` `backfillpage` `tracerlink` `tokencrypt` `linktoken` |
+| `platform` | `db` `database` `migrate` `worker` `outbox` `cache` `config` `observability` `safehttp` `blobstore` `pgconv` `pgerr` `flexjson` `stringset` `isoweek` `htmltext` `testdb` `backfillpage` `tracerlink` `tokencrypt` `linktoken` `llm`※ `llmschema`※ |
 | `dict` | `normalize` `location` `skilltag` `classify` `industrytag` `roletag` `roletype` `vocab` `wordmatch` `lang` `skilladjacency` `skillbundle` `companyname` `provider`※ |
-| `ai` | `llm` `llmkey` `llmschema` `enrich` `embed` `assistant` `aiarchetype` `speech` `autofillagent` `credits` `browsertools` |
+| `ai` | `llmkey` `enrich` `embed` `assistant` `aiarchetype` `speech` `autofillagent` `credits` `browsertools` |
 | `identity` | `accounts` `auth` `auth/apple` `auth/applejobs` `auth/mobileauth` `auth/oauth` `auth/recentauth` `accountdelete` `userprofile` |
 | `candidate` | `cv` `cvedit` `cvsection` `cvmatch` `resume` `resumeextract` `experience` `atscheck` `pii` `headshot` `jobmatch` `hardconstraint` `hardconstraint/credentials` `matchanalysis` |
 | `job` | `job` `jobhash` `jobderive` `jobfacts` `jobdedup` `jobview` `jobreality` `privatejob` `outboundurl` `catalogstats` `ycdir` `collections` `ghost` `ghostreport` `liveness` `verdict` `silence`※ |
@@ -64,7 +64,8 @@ Eleven blocks. `internal/<pkg>` becomes `internal/<block>/<pkg>`.
 | `api` | `handler` `ogimage` `ratelimit` `realtime` |
 
 ※ `dict/provider` and `job/silence` are new packages carved out by prerequisite edits 3
-and 4 below.
+and 4 below. `platform/llm` and `platform/llmschema` are reclassifications made during
+implementation — see edit 2.
 
 ### Layering
 
@@ -82,9 +83,9 @@ eight layers. A block may import only blocks strictly below it.
 1. platform
 ```
 
-`ai` sits low because `llm` is a client library with no upward dependencies. `ingest` sits
-high because `submission`/`moderation` reach into `job`, and `linkimport` reaches into
-`search` and `enrich`.
+`ai` sits low because what remains in it — `enrich`, `embed`, `llmkey` — depends only on
+`platform` and `dict`. `ingest` sits high because `submission`/`moderation` reach into
+`job`, and `linkimport` reaches into `search` and `enrich`.
 
 ### Non-obvious block placements
 
@@ -114,12 +115,26 @@ on its own. Without them the block graph has cycles and no `depguard` rule can b
 Pure relocation, no code change. Removes `engage ↔ application` (back-edge
 `submission → moderation`) and part of `job ↔ application`.
 
-**2. Move the `llm.Settings` conversion out of `internal/config`.**
+**2. ~~Move the `llm.Settings` conversion out of `internal/config`.~~ Withdrawn during implementation.**
 `internal/config/llm.go:75` defines `func (l LLM) Settings(model string) llm.Settings`.
-That one method is the only reason `config` imports `llm`, which puts the whole `ai` block
-below `platform` and creates `ai ↔ platform`. The conversion belongs either in
-`internal/llm` (as a constructor taking the env-shaped values) or in the `cmd/*` wiring.
-`internal/config` keeps the env struct.
+That one method is the only reason `config` imports `llm`, which with `llm` in `ai` creates
+`ai ↔ platform`.
+
+Every way of moving the method made the code worse. All eight call sites are
+`llm.NewClient(cfg.Settings(model), tag)` in `cmd/`, so relocating the conversion there
+regresses exactly what the comment at `config/llm.go:72-74` defends — "a field added to
+either is a one-line change here rather than seven copies at the entrypoints" — and the
+only other option was a package holding one function. `config.LLM` is additionally embedded
+in both `config.Settings` and `config.Enrich`, so extracting the struct ripples further.
+
+The classification was wrong, not the code. `internal/llm` imports only `internal/llmschema`;
+`llmschema` imports nothing of ours. Neither knows the domain: one wraps an
+OpenAI-compatible chat endpoint, the other derives a JSON Schema from a Go type. That is the
+category `safehttp` and `blobstore` occupy. Both moved to `platform`, `config` → `llm`
+became an intra-block import, and the edge disappeared with no code change.
+
+`llmkey` stays in `ai` — it imports `db` and is about per-user spend attribution, which is
+domain rather than transport.
 
 **3. Carve the provider vocabulary out of `internal/sources`.**
 `catalogstats` and `privatejob` reach into `sources` for `Taxonomy` (5 uses),

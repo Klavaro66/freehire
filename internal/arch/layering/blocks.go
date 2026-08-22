@@ -31,11 +31,18 @@ var Layers = map[string]int{
 // block, because a sub-package on a different layer from its parent would be a lie about
 // where the concept lives.
 var blocks = map[string][]string{
+	// llm and llmschema are here, not in ai, because neither knows anything about the
+	// domain: llm wraps an OpenAI-compatible endpoint and llmschema derives a JSON Schema
+	// from a Go type. They import nothing of ours (llm imports only llmschema), which puts
+	// them in the same category as safehttp and blobstore. Placing them in ai instead would
+	// have made config -> llm an upward edge, and the only ways out were to scatter the
+	// config-to-Settings conversion across eight cmd/ entrypoints or to add a package
+	// holding one function. The classification was wrong, not the code.
 	"platform": {
 		"arch/layering", "backfillpage", "blobstore", "cache", "config", "database", "db",
-		"flexjson", "htmltext", "isoweek", "linktoken", "migrate", "observability",
-		"outbox", "pgconv", "pgerr", "safehttp", "stringset", "testdb", "tokencrypt",
-		"tracerlink", "worker",
+		"flexjson", "htmltext", "isoweek", "linktoken", "llm", "llmschema", "migrate",
+		"observability", "outbox", "pgconv", "pgerr", "safehttp", "stringset", "testdb",
+		"tokencrypt", "tracerlink", "worker",
 	},
 	"dict": {
 		"classify", "companyname", "industrytag", "lang", "location", "normalize",
@@ -44,7 +51,7 @@ var blocks = map[string][]string{
 	},
 	"ai": {
 		"aiarchetype", "assistant", "autofillagent", "browsertools", "credits", "embed",
-		"enrich", "llm", "llmkey", "llmschema", "speech",
+		"enrich", "llmkey", "speech",
 	},
 	"identity": {
 		"accountdelete", "accounts", "auth", "auth/apple", "auth/applejobs",

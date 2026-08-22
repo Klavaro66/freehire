@@ -111,6 +111,8 @@ func TestNonObviousPlacementsArePinned(t *testing.T) {
 		"searchintent":  "search",
 		"submission":    "ingest",
 		"moderation":    "ingest",
+		"llm":           "platform",
+		"llmschema":     "platform",
 	} {
 		if got := layering.Assignment[pkg]; got != block {
 			t.Errorf("Assignment[%q] = %q, want %q — see the design's cycle analysis", pkg, got, block)

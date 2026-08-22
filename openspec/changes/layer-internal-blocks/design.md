@@ -66,6 +66,25 @@ middleware; `ratelimit` imports `auth`). `ghost`/`ghostreport`/`jobreality`/`liv
 call them "the moderator-authored job use cases" and "the public job-submission queue";
 they are manual job intake.
 
+### `llm` and `llmschema` are platform, not ai
+
+Discovered while implementing: `internal/config` imports `internal/llm` for one conversion
+method (`config/llm.go:75`), which with `llm` in `ai` is an upward edge from layer 1 to
+layer 3. The planned fix was to move the conversion. Every alternative made the code worse —
+all eight call sites are `llm.NewClient(cfg.Settings(model), tag)` in `cmd/`, so moving the
+conversion there regresses exactly the property the code comment at `config/llm.go:72-74`
+defends ("a field added to either is a one-line change here rather than seven copies at the
+entrypoints"), and the only other option was a package holding one function.
+
+The classification was wrong, not the code. `llm` imports only `llmschema`; `llmschema`
+imports nothing of ours. Neither knows the domain — one wraps an OpenAI-compatible chat
+endpoint, the other derives a JSON Schema from a Go type. That is the same category as
+`safehttp` and `blobstore`. Moved both to `platform`; `config` → `llm` becomes an intra-block
+import and the edge disappears with no code change.
+
+`llmkey` stays in `ai`: it imports `db` and is about per-user spend attribution, which is
+domain, not transport.
+
 ### Two extractions rather than two exceptions
 
 `catalogstats` and `privatejob` reach into `sources` for `Taxonomy`,
