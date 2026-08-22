@@ -5,7 +5,7 @@ A deterministic 0–100 ATS-readiness score for a CV's plain text: five weighted
 with per-item point attribution (atscheck.go). An optional LLM layer refines the Content
 Quality category (analyzer.go), and `Compare` builds the Delta between a base and a
 tailored CV's reports (delta.go). Consumers: `GET`/`POST /me/profile/ats-report`
-(internal/handler/ats_report.go, routes at resume.go:87-88) and
+(internal/api/handler/ats_report.go, routes at resume.go:87-88) and
 `GET /me/cvs/:id/ats-delta` (cv_ats_delta.go, route at cv.go:205).
 
 ## Always true
@@ -15,7 +15,7 @@ tailored CV's reports (delta.go). Consumers: `GET`/`POST /me/profile/ats-report`
   `machine_readable`, the single biggest ATS killer (atscheck.go:9-13;
   `minReadableWords` = 30, atscheck.go:91).
 - **Pure and I/O-free** — `Score(cvText, cvSkills, roleTopSkills)` (atscheck.go:136)
-  mirrors internal/verdict. The handler supplies the text, the parsed skills
+  mirrors internal/job/verdict. The handler supplies the text, the parsed skills
   (`skilltag.Parse`), and the role's top in-demand skills.
 - **Five categories, server-owned weights, maxima summing to 100:** Keyword Strength 40,
   Format Compliance 20, Section Completeness 15, Content Quality 15, Length & Density 10
@@ -45,7 +45,7 @@ tailored CV's reports (delta.go). Consumers: `GET`/`POST /me/profile/ats-report`
 ## How it works
 `POST /me/profile/ats-report` runs the LLM review under the caller's own gateway
 credential — `h.atsAnalyzer.As(h.llm.bind(...))` (ats_report.go:89) — so the spend is
-attributed per-user per internal/llmkey; `cfg.LLM` nil means deterministic only
+attributed per-user per internal/ai/llmkey; `cfg.LLM` nil means deterministic only
 (handler.go:362). The ats-delta endpoint renders base and tailored CVs and scores both
 through one helper (`scoreRenderedCV`, cv_ats_delta.go:117-122) so the two sides can never
 disagree about what the text says. `LineItem`/`Status` are the shared wire shape that

@@ -95,7 +95,7 @@ SELECT EXISTS(SELECT 1 FROM company_feedback WHERE id = $1);
 -- File a report against a specific review. A second report by the same user on
 -- the same review is a silent no-op (the partial unique index) — evidence for a
 -- moderator to act on, not a per-report ticket with its own state machine (see
--- internal/report for that fuller shape, built for job postings).
+-- internal/engage/report for that fuller shape, built for job postings).
 INSERT INTO company_feedback_reports (feedback_id, reporter_user_id, reason)
 VALUES ($1, $2, $3)
 ON CONFLICT (feedback_id, reporter_user_id) WHERE reporter_user_id IS NOT NULL DO NOTHING;

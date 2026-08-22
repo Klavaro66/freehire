@@ -1,9 +1,9 @@
 # The in-app assistant
 
 ## Scope
-The `internal/assistant` package — the agent's turn loop, its tool contract, the
+The `internal/ai/assistant` package — the agent's turn loop, its tool contract, the
 session/transcript store, and the prompts each preset runs under. The tools
-themselves live in `internal/handler` (`assistant_*_tools.go`), because they are
+themselves live in `internal/api/handler` (`assistant_*_tools.go`), because they are
 built from the same services the HTTP handlers use.
 
 ## Always true
@@ -34,7 +34,7 @@ built from the same services the HTTP handlers use.
   lost an unattended run its report after twenty-five committed CV edits. Stopping is
   a request of its own (`POST /assistant/sessions/:id/cancel`), because a dropped
   connection cannot be told apart from a deliberate Stop.
-- **One turn at a time per session.** `turnRegistry` (`internal/handler/assistant_turns.go`)
+- **One turn at a time per session.** `turnRegistry` (`internal/api/handler/assistant_turns.go`)
   holds each running turn's `CancelFunc` — the only handle on a turn no request owns
   any more — and makes a second message wait rather than run beside the first: two
   turns of one tailoring session would edit one CV from two conversations that cannot
@@ -58,7 +58,7 @@ built from the same services the HTTP handlers use.
   a CV is written for the employer reading it, not for the candidate reading the chat beside
   it. Voice mode (`assistant_interview_voice.go`) is outside `SystemPrompt` — its Realtime
   `instructions` are a one-shot rendering, so it appends its own short directive via the same
-  `LanguageName` map. `internal/matchanalysis` has an equivalent directive of its own
+  `LanguageName` map. `internal/candidate/matchanalysis` has an equivalent directive of its own
   (`freeTextLanguageDirective`) for the fit-analysis chain's free-text commentary, which
   follows the SAME rule (profile language, not the vacancy's) since it is the candidate's own
   reading of their fit, not CV content.
@@ -184,7 +184,7 @@ the ordinary tool-calling turn loop, not inside it:
   persistence is for this session's own history view and for mid-session continuity.
 - The credential rides the same `LLM_BASE_URL`/`LLM_API_KEY` gateway as everything
   else here, gated by its own `REALTIME_MODEL` (no default, same posture as
-  `STTModel` in `internal/config` — unset means the feature is absent, not billed for
+  `STTModel` in `internal/platform/config` — unset means the feature is absent, not billed for
   by accident).
 - **`REALTIME_MODEL` must carry the provider prefix** (`openai/gpt-realtime-2.1`, not
   the bare `gpt-realtime-2.1`), unlike every other model name in this file. The
@@ -228,7 +228,7 @@ appended after that instruction, it has to name it: an override that does not sa
 what it replaces reads as advice about a different moment.
 
 **Mail** (`handler/assistant_inbox_tools.go`) is the `chat` preset's alone — seven tools
-over `internal/inbox`, the same use cases `/me/inbox` and `/me/emails` render. Three rules
+over `internal/application/inbox`, the same use cases `/me/inbox` and `/me/emails` render. Three rules
 are load-bearing:
 
 - **No tool opens one message by id.** That endpoint marks the message read, and `read_at`
@@ -250,15 +250,15 @@ attacker's body; the tool carries a judgement the candidate asked for, and silen
 rewriting it would record a verdict nobody chose.
 
 A `browse` session is meant to be held from the browser extension, but the preset
-recorded on the session does not by itself prove that: `internal/browsertools.Hub` is
+recorded on the session does not by itself prove that: `internal/ai/browsertools.Hub` is
 keyed by user id, not session id, so a browse session reached any other way would still
 find a browser attached the moment the caller's extension is open elsewhere. The
 `preset` a turn's request carries is therefore not the last word — `effectivePreset`
-(`internal/handler/assistant.go`) demotes a browse session to plain chat, for BOTH the
+(`internal/api/handler/assistant.go`) demotes a browse session to plain chat, for BOTH the
 prompt and the tool set, unless the turn itself authenticated as the extension's own
 Bearer session JWT (`auth.ViaCookie`/`auth.ViaAPIKey` both false). Only a session that
 clears that gate is the one preset whose agent can see something outside this process:
-`read_current_page` attaches to the caller's browser-tool channel (`internal/browsertools`)
+`read_current_page` attaches to the caller's browser-tool channel (`internal/ai/browsertools`)
 as an in-process harness for the length of one call, the same way `/me/autofill/run`
 does. That tool is deliberately absent from every other preset, and from a browse turn
 that fails the carrier check — nothing is attached to their channel, and a tool that can
@@ -280,11 +280,11 @@ to `OnText`, reasoning to `OnThinking`. The chat renders them apart, so reasonin
 is never mistaken for the answer.
 
 ## Adding a tool
-1. Write it in `internal/handler/assistant_*_tools.go` as an `assistant.Tool`:
+1. Write it in `internal/api/handler/assistant_*_tools.go` as an `assistant.Tool`:
    a name, a one-paragraph description the model reads, a JSON schema, and a
    `Run` that decodes with `assistant.DecodeArgs` and calls the same service the
    HTTP handler calls.
-2. Register it in `registry` (`internal/handler/assistant_tools.go`) under the presets that should offer it.
+2. Register it in `registry` (`internal/api/handler/assistant_tools.go`) under the presets that should offer it.
 3. Return structured data, not prose. Include the fields the model needs to act
    (a vacancy's `public_slug`, not just its title; an achievement's id and whether it may
    be written to a CV, not just its text).
@@ -295,7 +295,7 @@ is never mistaken for the answer.
    the valid ones. That message is the model's only path to self-correction.
 
 **Whose spend a turn is.** Every turn goes out on the CALLER's own gateway credential,
-resolved by `internal/llmkey` and minted on their first AI call. The runner is built once
+resolved by `internal/ai/llmkey` and minted on their first AI call. The runner is built once
 at boot and cloned per turn (`Runner.With`), because the credential is per-user and the
 bounds are not. The call is tagged `feature:assistant` **and** `preset:<preset>`: the
 gateway files one spend row per tag, and a rehearsal, an unattended tailoring run and a
@@ -305,10 +305,10 @@ Two rules hold the whole thing up, and both fail silently if broken:
 
 - **Attribution never costs a turn.** An unmintable credential, an unreachable admin API
   and a rejected key all fall back to the service credential and the turn completes. A key
-  the gateway has forgotten is additionally retried once and reported, in `internal/llm`'s
+  the gateway has forgotten is additionally retried once and reported, in `internal/platform/llm`'s
   transport — the only layer that sees a status code rather than langchaingo's error prose.
 - **A re-credentialed client must not share the schema-model cache.** See the comment on
-  `modelCache` in `internal/llm/schema.go`. Sharing it sends one user's schema-bound call
+  `modelCache` in `internal/platform/llm/schema.go`. Sharing it sends one user's schema-bound call
   out on another user's key, successfully.
 
 CV tailoring has no tag of its own on purpose: `/me/cvs/tailor` makes no model call: it
@@ -320,7 +320,7 @@ tag would double-count one spend.
   cost is readable (`GET /me/usage`, and per-feature on the gateway), but nothing refuses
   one. The gateway supports a per-account ceiling and `LLM_USER_MAX_BUDGET` passes one
   through; it is deliberately unset, because a ceiling chosen before the spend
-  distribution is known is a guess. `internal/credits` remains the seam for a per-turn
+  distribution is known is a guess. `internal/ai/credits` remains the seam for a per-turn
   debit — points price the product, a gateway budget is a fuse, and they are not the same
   instrument.
 - No summarisation: a long session loses its oldest messages to the window rather

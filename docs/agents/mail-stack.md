@@ -7,15 +7,15 @@ how they compose and where the traps are.
 ## The pipeline
 
 ```
-                 ┌── Gmail OAuth ──→ internal/gmailsync ──┐
+                 ┌── Gmail OAuth ──→ internal/application/gmailsync ──┐
 inbound mail ────┤                                        ├──→ emails table
-                 └── SES→S3→SQS ──→ internal/mailingest ──┘    (source = gmail|hosted)
+                 └── SES→S3→SQS ──→ internal/application/mailingest ──┘    (source = gmail|hosted)
                                                                       │
                                           email_classification_outbox │  ← excludes 'external'
                                                                       ▼
-                                                        internal/maillink (runner)
-                                                          ├─ internal/mailmatch   deterministic
-                                                          └─ internal/mailclassify  LLM + vocabulary
+                                                        internal/application/maillink (runner)
+                                                          ├─ internal/application/mailmatch   deterministic
+                                                          └─ internal/application/mailclassify  LLM + vocabulary
                                                                       │
                                                         link + monotonic stage advance
 
@@ -32,14 +32,14 @@ the point: it is the tier that costs us nothing. See the `external` bullets belo
 
 | Package | Role |
 |---|---|
-| `internal/inbox` | The mail use cases (read, classify, link, record an application). Both readers call it |
-| `internal/gmailsync` | Incremental Gmail OAuth connect + per-user sync worker (`cmd/gmail-sync`) |
-| `internal/mailingest` | SES inbound: parse MIME → resolve recipient → store (`cmd/mail-ingest`, a daemon) |
-| `internal/mailbox` | Derives `<handle>@<MAILBOX_DOMAIN>`; pure — allocation lives in the handler |
-| `internal/maillink` | Drains the classification outbox, decides link + stage (`cmd/classify-mail`) |
-| `internal/mailmatch` | Deterministic match: thread continuity, company name in sender/subject |
-| `internal/mailclassify` | Status vocabulary, sanitizer, LLM adapter |
-| `internal/mailrecall` | Pull direction: one Gmail search scoped to an employer, proposals only — never stored, never linked |
+| `internal/application/inbox` | The mail use cases (read, classify, link, record an application). Both readers call it |
+| `internal/application/gmailsync` | Incremental Gmail OAuth connect + per-user sync worker (`cmd/gmail-sync`) |
+| `internal/application/mailingest` | SES inbound: parse MIME → resolve recipient → store (`cmd/mail-ingest`, a daemon) |
+| `internal/application/mailbox` | Derives `<handle>@<MAILBOX_DOMAIN>`; pure — allocation lives in the handler |
+| `internal/application/maillink` | Drains the classification outbox, decides link + stage (`cmd/classify-mail`) |
+| `internal/application/mailmatch` | Deterministic match: thread continuity, company name in sender/subject |
+| `internal/application/mailclassify` | Status vocabulary, sanitizer, LLM adapter |
+| `internal/application/mailrecall` | Pull direction: one Gmail search scoped to an employer, proposals only — never stored, never linked |
 
 ## Always true
 
@@ -142,7 +142,7 @@ the point: it is the tier that costs us nothing. See the `external` bullets belo
   re-sync cannot resurrect deleted mail, un-read a message, or wipe a triage verdict.
 - **There is a PULL direction, and it SEARCHES the mailbox rather than reading our copy.**
   Everything above starts from a message and asks which application it belongs to.
-  `POST /me/tracking/:slug/mail-recall` (`internal/mailrecall`) asks the opposite. It issues
+  `POST /me/tracking/:slug/mail-recall` (`internal/application/mailrecall`) asks the opposite. It issues
   ONE Gmail search scoped to the employer inside a window around `applied_at`, adjudicates
   what comes back in one model call, and shows the confident answers.
   The first version read the stored table instead, and production retired it: candidates in
@@ -169,7 +169,7 @@ the point: it is the tier that costs us nothing. See the `external` bullets belo
   scan of the package for `LinkEmailToJob` / `application_events` / `calsync`.
   **The calendar still needs no code**: `cmd/cal-sync` re-reads its whole ±90-day window
   every run, so an invitation linked here yields its meeting on the next one.
-- **`internal/calsync` stores only meetings an application earned.** `cmd/cal-sync` reads each
+- **`internal/application/calsync` stores only meetings an application earned.** `cmd/cal-sync` reads each
   connected candidate's calendar ±90 days around now and writes ONLY a meeting `calmatch` can
   attach to one of the candidate's own applications — the schema backstops the rule
   (`application_interviews.application_id` is NOT NULL), so a mistake cannot become a stored
@@ -221,13 +221,13 @@ the point: it is the tier that costs us nothing. See the `external` bullets belo
   *under*-reporting elapsed silence, which is the safe direction: a missed ghost is
   a non-event, a fabricated one tells a person they were ignored when they were not.
 - **There is a third reader, and it issues no HTTP request.** The in-app assistant's mail
-  tools (`chat` preset only) call `internal/inbox` directly with the session owner's id.
+  tools (`chat` preset only) call `internal/application/inbox` directly with the session owner's id.
   That package exists because of it: a rule enforced in a Fiber handler is a rule the
   in-process agent never meets, which is exactly how the CV-tailoring contact guard was
   lost. Put a new mail rule in the service, not in a handler, and check `IsNotFound` /
   `InvalidError` render sensibly for both readers. The assistant's own bounds — no
   single-message read, a 10-message body cap, no tool that sends — are in
-  `internal/assistant/AGENTS.md`.
+  `internal/ai/assistant/AGENTS.md`.
 - **Bodies reach an agent through the listing (`?body=1`), not `GET /me/emails/:id`.** That
   endpoint marks the message read, and `read_at` means "a human saw this" — a harness
   sweeping the backlog through it would silently zero its owner's unread count. For the
@@ -250,5 +250,5 @@ every other worker in this repo.
 
 - Gmail sync runs under an unverified restricted-scope OAuth app — test users only until
   Google verification.
-- `internal/gmailsync/learn.go` self-learns confident job-mail sender domains; promotion is
+- `internal/application/gmailsync/learn.go` self-learns confident job-mail sender domains; promotion is
   count-based and has no decay.

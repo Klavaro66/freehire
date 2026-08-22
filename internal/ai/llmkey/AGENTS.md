@@ -1,10 +1,10 @@
 # Per-user LLM spend attribution
 
 ## Scope
-`internal/llmkey` — minting, reading and retiring the credential the LLM gateway knows an
+`internal/ai/llmkey` — minting, reading and retiring the credential the LLM gateway knows an
 account by, and the resolver that hands it out. The clone that actually spends under it
-lives in `internal/llm` (`Client.As`); the one place per-user calls resolve through is
-`userLLM` in `internal/handler`.
+lives in `internal/platform/llm` (`Client.As`); the one place per-user calls resolve through is
+`userLLM` in `internal/api/handler`.
 
 ## Always true
 - **The credential is invisible to the user.** No page, no field, no setting, and it
@@ -43,7 +43,7 @@ variable read as "every account's key is stale" and set off a re-minting storm. 
 are kept apart structurally rather than by a sentinel: `do` classifies only 404 (→
 `ErrUnknownKey`, treated by `Block`/`Delete` as already done) and sends every other
 non-2xx, 401 included, to the generic `ErrUpstream` branch. The 401 that matters — the
-gateway refusing a user's credential on an inference call — is caught in `internal/llm`'s
+gateway refusing a user's credential on an inference call — is caught in `internal/platform/llm`'s
 transport, which retries once on the fallback and calls `Resolver.Forget` to clear the
 row so the next call re-mints.
 
@@ -72,7 +72,7 @@ the pool behind it runs on mixed upstream keys. They compare features and period
 other honestly and must never be quoted as a bill.
 
 ## Adding a per-user LLM call
-1. Resolve through `userLLM` in `internal/handler` — the single identifier to grep for.
+1. Resolve through `userLLM` in `internal/api/handler` — the single identifier to grep for.
 2. Give it a `feature:` tag from the constants in `user_llm.go`. One tag per thing a person
    can ask for; do not tag two surfaces the same or the report stops answering the question
    it exists for.

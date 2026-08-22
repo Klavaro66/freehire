@@ -1,4 +1,4 @@
-# internal/browsertools — Browser-Tool Relay
+# internal/ai/browsertools — Browser-Tool Relay
 
 The wire between an agent harness and a user's browser extension. The harness
 issues tool calls (`read_form`, `fill_simple`, …); the extension executes them
@@ -55,7 +55,7 @@ not at all.
 
 ## Transport
 
-`internal/handler/browsertools.go` upgrades `GET /api/v1/tools/ws?role=…` behind
+`internal/api/handler/browsertools.go` upgrades `GET /api/v1/tools/ws?role=…` behind
 `auth.RequireAuthWS`. Only the subprotocol marker is echoed back, never the token.
 
 Carrier and credential vary independently:

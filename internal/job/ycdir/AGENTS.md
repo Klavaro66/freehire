@@ -1,16 +1,16 @@
-# internal/ycdir — YC Directory Enrichment
+# internal/job/ycdir — YC Directory Enrichment
 
 Maps yc-oss directory entries to company-info fields, consumed by `cmd/import-yc`.
 
 ## Enrichment Map
 
-`internal/ycdir.Map` turns each yc-oss entry into:
+`internal/job/ycdir.Map` turns each yc-oss entry into:
 - `one_liner` → tagline
 - `long_description` → `company_info.description`
 - `industry`+`industries`+`subindustry` leaf+`tags` → industries
 - `team_size` → employee_count
 - `launched_at` → year_founded
-- `all_locations` → hq_country via `internal/location`
+- `all_locations` → hq_country via `internal/dict/location`
 - Four curated facet columns: `yc_batch`/`yc_status`/`yc_stage`/`yc_flags` (text[], filterable by overlap on `GET /api/v1/companies` + FilterModal; `yc_flags` holds `top_company`/`hiring`)
 
 ## Upsert Logic

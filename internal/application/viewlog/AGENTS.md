@@ -1,4 +1,4 @@
-# internal/viewlog
+# internal/application/viewlog
 
 Parses nginx access-log lines into per-job view counts, **off the request path**.
 The read path (`GET /jobs/:slug`, `GET /api/v1/jobs/:slug`) writes no counter; the

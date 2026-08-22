@@ -88,7 +88,7 @@ WHERE user_id = sqlc.arg(user_id)
 -- invitations already linked to it.
 --
 -- One query per candidate rather than one lookup per calendar event: a sync window holds
--- far more events than a person has applications, and internal/calmatch is pure over what
+-- far more events than a person has applications, and internal/application/calmatch is pure over what
 -- it is handed. The UID array is what makes the deterministic tier possible — the mail
 -- matcher already tied those invitations to these applications, so a calendar entry
 -- carrying the same identifier is provably the same meeting.

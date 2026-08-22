@@ -1,10 +1,10 @@
 # AI fit analysis conventions
 
 ## Scope
-On-demand, cached, three-stage LLM prompt-chain for job-fit analysis per (user, job). Backend `internal/matchanalysis`; frontend embedded in the Tailor workspace (`web/src/routes/tailor/[slug]/`), with `web/src/routes/match/[slug]/` kept only as a 308 redirect to it.
+On-demand, cached, three-stage LLM prompt-chain for job-fit analysis per (user, job). Backend `internal/candidate/matchanalysis`; frontend embedded in the Tailor workspace (`web/src/routes/tailor/[slug]/`), with `web/src/routes/match/[slug]/` kept only as a 308 redirect to it.
 
 ## Always true
-- **Fixed prompt-chain, NOT an autonomous agent.** Deterministic, typed, cacheable. Runs over the shared `internal/llm` client — provider-agnostic, no vendor baked in.
+- **Fixed prompt-chain, NOT an autonomous agent.** Deterministic, typed, cacheable. Runs over the shared `internal/platform/llm` client — provider-agnostic, no vendor baked in.
 - **Stage 1 Extract & Match:** extract posting requirements, classify each against CV as `covered`/`synonym-only`/`missing-have`/`missing-gap`, and grade the cited evidence of the two positive statuses as `evidence_strength` `metric`/`scope`/`responsibility`/`keyword` (coerced to `keyword` when unknown; empty for `missing-*`). Never fabricate a skill.
 - **Stage 2 Recruiter verdict:** six scored dimensions (title alignment, experience relevance, seniority fit, skills coverage, company context, location & work-mode fit). Model only scores dimensions — the server computes `overall_score` and `verdict`.
 - **Stage 3 Adversarial audit:** skeptic pass that refines Stage 2. Stage 3 merges onto Stage 2 (unmarshalled over a copy of sanitized Stage-2 verdict); a parse failure degrades to the un-audited Stage-2 verdict.
@@ -18,7 +18,7 @@ On-demand, cached, three-stage LLM prompt-chain for job-fit analysis per (user, 
 
 ## How it works
 
-`internal/matchanalysis` is complemented by the deterministic `internal/jobmatch` bar (skills-only, instant, free). The LLM analysis is opt-in and reads the whole vacancy + `company_info` + the caller's de-identified structured résumé.
+`internal/candidate/matchanalysis` is complemented by the deterministic `internal/candidate/jobmatch` bar (skills-only, instant, free). The LLM analysis is opt-in and reads the whole vacancy + `company_info` + the caller's de-identified structured résumé.
 
 **The chain:** `analyzer.go` holds the one chain implementation, `AnalyzeStream(ctx, in, emit)` — a method on `*Analyzer`. `Analyze` is the sync entry point, a one-line wrapper that runs it with a no-op emit. `matchanalysis.go` holds the `Analysis` wire shape, the sanitize pass, and the weighted scoring.
 

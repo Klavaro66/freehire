@@ -31,7 +31,7 @@ WHERE job_count > 0
   -- industries answers from EITHER source, which is why two arrays arrive for one
   -- facet: `industries` is what an importer wrote, `industry_domains` is the caller's
   -- industries translated into the coarse job-derived vocabulary by
-  -- internal/industrytag, matched against the domains the company's own postings
+  -- internal/dict/industrytag, matched against the domains the company's own postings
   -- imply. The curated column covers 27% of the catalogue, so the second arm is most
   -- of the facet's reach, not a fallback. An industry the mapping does not cover
   -- contributes nothing to the second array, and `domains && '{}'` is false, so the
@@ -69,7 +69,7 @@ WHERE job_count > 0
 -- CASE NULL for every row, so this ORDER BY is byte-for-byte the old one.
 -- sort=rating forces every request onto this Postgres path even with a search
 -- or facet present that would otherwise route to Meili (see ListCompanies in
--- internal/handler/companies.go) — rating is not (yet) a Meili-sortable
+-- internal/api/handler/companies.go) — rating is not (yet) a Meili-sortable
 -- attribute, so routing there would silently drop the requested order.
 ORDER BY
   CASE WHEN sqlc.arg('sort')::text = 'rating' THEN feedback_rating_avg END DESC NULLS LAST,
@@ -91,7 +91,7 @@ WHERE job_count > 0
   -- industries answers from EITHER source, which is why two arrays arrive for one
   -- facet: `industries` is what an importer wrote, `industry_domains` is the caller's
   -- industries translated into the coarse job-derived vocabulary by
-  -- internal/industrytag, matched against the domains the company's own postings
+  -- internal/dict/industrytag, matched against the domains the company's own postings
   -- imply. The curated column covers 27% of the catalogue, so the second arm is most
   -- of the facet's reach, not a fallback. An industry the mapping does not cover
   -- contributes nothing to the second array, and `domains && '{}'` is false, so the
@@ -226,7 +226,7 @@ SET company = @name,
     company_slug = @new_slug,
     -- Kept in step with company_slug by hand, like every other write path that sets
     -- it — see migrations/0109 for why the folded value is a stored column at all,
-    -- and internal/db/folded_slug_rule_test.go for the test that catches a new write
+    -- and internal/platform/db/folded_slug_rule_test.go for the test that catches a new write
     -- path forgetting this line.
     company_slug_folded = replace(@new_slug, '-', ''),
     updated_at = now()

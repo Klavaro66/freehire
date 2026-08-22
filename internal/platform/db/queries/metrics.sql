@@ -51,7 +51,7 @@ FROM semantic_outbox;
 -- gauges sum to the fleet size and a stacked graph reads correctly.
 --
 -- Cooled takes precedence over failing. A board in cooldown always has failures behind it
--- (see internal/pipeline's CooldownFor), so counting it in both states would double-count
+-- (see internal/ingest/pipeline's CooldownFor), so counting it in both states would double-count
 -- every cooled board and make the total exceed the fleet. Cooled is the more actionable
 -- of the two: it means the board is currently NOT being crawled.
 SELECT

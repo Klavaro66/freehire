@@ -67,7 +67,7 @@ GROUP BY company_slug;
 -- Move one chunk of a retired slug's jobs onto the canonical slug.
 --
 -- company_slug_folded is written in the same statement, as every write path that sets
--- company_slug must (migration 0109; internal/db/folded_slug_rule_test.go enforces it).
+-- company_slug must (migration 0109; internal/platform/db/folded_slug_rule_test.go enforces it).
 --
 -- Idempotent by construction rather than by a guard: the subquery selects rows still
 -- carrying the OLD slug, so an updated row leaves the set. A re-run updates zero, and

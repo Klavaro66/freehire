@@ -11,7 +11,7 @@ change.
 
 The system SHALL show, for every classified message linked to an application, both its status
 signal and the application stage that signal implies — or that it implies none. The
-signal→stage mapping SHALL be exported from `internal/mailclassify` rather than kept private,
+signal→stage mapping SHALL be exported from `internal/application/mailclassify` rather than kept private,
 and SHALL be emitted into the generated frontend contracts beside the existing status-signal
 vocabulary, so the reader and the classifier cannot disagree about what a signal means.
 

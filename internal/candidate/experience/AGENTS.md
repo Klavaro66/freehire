@@ -1,7 +1,7 @@
 # The experience bank
 
 ## Scope
-`internal/experience` — the durable, per-user record of what a candidate has actually
+`internal/candidate/experience` — the durable, per-user record of what a candidate has actually
 done. An `Employment` is a place where something happened (a job or a project); an `Atom`
 is one piece of evidence at the grain of a CV bullet.
 
@@ -20,7 +20,7 @@ is one piece of evidence at the grain of a CV bullet.
 - **Listing is reverse-chronological in the domain, not via `ORDER BY period_start`.** Dates
   stay free-form display labels (`"October 2018"`, `"2024"`). Lexicographic SQL order puts
   month names above years; `ListEmployments` re-sorts with a best-effort parsed key
-  (`internal/experience/period_sort.go`) so WorkHistory / CV seed / Professional agree.
+  (`internal/candidate/experience/period_sort.go`) so WorkHistory / CV seed / Professional agree.
   Placeless publishable atoms are appended **after** dated roles (empty company/title,
   highlights only) — they are not a titled job. A role-only row with empty company is a
   normal employment from import/edit, not that placeless path.
@@ -31,7 +31,7 @@ is one piece of evidence at the grain of a CV bullet.
 - **`Sanitize` is the persistence guard AND the prompt-injection guard**, and it also
   coerces nil slices to empty ones — the array columns are `NOT NULL`, and pgx sends a nil
   slice as SQL `NULL`, which a column DEFAULT does not cover.
-- **Skills are canonical slugs from `internal/skilltag`** — the same dictionary that
+- **Skills are canonical slugs from `internal/dict/skilltag`** — the same dictionary that
   produces the `jobs.skills` facet, so matching evidence to a vacancy requirement is a set
   intersection rather than a text-matching problem.
 
@@ -83,8 +83,8 @@ to 1s" must not merge. Nothing stems or reorders words for the same reason.
 |---|---|---|
 | Employments, achievement atoms | this package | accumulates across uploads and sessions |
 | Education, languages, certifications, contacts, total years | `resumeextract` | stable form-shaped data with no accumulation problem |
-| The CV document a user edits and renders | `internal/cv` | must be a self-contained snapshot |
-| Specializations, wanted/excluded skills, location | `internal/userprofile` | targeting, not evidence — a different lifecycle |
+| The CV document a user edits and renders | `internal/candidate/cv` | must be a self-contained snapshot |
+| Specializations, wanted/excluded skills, location | `internal/identity/userprofile` | targeting, not evidence — a different lifecycle |
 
 The ATS report deliberately reads the **file's** structure and not the bank: it judges the
 document, and banked evidence would have it praise a CV for experience the CV never states.
@@ -98,6 +98,6 @@ document, and banked evidence would have it praise a CV for experience the CV ne
   CV that already cites the loser stays a printable snapshot; a later agent `cv_edit`
   that re-cites the deleted id fails the evidence gate. Citations are not rewritten.
 - **No semantic retrieval.** A linear pass is right for tens-to-hundreds of atoms;
-  `internal/embed` is the open seam if that changes.
+  `internal/ai/embed` is the open seam if that changes.
 - **No STAR depth.** Atoms are CV-bullet grade. Interview-prep depth would be a layer over
   the same employments, not nullable fields added speculatively now.

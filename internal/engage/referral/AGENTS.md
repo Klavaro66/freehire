@@ -4,7 +4,7 @@
 The employee-referral marketplace. Members offer to refer into a company (proof CV +
 LinkedIn profile, manual moderation); seekers file a request that company's approved
 referrers all see. Domain service and ports in referral.go, the sqlc adapter in
-repository.go, delivery in pinger.go. HTTP lives in internal/handler/referrals.go: member
+repository.go, delivery in pinger.go. HTTP lives in internal/api/handler/referrals.go: member
 routes `/me/referrals/*` behind cookie-or-key auth, the moderation queue under
 `/referrals/offers/*` behind the moderator gate (referrals.go:37-53).
 

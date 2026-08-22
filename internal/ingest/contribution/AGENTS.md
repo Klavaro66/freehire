@@ -3,7 +3,7 @@
 ## Scope
 The crowdsourced "contribute a board" flow: a signed-in user pastes a job link from a
 supported multi-tenant ATS, and a company board we do not yet crawl is recorded and rewarded
-with AI credits. Distinct from `internal/submission` (the manual full-card moderation queue) —
+with AI credits. Distinct from `internal/ingest/submission` (the manual full-card moderation queue) —
 contributions are URL-only, auto-validated, unmoderated.
 
 ## Always true
@@ -12,7 +12,7 @@ contributions are URL-only, auto-validated, unmoderated.
   board-listing URL) collapse to one board, so only the first earns a point. Rationale: once
   we know the board, the ingest side onboards it and crawls ALL its vacancies — a second
   vacancy from the same board adds nothing.
-- **Board recognition lives in `internal/atsboard`**, shared with link resolution (board
+- **Board recognition lives in `internal/ingest/atsboard`**, shared with link resolution (board
   coverage) and boardresolve — it used to live here, which `boardresolve` already reached
   across for. What remains in `board.go` is the Greenhouse/Ashby job-id parsing, which IS
   service logic (it looks the board up in the catalogue by that id). The recogniser is a pure,

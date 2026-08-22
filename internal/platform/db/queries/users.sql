@@ -28,7 +28,7 @@ WHERE lower(email) = lower($1);
 -- client whether to surface moderator-only UI. The password hash itself never leaves
 -- the database — only whether one exists, which is what lets the SPA offer a password
 -- change to password accounts and explain itself to OAuth-only ones. timezone is NULL
--- until the user sets one on their profile (internal/deliverywindow reads NULL as UTC).
+-- until the user sets one on their profile (internal/application/deliverywindow reads NULL as UTC).
 -- language is never NULL — it has a NOT NULL DEFAULT, so every account has one from
 -- creation.
 SELECT id, email, role, beta_tester, email_verified,
@@ -383,7 +383,7 @@ WHERE id = $1;
 -- Everything the public Talent Network page needs to render, keyed by the opaque
 -- talent_network_public_id (never users.id, which would leak signup order/row count).
 -- Mirrors the users + user_profiles composition GetProfile/toProfileResponse already
--- use for the owner-facing profile read (internal/handler/me_profile.go), via a LEFT
+-- use for the owner-facing profile read (internal/api/handler/me_profile.go), via a LEFT
 -- JOIN because a candidate can enable visibility before ever saving a profile (design
 -- decision: "Missing/empty CV does not block enabling the toggle").
 --

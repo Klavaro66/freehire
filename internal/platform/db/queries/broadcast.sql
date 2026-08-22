@@ -1,4 +1,4 @@
--- Audience reader and ledger writer for one-off campaigns (internal/broadcast).
+-- Audience reader and ledger writer for one-off campaigns (internal/engage/broadcast).
 
 -- name: ListBroadcastCandidates :many
 -- Everyone who can be mailed and has not received this campaign yet.

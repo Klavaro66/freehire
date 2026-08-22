@@ -1,4 +1,4 @@
-# internal/handler — HTTP Handlers
+# internal/api/handler — HTTP Handlers
 
 Fiber HTTP handlers: feature handler structs, route registration, auth surface, user job endpoints, error rendering.
 
@@ -52,7 +52,7 @@ Fiber HTTP handlers: feature handler structs, route registration, auth surface, 
 - **Catalogue scale is read, never counted** (`stats.go` `CatalogScale`, `jobs.go`
   `openJobTotal`). Every figure describing how big the catalogue is —
   `GET /stats/catalog` and the jobs list's `meta.total` — comes from the snapshot
-  `cmd/rollup-stats` publishes (`internal/catalogstats`). Both call
+  `cmd/rollup-stats` publishes (`internal/ingest/catalogstats`). Both call
   `catalogstats.Load`, which takes no exact counter, so no request path can reach a
   catalogue-wide scan even by mistake. Neither read can fail: a cold cache, an
   unreachable Redis, a payload from an older build and no `cfg.Cache` at all all
@@ -74,7 +74,7 @@ Fiber HTTP handlers: feature handler structs, route registration, auth surface, 
 
 - `DELETE /api/v1/me` erases the caller's account permanently — no soft-delete, no grace period, no restore. Cookie-only (`RequireAuth`), never `keyAuth`: a leaked API key must not destroy the account that issued it.
 - The body confirms the caller's **own** email (case-insensitive, matching the login lookup); a mismatch is 400 and erases nothing. Success is 204 plus an expired session cookie.
-- The orchestration lives in `internal/accountdelete`, not here: object keys are collected, the Gmail grant revoked (best-effort, shared with `GmailDisconnect` via `revokeGmailGrant`), objects deleted, and only then the row — so a storage failure leaves the account whole. That case surfaces as **503**, meaning "nothing was deleted, retry", and is the one status worth knowing: `ErrStorageUnavailable` must not fall through to a 500.
+- The orchestration lives in `internal/identity/accountdelete`, not here: object keys are collected, the Gmail grant revoked (best-effort, shared with `GmailDisconnect` via `revokeGmailGrant`), objects deleted, and only then the row — so a storage failure leaves the account whole. That case surfaces as **503**, meaning "nothing was deleted, retry", and is the one status worth knowing: `ErrStorageUnavailable` must not fall through to a 500.
 
 ## User Job Handlers (`user_jobs.go`)
 
@@ -84,7 +84,7 @@ Fiber HTTP handlers: feature handler structs, route registration, auth surface, 
 
 ## Mail Inbox + Harness Surface (`gmail.go`, `inbox.go`, `inbox_linking.go`, `inbox_harness.go`)
 
-Pipeline and cross-package invariants live in [docs/agents/mail-stack.md](../../docs/agents/mail-stack.md); this section is the HTTP surface only. The use cases themselves live in `internal/inbox` — these handlers parse, call it and render, and the in-app assistant's mail tools call the same service without going through HTTP. A rule added to a handler here is a rule the assistant never meets.
+Pipeline and cross-package invariants live in [docs/agents/mail-stack.md](../../../docs/agents/mail-stack.md); this section is the HTTP surface only. The use cases themselves live in `internal/application/inbox` — these handlers parse, call it and render, and the in-app assistant's mail tools call the same service without going through HTTP. A rule added to a handler here is a rule the assistant never meets.
 
 It is the **harness** surface, not "the agent surface": there are two agents on this store now, and only this one speaks HTTP.
 
@@ -153,11 +153,11 @@ ends at its step cap.
 `assistant_profile_tool.go` / `assistant_present_tool.go` / `assistant_page_tools.go`
 build the agent's tools from the same services these handlers use, and
 `assistantRegistry` picks the set for a session's preset. The loop itself lives in
-[internal/assistant](../assistant/AGENTS.md).
+[internal/ai/assistant](../../ai/assistant/AGENTS.md).
 
 `read_current_page` (`assistant_page_tools.go`) is the only tool that leaves this
 process for something we do not control: it drives the caller's browser through the
-relay in [internal/browsertools](../browsertools/AGENTS.md). It is registered for the
+relay in [internal/ai/browsertools](../../ai/browsertools/AGENTS.md). It is registered for the
 `browse` preset alone, and it carries its own deadline, because every other tool is
 bounded by a database or a search call and this one waits on a tab.
 
@@ -178,7 +178,7 @@ empty profile the model would read as "no preferences".
 
 - `GET /talent-network/:publicID` is the **only** unauthenticated route that serves candidate CV content — it takes no `mw` middleware at all, unlike `get_profile`/`GET /me/profile`, which at least require a session or key. `:publicID` is `users.talent_network_public_id` (an opaque UUID, never `users.id`), minted for every user by migration `0085` regardless of opt-in state.
 - **The 404-identity invariant:** `talent_network_visibility = 'off'` and "no such id" render the byte-identical `{"error":"not found"}` body. A malformed (non-UUID) `:publicID` also 404s rather than 400 — see `talentNetworkPublicID` — so a probe cannot distinguish "not a UUID" from "no such profile" from "a real profile that opted out". Do not add a distinct status/message for any of these three cases; that is the leak this route is built to not have.
-- The response body is built from `resumeextract.Structured.Anonymous()`/`.Public()` (`internal/resumeextract/visibility.go`), never `Structured` or `Professional` directly — those two functions are the only place project-link stripping and current-employer masking happen, so this handler must not re-derive or bypass them (e.g. by reaching into `row.ResumeStructured` for anything but the `json.Unmarshal` into `Structured`).
+- The response body is built from `resumeextract.Structured.Anonymous()`/`.Public()` (`internal/candidate/resumeextract/visibility.go`), never `Structured` or `Professional` directly — those two functions are the only place project-link stripping and current-employer masking happen, so this handler must not re-derive or bypass them (e.g. by reaching into `row.ResumeStructured` for anything but the `json.Unmarshal` into `Structured`).
 - `full_name` is populated only for `visibility = 'public'`; `GetProfile` leaves it as the Go zero value for `'anonymous'`, and `omitempty` drops the key entirely rather than serializing it empty — there is no name field an anonymous response could accidentally carry.
 
 ## Application forms (`apply_form.go`)
@@ -199,7 +199,7 @@ empty profile the model would read as "no preferences".
 - The bot mirrors Telegram's role but has one on/off switch, not two: `newDiscordHandlers`
   wires the client only when all four env vars are set (`DISCORD_BOT_TOKEN`,
   `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_GUILD_ID` — documented on the
-  `Config` fields in `handler.go`, read from env in `internal/config/config.go`). Missing any one, the bot is fully inert: `POST /me/discord/link` answers
+  `Config` fields in `handler.go`, read from env in `internal/platform/config/config.go`). Missing any one, the bot is fully inert: `POST /me/discord/link` answers
   503, `GET /me/discord` reports `enabled: false`, and `POST /api/v1/discord/interactions`
   404s instead of attempting Ed25519 verification.
 - One-time setup once those four are set: point Discord's Interactions Endpoint URL at

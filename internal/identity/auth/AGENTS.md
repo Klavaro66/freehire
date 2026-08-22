@@ -10,7 +10,7 @@ Auth primitives: bcrypt password hashing, JWT cookie transport, API-key hashing/
 - `users.password_hash` is **nullable** — passwordless sign-in creates accounts with no password; password login rejects a null hash with a generic `401`.
 - `email` is the canonical account key (`UNIQUE (lower(email))`); external providers link via `user_identities`.
 - `JWT_SECRET` is required at server startup (fail-fast in `cmd/server`); `COOKIE_SECURE=true` for HTTPS (default false for http://localhost dev).
-- Credential endpoints are throttled by a Redis-backed GCRA rate limiter (`internal/ratelimit`, keyed on client IP, no in-memory fallback; it fails open on Redis errors) — `login` 10/min, `register` 5/min.
+- Credential endpoints are throttled by a Redis-backed GCRA rate limiter (`internal/api/ratelimit`, keyed on client IP, no in-memory fallback; it fails open on Redis errors) — `login` 10/min, `register` 5/min.
 - **API keys are hashed at rest:** the row stores only the `HashAPIKey(token)` SHA-256 (i.e. `SHA-256(token)`) plus a short non-secret `token_prefix` (enough to tell keys apart in a list); the plaintext (minted by `GenerateAPIKey`) is shown exactly once at create time and is unrecoverable.
 - **Key management is cookie-only (`RequireAuth`)** — a leaked key must not be able to create, list, or revoke keys.
 - **Minting a key requires a proven address.** `CreateAPIKey` is an `INSERT ... SELECT ... WHERE users.email_verified`; no row means `403`. The gate lives in the statement because registration hands out a session before the address is proven, so a squatter on someone else's email could otherwise walk away with a never-expiring, full-scope credential.
@@ -19,7 +19,7 @@ Auth primitives: bcrypt password hashing, JWT cookie transport, API-key hashing/
 
 ## How it works
 
-`internal/auth` owns four responsibilities:
+`internal/identity/auth` owns four responsibilities:
 
 1. **Password hashing** (`password.go`): bcrypt between register and login.
 2. **JWT Issuer** (`token.go`): issues and verifies HS256 tokens carrying `sub`, `tv`, and a `jti` (random session id). `Parse` returns `sub`/`tv` and rejects a claimless (pre-versioning) token with `ErrNoTokenVersion`; `SessionFingerprint` binds a recent-auth proof to one exact session and refuses a legacy no-`jti` token with `ErrNoSessionID`.
@@ -28,16 +28,16 @@ Auth primitives: bcrypt password hashing, JWT cookie transport, API-key hashing/
 
    **API-key scopes:** `api_keys.scope` is `full` (every key minted today — `mintAPIKey` hardcodes it and the create body has no scope field, so a client cannot choose) or `cv` (a narrow scope reserved for external agents; nothing currently mints one — the tailoring agent now runs in-process and needs no credential — but the schema CHECK, `RequireAuthOrScopedKey`, and the `/auth/me` mount keep the door open). Full-scope-only is the default on every route, so a new endpoint is out of a leaked narrow credential's reach unless it deliberately opts in.
 
-OAuth sign-in (`internal/auth/oauth/`) adds a provider registry (Google/GitHub/LinkedIn/Apple), each implementing the `Provider` interface. The authorization-code flow redirects to `/start` (sets CSRF state cookie), then `/callback` (verifies state, exchanges code, fetches verified email, resolves account, sets JWT cookie, 302s back to SPA). Resolution is identity-first (keyed `user_identities (provider, provider_user_id)`), then verified-email link to existing account, then new passwordless user — all in one transaction. **Never link or create by an unverified email.**
+OAuth sign-in (`internal/identity/auth/oauth/`) adds a provider registry (Google/GitHub/LinkedIn/Apple), each implementing the `Provider` interface. The authorization-code flow redirects to `/start` (sets CSRF state cookie), then `/callback` (verifies state, exchanges code, fetches verified email, resolves account, sets JWT cookie, 302s back to SPA). Resolution is identity-first (keyed `user_identities (provider, provider_user_id)`), then verified-email link to existing account, then new passwordless user — all in one transaction. **Never link or create by an unverified email.**
 
-`internal/handler/oauth.go` owns the OAuth HTTP handlers.
+`internal/api/handler/oauth.go` owns the OAuth HTTP handlers.
 
 ### Browser-extension connect flow
 
 The browser extension signs in with `chrome.identity.launchWebAuthFlow`, which
 opens `GET /api/v1/auth/extension/connect` **in the freehire origin** and waits for
 a redirect to `https://<extension-id>.chromiumapp.org/`. Handlers live in
-`internal/handler/extension_connect.go`, both **cookie-only** like key management —
+`internal/api/handler/extension_connect.go`, both **cookie-only** like key management —
 a leaked key must not mint further keys — but mounted on `optionalCookie`:
 
 - `GET` validates `redirect_uri` (`validateExtensionRedirect`: https +
@@ -59,7 +59,7 @@ page rather than bouncing again. `redirect_uri` is validated **before** the boun
 so a crafted target never rides a sign-in round trip.
 
 The redirect target is bounded by `EXTENSION_REDIRECT_ALLOWLIST` (comma-separated
-extension ids, parsed in `internal/config`); an empty allowlist disables the flow.
+extension ids, parsed in `internal/platform/config`); an empty allowlist disables the flow.
 
 **Unified credential.** The extension holds one token — the session JWT — and it
 authenticates everywhere via the shared HS256 secret: hire endpoints accept it as

@@ -1,4 +1,4 @@
--- Candidate readers for the founder signup sequence (internal/onboarding).
+-- Candidate readers for the founder signup sequence (internal/engage/onboarding).
 --
 -- Three rules hold across all of them, and each is load-bearing:
 --

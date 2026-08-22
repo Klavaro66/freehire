@@ -106,7 +106,7 @@ WHERE id = $1;
 -- its expiry gates the retry to a later run and doubles as the crash reaper, so a
 -- failed entry is never reprocessed within the same run.
 --
--- Which bound applies depends on who is at fault (internal/enrich.postingAtFault):
+-- Which bound applies depends on who is at fault (internal/ai/enrich.postingAtFault):
 --
 --   posting_at_fault  → the attempt ceiling. The posting cannot be enriched, so each
 --                       try is a real try at something that may be impossible.

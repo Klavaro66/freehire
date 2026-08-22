@@ -233,7 +233,7 @@ three kinds:
   **30 feeds · 59 companies · 26,222 open postings.**
 
 A source's kind is not configuration but a property of the adapter's own Go type,
-so `internal/sources` classifies every provider without a network call.
+so `internal/ingest/sources` classifies every provider without a network call.
 
 Full per-source breakdown — every source with its own companies/open-jobs
 count — lives on its own page: [docs/sources.md](docs/sources.md).
@@ -243,7 +243,7 @@ count — lives on its own page: [docs/sources.md](docs/sources.md).
 Adding a company is one entry in the provider's board file (`sources/<provider>.yml`,
 or the mixed `sources/custom.yml`) — `company` + `board` (and `provider` when an
 entry overrides the file's). Adding an ATS platform is a new adapter in
-`internal/sources` plus one line in `sources.All` — every adapter speaks the same
+`internal/ingest/sources` plus one line in `sources.All` — every adapter speaks the same
 `Source` interface, and `cmd/ingest` validates the file against the registry before
 any crawl.
 
@@ -278,7 +278,7 @@ fill the application form for you. Source lives under `extension/`
 allowlist, no approval step — open one.
 
 The easiest way to help is to **add a source**: one entry in a `sources/` board
-file, or a new adapter in `internal/sources`. Missing a company you would apply
+file, or a new adapter in `internal/ingest/sources`. Missing a company you would apply
 to? That is a one-line PR, and it is the single most useful thing you can send.
 
 Questions and half-formed ideas are equally welcome in

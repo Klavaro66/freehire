@@ -274,7 +274,7 @@ never guesses: a title naming neither resolves to an empty category, unchanged.
 
 ### Requirement: Required certifications are derived deterministically from the description
 
-`internal/jobfacts` SHALL expose `RequiredCertifications(description)` returning the canonical credential slugs the posting requires, found by scanning the description with the shared credential vocabulary (whole-word alias matching, deduped). It is computed at read where the hard-constraint evaluator runs — not stored, not an enrichment field, not a Meilisearch facet — so it is correct for the whole catalogue the moment the code ships, with no re-enrich and no backfill.
+`internal/job/jobfacts` SHALL expose `RequiredCertifications(description)` returning the canonical credential slugs the posting requires, found by scanning the description with the shared credential vocabulary (whole-word alias matching, deduped). It is computed at read where the hard-constraint evaluator runs — not stored, not an enrichment field, not a Meilisearch facet — so it is correct for the whole catalogue the moment the code ships, with no re-enrich and no backfill.
 
 #### Scenario: A recognized credential in the description is surfaced as a slug
 
@@ -288,7 +288,7 @@ never guesses: a title naming neither resolves to an empty category, unchanged.
 
 ### Requirement: Degree-optional postings are detected deterministically
 
-`internal/jobfacts` SHALL expose `DegreeOptional(description)` returning true when the posting offers a degree with an equivalent-experience alternative ("or equivalent experience", "degree or equivalent", and like phrasings). The hard-constraint evaluator uses this flag to skip the education blocker, so a posting that explicitly accepts equivalent experience never raises a false education blocker. The `education_level` facet itself is unchanged.
+`internal/job/jobfacts` SHALL expose `DegreeOptional(description)` returning true when the posting offers a degree with an equivalent-experience alternative ("or equivalent experience", "degree or equivalent", and like phrasings). The hard-constraint evaluator uses this flag to skip the education blocker, so a posting that explicitly accepts equivalent experience never raises a false education blocker. The `education_level` facet itself is unchanged.
 
 #### Scenario: "Degree or equivalent experience" is degree-optional
 
@@ -302,7 +302,7 @@ never guesses: a title naming neither resolves to an empty category, unchanged.
 
 ### Requirement: An explicit no-experience statement resolves to zero years
 
-`internal/jobfacts`'s `ExperienceYearsMin(description)` SHALL resolve to `0` when the
+`internal/job/jobfacts`'s `ExperienceYearsMin(description)` SHALL resolve to `0` when the
 description explicitly states that no prior experience is required
 ("no prior experience required", "no experience necessary", "no previous experience
 needed", and like phrasings). Today such a posting yields nothing, because the

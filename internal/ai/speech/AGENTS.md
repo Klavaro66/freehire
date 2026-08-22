@@ -1,12 +1,12 @@
 # Speech to text
 
 ## Scope
-`internal/speech` — one method that turns recorded audio into text, and nothing else.
-Its HTTP surface is `internal/handler/speech.go`; the microphone that feeds it is
+`internal/ai/speech` — one method that turns recorded audio into text, and nothing else.
+Its HTTP surface is `internal/api/handler/speech.go`; the microphone that feeds it is
 `web/src/lib/assistant/VoiceInput.svelte`.
 
 ## Always true
-- **It is not part of `internal/llm`.** That package is built on langchaingo, which
+- **It is not part of `internal/platform/llm`.** That package is built on langchaingo, which
   models chat completions and has no audio surface; a multipart audio POST bolted onto
   it would reach around the abstraction it exists to provide. What the two DO share is
   the endpoint — an OpenAI-compatible gateway serves `/chat/completions` and
@@ -16,7 +16,7 @@ Its HTTP surface is `internal/handler/speech.go`; the microphone that feeds it i
   billed per minute of audio against an assistant that is not metered, so a deployment
   that never named a model gets no microphone rather than a bill for one nobody chose.
 - **`New` returns nil when unconfigured.** Nil is "this deployment has no speech",
-  following `internal/headshot`: the handler answers 501 and the SPA reads that as a
+  following `internal/candidate/headshot`: the handler answers 501 and the SPA reads that as a
   surface that does not exist here rather than as a fault. Whoever wires it must put an
   untyped nil into the handler's `transcriber` interface — a nil `*Client` inside an
   interface is not a nil interface, and that mistake turns an absent feature into a
@@ -37,7 +37,7 @@ a 400 the caller cannot explain.
 
 ## What bounds the spend
 Transcription is billed per minute of audio, and a turn is not metered
-(`internal/credits` is the seam and is not wired to it). Three things stand in for that,
+(`internal/ai/credits` is the seam and is not wired to it). Three things stand in for that,
 none of which depends on metering landing first:
 
 - a per-**caller** rate limit (`transcriptionsPerHour`), keyed on the user rather than

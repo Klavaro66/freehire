@@ -20,9 +20,9 @@ the exit-code convention, a progress heartbeat, and a corruption-tolerant keyset
 - **`ExitCode(failed, deadLettered)` is the convention** (exit.go:11): 0 on a clean run, 1
   when the run finished with ANY per-item failure or dead-lettered item, so cron alerts on
   a partially-failed run that would otherwise look successful. Deliberate divergence:
-  `internal/applyform`'s `RunStats.Degraded` rejects this rule (hundreds of thousands of
+  `internal/ingest/applyform`'s `RunStats.Degraded` rejects this rule (hundreds of thousands of
   requests to other companies' APIs make a handful of transient failures the healthy
-  shape) — see internal/applyform/AGENTS.md.
+  shape) — see internal/ingest/applyform/AGENTS.md.
 - **`Heartbeat(interval, report)` logs progress so a stall is visible** (heartbeat.go:11).
   `report` runs on a background goroutine CONCURRENTLY with the work — every counter it
   reads must be safe for concurrent access (atomic). The returned stop halts the goroutine;

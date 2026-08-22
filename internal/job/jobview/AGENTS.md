@@ -1,4 +1,4 @@
-# internal/jobview — Public Wire Shape of a Job
+# internal/job/jobview — Public Wire Shape of a Job
 
 The single JSON representation of a job served by the list, detail, and search
 endpoints and stored in the search index. One type, projected from the `job.Job`

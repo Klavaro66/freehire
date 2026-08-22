@@ -3,7 +3,7 @@
 ## Scope
 Best-effort, read-only LLM parse of the stored user CV into a typed `Structured` shape. Extracted in the background on every CV upload.
 
-**It no longer owns work experience.** Since the experience-bank change the parse also feeds `internal/experience`, which is the durable home of what the candidate has done; this package keeps the sections that have no accumulation problem — contacts, summary, education, languages, links, the total-years estimate. The staleness rule below governs those and only those.
+**It no longer owns work experience.** Since the experience-bank change the parse also feeds `internal/candidate/experience`, which is the durable home of what the candidate has done; this package keeps the sections that have no accumulation problem — contacts, summary, education, languages, links, the total-years estimate. The staleness rule below governs those and only those.
 
 ## Always true
 - **Derived in the background on every upload** (both `PutResume` and `ExtractResumeProfile`), folded into `deriveResumeArtifacts` beside `embedResume` so the two paths can't drift.
@@ -27,7 +27,7 @@ Best-effort, read-only LLM parse of the stored user CV into a typed `Structured`
 
 ## How it works
 
-`internal/resumeextract` is a self-contained prompt unit like `internal/matchanalysis`/`internal/enrich`, NOT an agent. It turns the uploaded CV into a typed `Structured` (contacts, summary, work experience with free-form dates, education, languages, links, total years) via the shared `internal/llm` client.
+`internal/candidate/resumeextract` is a self-contained prompt unit like `internal/candidate/matchanalysis`/`internal/ai/enrich`, NOT an agent. It turns the uploaded CV into a typed `Structured` (contacts, summary, work experience with free-form dates, education, languages, links, total years) via the shared `internal/platform/llm` client.
 
 **File split:** `structured.go` holds the wire shape + `Sanitize` + the `Professional` projection. `resumeextract.go` holds the server-only `Extractor` — split so `cmd/gen-contracts` emits only `structured.go`, mirroring `matchanalysis.go` vs `analyzer.go`.
 

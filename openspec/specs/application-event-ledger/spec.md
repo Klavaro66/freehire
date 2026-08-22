@@ -6,18 +6,18 @@ TBD - created by archiving change application-event-ledger. Update Purpose after
 ### Requirement: Application events are recorded from the service that decides them
 
 Every application event SHALL be written by the service layer that already makes the
-decision producing it, never by an HTTP handler. The emitting paths are `internal/maillink`
-(the classification worker), `internal/inbox` (suggestion confirmation, manual link,
+decision producing it, never by an HTTP handler. The emitting paths are `internal/application/maillink`
+(the classification worker), `internal/application/inbox` (suggestion confirmation, manual link,
 application-from-mail, external triage), `jobtracking.MarkApplied`, `jobtracking.TrackJob`,
 and the follow-up record action.
 
 The mail stack already pins this rule for a reason: the in-app assistant calls
-`internal/inbox` directly with the session owner's id and issues no HTTP request, so a rule
+`internal/application/inbox` directly with the session owner's id and issues no HTTP request, so a rule
 enforced in a Fiber handler is a rule the in-process agent never meets.
 
 #### Scenario: The assistant links an email
 
-- **WHEN** the in-app assistant confirms an email→application link through `internal/inbox`
+- **WHEN** the in-app assistant confirms an email→application link through `internal/application/inbox`
 - **THEN** an `employer_reply` event is recorded, exactly as if the link had come from the SPA
 
 #### Scenario: Applying records an event in the same transaction

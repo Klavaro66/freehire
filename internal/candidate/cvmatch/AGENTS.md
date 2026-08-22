@@ -2,13 +2,13 @@
 
 ## Scope
 Deterministic, dictionary-only scoring of a **tailored CV against the vacancy it is bound to**.
-Backend `internal/cvmatch` + `internal/handler/cv_job_match.go`; frontend in
+Backend `internal/candidate/cvmatch` + `internal/api/handler/cv_job_match.go`; frontend in
 `web/src/lib/tailor/JobMatch.svelte` and its unit-tested view model `web/src/lib/tailor/jobmatch.ts`.
 
 ## Always true
 - **The document is the only subject.** The scorer never reads the base CV, the experience bank
   or the structured résumé — those describe the *candidate*. That is what distinguishes this
-  score from `internal/matchanalysis`, whose numbers do not move when the CV is edited.
+  score from `internal/candidate/matchanalysis`, whose numbers do not move when the CV is edited.
 - **No LLM, ever.** Pure and I/O-free (`cvmatch.Compute(Input) Score`), so it costs no AI credits
   and the workspace recomputes it after every saved edit.
 - **The rendered text layer is the input**, never the stored document — same rule and same helper

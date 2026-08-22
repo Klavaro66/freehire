@@ -5,11 +5,11 @@ Capturing the application form an ATS published for a posting — the questions 
 must answer and the identifiers the platform expects back — and projecting it for display
 on the job page. Providers: greenhouse, ashby, workable, lever. Queue drain is
 `cmd/capture-apply-form`; the read is `GET /jobs/:slug/apply-form`
-(`internal/handler/apply_form.go:25`); wire shapes go to TypeScript via `cmd/gen-contracts`.
+(`internal/api/handler/apply_form.go:25`); wire shapes go to TypeScript via `cmd/gen-contracts`.
 
 ## Always true
-- **Platform vocabulary is stored VERBATIM** — the opposite of `internal/skilltag` and
-  `internal/classify` (form.go:1-22). Field IDs, option values and question text are kept
+- **Platform vocabulary is stored VERBATIM** — the opposite of `internal/dict/skilltag` and
+  `internal/dict/classify` (form.go:1-22). Field IDs, option values and question text are kept
   exactly as the platform sent them: `question_67165648` is a token to hand back to
   Greenhouse, not a name to interpret, and any mapping of it is loss. The ONE normalized
   thing is `FieldType`, the kind of control (form.go:27-54), and it follows the dict-only
@@ -42,18 +42,18 @@ on the job page. Providers: greenhouse, ashby, workable, lever. Queue drain is
 - **`MaxPerRun` exists because nothing holds a flock.** systemd `Type=oneshot` is the only
   anti-stacking mechanism, so an unbounded run over the ~185k backlog works for hours while
   every scheduled firing behind it is silently dropped (runner.go:55-64;
-  internal/config/applyform.go:23-28).
+  internal/platform/config/applyform.go:23-28).
 - **`Transport` and `statusCoder` are declared here** (fetch.go:27, 46-53) because
-  `internal/sources` imports THIS package (its Recruitee adapter yields a form) — the
+  `internal/ingest/sources` imports THIS package (its Recruitee adapter yields a form) — the
   dependency cannot run both ways. The real `sources.Client` satisfies `Transport`
   structurally, so the worker passes the same client the crawl uses.
 
 ## How it works
 `cmd/ingest` enqueues a capture when `applyform.NeedsRequestCapture(source)`
 (`cmd/ingest/store.go:266`). `cmd/capture-apply-form` runs `applyform.Run`, which delegates
-the claim/process loop to `internal/outbox.RunPool` (runner.go:115-133): claim a leased
+the claim/process loop to `internal/platform/outbox.RunPool` (runner.go:115-133): claim a leased
 wave, fetch each posting's form through its provider fetcher, and `Save` — which stores the
 form and retires the queue entry atomically, so a capture cannot be both stored and left
 queued. Tunables: `APPLY_FORM_BATCH_SIZE` (200), `_LEASE_SECONDS` (300, floored to the call
 timeout so an in-flight capture is never re-claimed), `_MAX_ATTEMPTS` (3), `_CONCURRENCY`
-(4), `_MAX_PER_RUN` (5000), `_CALL_TIMEOUT_SECONDS` (20) — internal/config/applyform.go:29-53.
+(4), `_MAX_PER_RUN` (5000), `_CALL_TIMEOUT_SECONDS` (20) — internal/platform/config/applyform.go:29-53.

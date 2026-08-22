@@ -1,4 +1,4 @@
-# internal/classify — Seniority & Category Tagging
+# internal/dict/classify — Seniority & Category Tagging
 
 Deterministic seniority/category tagging from job title, feeding enrichment facets.
 
@@ -6,7 +6,7 @@ Deterministic seniority/category tagging from job title, feeding enrichment face
 
 - Parses the **job title** at ingest into canonical `jobs.seniority`/`jobs.category` columns.
 - Values from `vocab.SeniorityValues`/`vocab.CategoryValues` — EN+RU aliases, whole-word matched. Russian forms listed as full surface forms (not stems) since matcher requires word boundaries. **Never guesses**.
-- Same alias→canonical dictionary design as `internal/location` and `internal/skilltag`.
+- Same alias→canonical dictionary design as `internal/dict/location` and `internal/dict/skilltag`.
 
 ## Grade-blind phrases
 

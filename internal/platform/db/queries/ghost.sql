@@ -2,7 +2,7 @@
 -- Candidate applications for the ghost signal, for a page of jobs at a time.
 --
 -- This query selects and gates; it does NOT judge. Whether an application is
--- actually silent is decided in Go by internal/userjob's threshold ladder, whose
+-- actually silent is decided in Go by internal/application/userjob's threshold ladder, whose
 -- five values carry their measured provenance. Restating that ladder here would let
 -- a change to it disagree silently with the personal tracking board — the same
 -- application judged by two ladders on two surfaces, with nothing binding them.

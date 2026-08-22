@@ -7,12 +7,12 @@ codes, password reset/change, and mapping an external sign-in identity onto a lo
 
 Four packages split this surface — keep the split:
 
-- **`internal/accounts`** (here) — the *policy*: who an identity resolves to, what a valid
+- **`internal/identity/accounts`** (here) — the *policy*: who an identity resolves to, what a valid
   password is, when a code is burnt.
-- **`internal/auth`** — the *primitives*: bcrypt, JWT issue/verify, cookie transport,
+- **`internal/identity/auth`** — the *primitives*: bcrypt, JWT issue/verify, cookie transport,
   middleware. See [../auth/AGENTS.md](../auth/AGENTS.md).
-- **`internal/auth/oauth`** — provider registry and the authorization-code flow.
-- **`internal/handler`** — HTTP shape and rate limiting; handlers never re-implement policy.
+- **`internal/identity/auth/oauth`** — provider registry and the authorization-code flow.
+- **`internal/api/handler`** — HTTP shape and rate limiting; handlers never re-implement policy.
 
 ## Always true
 
@@ -55,4 +55,4 @@ Four packages split this surface — keep the split:
 ## Limitations
 
 - No magic-link sign-in, no identity unlinking (the repository seam exists, the UI doesn't).
-- The rate limiter on credential endpoints fails open on Redis errors (`internal/ratelimit`, Redis-backed GCRA — a Redis outage means no throttling, only log warnings).
+- The rate limiter on credential endpoints fails open on Redis errors (`internal/api/ratelimit`, Redis-backed GCRA — a Redis outage means no throttling, only log warnings).

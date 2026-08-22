@@ -2,7 +2,7 @@
 -- Active applications, for users with notifications enabled, whose last activity
 -- falls inside the recency window (bounds the scan to an index range rather than
 -- the whole table, and keeps a first deploy from detonating the entire historical
--- backlog as nudges). Returns the raw ingredients for userjob.SilenceStateFor —
+-- backlog as nudges). Returns the raw ingredients for silence.StateFor —
 -- the silence verdict itself is a Go-side decision, not a SQL one, same as every
 -- other silence-state reader in this codebase.
 SELECT a.user_id, a.job_id, a.stage,
@@ -39,7 +39,7 @@ WHERE ev.kind = 'stage_set'
 
 -- name: ListJobClosedCandidates :many
 -- Jobs that closed recently while the tracking user still has an application in a
--- non-terminal stage on them (any stage userjob.SilenceThresholdDays accrues
+-- non-terminal stage on them (any stage silence.ThresholdDays accrues
 -- silence for — the same active/terminal split every other silence reader uses).
 -- Bounded to a recency window on closed_at for the same first-deploy reason as
 -- the other two candidate scans.
@@ -90,14 +90,14 @@ RETURNING n.id;
 -- snapshotted, so a change between MATCH and DELIVER takes effect immediately),
 -- live destinations, the account's live quiet-hours window (timezone +
 -- notification_settings' quiet_hours_start/end, checked by
--- internal/deliverywindow before send), and the application's CURRENT
+-- internal/application/deliverywindow before send), and the application's CURRENT
 -- stage/last-activity/pending-suggestion so the worker can recompute the
 -- triggering condition rather than trust what MATCH saw. job_open lets the
 -- worker cancel a nudge for a job that has since closed. application_exists
 -- distinguishes "no applications row at all" (untracked since MATCH) from "row
 -- exists with a NULL stage" — the LEFT JOIN alone leaves stage NULL in both
 -- cases, which would otherwise be judged as the active `applied` stage by
--- userjob.SilenceThresholdDays.
+-- silence.ThresholdDays.
 SELECT n.id, n.user_id, n.job_id, n.kind,
        j.title, j.company, j.public_slug, j.url,
        (j.closed_at IS NULL)::bool AS job_open,

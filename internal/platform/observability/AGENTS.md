@@ -1,4 +1,4 @@
-# internal/observability — Sentry Error Tracking
+# internal/platform/observability — Sentry Error Tracking
 
 Opt-in Sentry across all three surfaces, env-gated.
 

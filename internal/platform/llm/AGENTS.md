@@ -6,7 +6,7 @@ generation with fence-stripping and optional schema constraints, streaming, tool
 chat, Langfuse tracing, and per-user spend attribution via gateway credentials and
 `x-litellm-tags` (credential.go:15). Callers keep their own prompts and typed-contract
 parsing. Consumers: `cmd/server`, `cmd/enrich`, `cmd/tg-extract`, `cmd/classify-mail`, the
-backfills, and `internal/enrich`, `matchanalysis`, `resumeextract`, `atscheck`,
+backfills, and `internal/ai/enrich`, `matchanalysis`, `resumeextract`, `atscheck`,
 `mailclassify`, `mailrecall`, `telegram`, `autofillagent`, `assistant`, `cv`.
 
 ## Always true
@@ -16,7 +16,7 @@ backfills, and `internal/enrich`, `matchanalysis`, `resumeextract`, `atscheck`,
   traces and is a no-op when tracing is off. An unconfigured `Settings` (`!Enabled()`)
   returns `(nil, no-op, nil)` so callers degrade uniformly. `NewWithModel` is the tests-only
   seam (injects a fake model; no endpoint behind it).
-- **No env is read here.** The package takes `llm.Settings`; env lives in `internal/config`
+- **No env is read here.** The package takes `llm.Settings`; env lives in `internal/platform/config`
   (`LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`, `LANGFUSE_*`). No vendor or model is
   hard-coded — any OpenAI-compatible backend works.
 - **`DefaultTimeout = 90s` bounds every call** (llm.go:30). Without it a stalled gateway
@@ -47,12 +47,12 @@ backfills, and `internal/enrich`, `matchanalysis`, `resumeextract`, `atscheck`,
   reports a refusal as an error string whose wording could change silently — the status
   code does not move (credential.go:96-108).
 - **A schema is a first line, never a proof** (llm.go:7-11). `WithSchema` (schema.go:43,
-  built via `internal/llmschema`) constrains generation, but a gateway that stops honouring
+  built via `internal/platform/llmschema`) constrains generation, but a gateway that stops honouring
   a schema answers 200 with ordinary JSON — every caller-side sanitiser and validator stays
   exactly where it was.
 - **Background work never re-credentials.** Only calls made FOR a signed-in user go through
   `As`; enrichment, Telegram, and embeddings keep the service credential. See
-  internal/llmkey/AGENTS.md for the credential-resolution side (lazy minting, feature tags,
+  internal/ai/llmkey/AGENTS.md for the credential-resolution side (lazy minting, feature tags,
   the test enforcing the background rule).
 
 ## Surface

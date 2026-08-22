@@ -5,12 +5,12 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
 
 | Package | Use case | Worker |
 |---|---|---|
-| `internal/notify` | Filter subscriptions — new jobs matching a saved search | `cmd/notify` |
-| `internal/reminder` | Saved-job nudges — come back before the vacancy goes stale | `cmd/remind` |
-| `internal/nudge` | Lifecycle nudges — an application went silent past its stage's threshold, or moved into `interview` | `cmd/nudge` |
-| `internal/emailnotify` | Email channel (SES) — implements `notify.Notifier` (the `reminder`/`nudge`-side email transports live in their own `transports.go`) | — |
-| `internal/telegramnotify` | Telegram channel (Bot API, deep-link token) | — |
-| `internal/pushnotify` | Mobile push channel (Expo relay) — the bare Expo transport; each of `notify`/`reminder`/`nudge` has its own thin `PushNotifier` on top, same as Telegram/email | — |
+| `internal/engage/notify` | Filter subscriptions — new jobs matching a saved search | `cmd/notify` |
+| `internal/engage/reminder` | Saved-job nudges — come back before the vacancy goes stale | `cmd/remind` |
+| `internal/engage/nudge` | Lifecycle nudges — an application went silent past its stage's threshold, or moved into `interview` | `cmd/nudge` |
+| `internal/engage/emailnotify` | Email channel (SES) — implements `notify.Notifier` (the `reminder`/`nudge`-side email transports live in their own `transports.go`) | — |
+| `internal/engage/telegramnotify` | Telegram channel (Bot API, deep-link token) | — |
+| `internal/engage/pushnotify` | Mobile push channel (Expo relay) — the bare Expo transport; each of `notify`/`reminder`/`nudge` has its own thin `PushNotifier` on top, same as Telegram/email | — |
 
 ## Always true
 
@@ -21,7 +21,7 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
   digest notifier, a reminder transport, a nudge transport, a case in ALL THREE `recipient`
   functions, and a wire-up in all three `cmd` mains — confirmed by push, the third channel to
   actually land this way (`add-push-notification-channel`). Collapsing the three engines into one
-  is still not done: `internal/nudge` was a third **use case** over the same channels and didn't
+  is still not done: `internal/engage/nudge` was a third **use case** over the same channels and didn't
   trigger it, and landing push — a third **channel** — didn't either, since the duplication is
   three small, near-identical `PushNotifier`s (a few lines of message-rendering each) rather than
   three copies of anything structurally significant. Revisit if a fourth channel makes the
@@ -71,12 +71,12 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
   matched jobs, DELIVER leases them and marks them notified — so re-scanning recent jobs
   never delivers twice. Preserve the two-stage split; merging match and send loses the
   guarantee.
-- **`internal/nudge`'s dedup key adds an "episode key"** — the fact that must change before a
+- **`internal/engage/nudge`'s dedup key adds an "episode key"** — the fact that must change before a
   re-notify is warranted (an application's `last_activity_at` for a follow-up nudge, a
   `stage_set` event's `occurred_at` for interview-prep) — alongside `(user, job, kind)`. This is
   what lets MATCH re-scan the same still-silent application every pass without re-pinging it: the
   episode key is unchanged, so the insert is a no-op against `application_nudges`' unique index.
-  No snooze interval, no notified-count column. `internal/reminder`/`internal/notify` don't need
+  No snooze interval, no notified-count column. `internal/engage/reminder`/`internal/engage/notify` don't need
   this — a reminder fires once from a pre-scheduled `fire_at`, a subscription match is a distinct
   `(subscription, job)` pair already.
 - **A digest is bounded twice, and the two bounds are not the same number.** `Digest.Jobs` is
@@ -97,13 +97,13 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
   (`DeleteNotification`) — best-effort: if that delete also fails it is logged, and one history
   row describes a digest nobody received. A failed *recording* is non-fatal in the other
   direction — the digest goes out with `NotificationID` zero and each channel's tail falls back
-  to `/my/notifications`. `internal/reminder` and `internal/nudge` still record after delivery
+  to `/my/notifications`. `internal/engage/reminder` and `internal/engage/nudge` still record after delivery
   and discard the returned id.
 - `DigestJob` deliberately carries **no internal job id** — only the public slug and URL.
 - **The Telegram link token is deliberately NOT a JWT.** Telegram's deep-link `start`
   parameter allows only 1–64 chars of `[A-Za-z0-9_-]`, which a dotted ~200-char JWT
   violates, so the token is a ~43-char base64url(payload‖truncated-HMAC) blob signed with
-  `JWT_SECRET` (`internal/telegramnotify`). The 4096-char message cap is measured the way
+  `JWT_SECRET` (`internal/engage/telegramnotify`). The 4096-char message cap is measured the way
   Telegram measures it — UTF-16 code units, with the widest possible "+ N more" tail
   reserved up front — because an oversized digest fails deterministically, every retry
   re-fails, and the whole batch is dead-lettered.
@@ -112,7 +112,7 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
 
 ## Note on naming
 
-`internal/telegramnotify` (outbound, notifications) is the sibling of `internal/telegram`
+`internal/engage/telegramnotify` (outbound, notifications) is the sibling of `internal/ingest/telegram`
 (inbound, channel crawling for vacancies). They are unrelated concerns that both talk to the
 Bot API — check which one you're in.
 

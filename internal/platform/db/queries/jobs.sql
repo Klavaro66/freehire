@@ -148,7 +148,7 @@ FROM jobs
 WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: GetSimilarJobIDs :one
--- Narrow read for GET /jobs/:slug/similar (internal/handler/similar.go): only the
+-- Narrow read for GET /jobs/:slug/similar (internal/api/handler/similar.go): only the
 -- precomputed neighbour-id list (jobs.similar_job_ids, populated by
 -- cmd/similar-backfill — see semantic.sql's job_semantic_chunks section), not the
 -- whole wide job row. Mirrors GetJobDescriptionsByIDs's "narrow projection for a
@@ -180,7 +180,7 @@ SELECT (
 
 -- name: CountCatalogueScale :one
 -- Exact open-job and company totals for the published catalogue-scale snapshot
--- (internal/catalogstats). Deliberately the opposite trade to EstimateOpenJobs below:
+-- (internal/ingest/catalogstats). Deliberately the opposite trade to EstimateOpenJobs below:
 -- this is a full scan and belongs only in the scheduled rollup worker, never on a
 -- request path.
 --
@@ -223,7 +223,7 @@ LIMIT $2 OFFSET $3;
 -- countries/regions ARE written here: they are source facts parsed from the
 -- location, not enrichment. COALESCE maps a nil arg to '{}', so a location that
 -- yields no geography stores empty arrays (the columns are NOT NULL).
--- content_hash is the incremental-index change signal (internal/jobhash): the
+-- content_hash is the incremental-index change signal (internal/job/jobhash): the
 -- `existing` CTE captures the row's pre-update hash (snapshot from before this
 -- statement), so RETURNING can report whether the write inserted a new row
 -- (`inserted`) or changed its searchable content (`changed`, true on insert and
@@ -308,7 +308,7 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     salary_currency_source = EXCLUDED.salary_currency_source,
     salary_period_source   = EXCLUDED.salary_period_source,
     content_hash = EXCLUDED.content_hash,
-    -- role_fingerprint is the repost-identity (internal/jobhash.RoleFingerprint):
+    -- role_fingerprint is the repost-identity (internal/job/jobhash.RoleFingerprint):
     -- refreshed on re-ingest so a title/description edit re-clusters the role.
     role_fingerprint = EXCLUDED.role_fingerprint,
     -- The crawl saw the posting: refresh liveness and reopen if it was closed. A
@@ -334,7 +334,7 @@ RETURNING sqlc.embed(jobs),
 -- name: BackfillBoardCompany :one
 -- Fills company/company_slug/company_slug_folded for rows still blank under one board of a
 -- provider whose adapter sets Company statically per board (see cmd/backfill-blank-company for
--- which providers qualify and why). board_pattern is sources.BoardIDPattern(board) — the
+-- which providers qualify and why). board_pattern is externalid.BoardPattern(board) — the
 -- board's external_id namespace, so only this board's rows move. Also enqueues every touched
 -- OPEN job into search_outbox, mirroring UpsertJob/EnqueueSearchOutbox's denormalized
 -- job_posted_at, since this write bypasses the normal ingest path that would do it inline.
@@ -379,7 +379,7 @@ WHERE source = sqlc.arg(source) AND company = '' AND external_id LIKE sqlc.arg(b
 --
 -- updated_at is deliberately NOT stamped, so the column comes to mean "content last changed"
 -- rather than "last crawled". Two live readers see that: the jobs sitemap serves it as <lastmod>
--- (ListJobSitemapFreshest -> internal/handler/sitemap.go), where a timestamp that stopped
+-- (ListJobSitemapFreshest -> internal/api/handler/sitemap.go), where a timestamp that stopped
 -- claiming every posting changed on every crawl is the honest signal rather than the one search
 -- engines learn to discount; and jobview puts it on the public wire. It also makes
 -- ListJobsUpdatedAfter viable for the first time — that query is currently dormant (no caller,
@@ -518,7 +518,7 @@ LIMIT 1;
 -- must keep doing so — this marks the single row an import just wrote.
 --
 -- Writes duplicate_of_role, not duplicate_of, and the name says so. Both callers
--- (cmd/ingest/store.go, internal/linkimport) resolve their canon through
+-- (cmd/ingest/store.go, internal/ingest/linkimport) resolve their canon through
 -- jobdedup.CanonicalForRole, so this is the role verdict arriving early — the same clustering
 -- the batch pass would reach hours later. A write to duplicate_of itself would not survive:
 -- the derivation in migration 0115 recomputes it from the owned columns.
@@ -644,7 +644,7 @@ WHERE closed_at IS NULL AND company_slug <> '' AND duplicate_of IS NOT NULL;
 -- hours under ordinary host load, most of it network/planning overhead rather than
 -- query cost. Batching multiple companies into ONE statement is safe here without any
 -- extra cross-company guard: role_fingerprint is sha256(company_slug, title,
--- description) (internal/jobhash.RoleFingerprint) with company_slug as its FIRST
+-- description) (internal/job/jobhash.RoleFingerprint) with company_slug as its FIRST
 -- component, so a fingerprint collision between two different companies is not a
 -- realistic concern — grouping by role_fingerprint alone, across the whole batch,
 -- cannot merge two different companies' rows. Canon = min(id) among a role's open rows;
@@ -1005,7 +1005,7 @@ RETURNING *;
 -- Creates a job visible only to its creator: the jd-tailor-intake private-JD path
 -- (pasted text, or a URL only a generic scrape could read). Always a plain INSERT,
 -- never an upsert — external_id is a synthetic value scoped to this one submission
--- (see internal/privatejob), never compared against the public (source, external_id)
+-- (see internal/job/privatejob), never compared against the public (source, external_id)
 -- dedup space, so two submissions never collide and this never conflicts with an
 -- existing row.
 --
@@ -1272,7 +1272,7 @@ WHERE source = sqlc.arg(source)
 -- text_pattern_ops), whose operator class compares byte-wise. A range predicate over the plain
 -- index (external_id >= 'board:' AND < 'board;') looks equivalent and is NOT: under the database's
 -- collation punctuation carries only a secondary weight, so that range returns nothing at all.
--- The caller passes an escaped pattern (sources.BoardIDPattern) — a board name may contain LIKE
+-- The caller passes an escaped pattern (externalid.BoardPattern) — a board name may contain LIKE
 -- syntax, and an unescaped underscore would match a sibling board.
 --
 -- hydration_cutoff withholds a still-body-less row from the seen-set so its detail is retried;
@@ -1501,8 +1501,8 @@ WHERE id = sqlc.arg(id);
 -- deterministic dictionary facets (countries, regions, cities, work_mode, skills,
 -- seniority, category, is_tech, plus the synthetic enrichment facets posting_language,
 -- employment_type, education_level, english_level, experience_years_min, all from
--- jobderive.Derive), the repost-identity role_fingerprint (internal/jobhash), and the
--- public_slug/company_slug (internal/normalize). One keyset scan propagates any
+-- jobderive.Derive), the repost-identity role_fingerprint (internal/job/jobhash), and the
+-- public_slug/company_slug (internal/dict/normalize). One keyset scan propagates any
 -- dictionary/algorithm change to old and closed rows that never re-crawl. Every column
 -- is a pure function of the raw fields, so the write is idempotent. COALESCE maps a nil
 -- array arg to '{}' for the NOT NULL array columns; work_mode is written as given by the

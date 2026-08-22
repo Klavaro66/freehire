@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Re-request `skills` in the enrichment LLM prompt/schema so `Enrichment.Skills` starts populating again, as a raw discovery signal for future `internal/skilltag` dictionary expansion.
+**Goal:** Re-request `skills` in the enrichment LLM prompt/schema so `Enrichment.Skills` starts populating again, as a raw discovery signal for future `internal/dict/skilltag` dictionary expansion.
 
-**Architecture:** Two-line-ish edit to `internal/enrich/langchain.go` (prompt) and `internal/enrich/schema.go` (request schema), plus a comment fix in `internal/enrich/enrichment.go`. No new files, no struct/DB change, no `enrich.Version` bump.
+**Architecture:** Two-line-ish edit to `internal/ai/enrich/langchain.go` (prompt) and `internal/ai/enrich/schema.go` (request schema), plus a comment fix in `internal/ai/enrich/enrichment.go`. No new files, no struct/DB change, no `enrich.Version` bump.
 
-**Tech Stack:** Go, `internal/enrich` package (existing LLM structured-output pipeline).
+**Tech Stack:** Go, `internal/ai/enrich` package (existing LLM structured-output pipeline).
 
 ## Global Constraints
 
@@ -21,8 +21,8 @@
 ### Task 1: Prompt — re-request `skills` in `buildSystemPrompt`
 
 **Files:**
-- Modify: `internal/enrich/langchain.go:128-134` (the "Other keys" line inside `buildSystemPrompt`)
-- Test: `internal/enrich/langchain_test.go`
+- Modify: `internal/ai/enrich/langchain.go:128-134` (the "Other keys" line inside `buildSystemPrompt`)
+- Test: `internal/ai/enrich/langchain_test.go`
 
 **Interfaces:**
 - Consumes: nothing new — `buildSystemPrompt(askGeo bool) string` keeps its existing signature.
@@ -30,7 +30,7 @@
 
 - [ ] **Step 1: Edit `TestSystemPromptOmitsDictBackedFacets` to drop `skills`**
 
-Current test body (`internal/enrich/langchain_test.go:60-71`):
+Current test body (`internal/ai/enrich/langchain_test.go:60-71`):
 
 ```go
 func TestSystemPromptOmitsDictBackedFacets(t *testing.T) {
@@ -66,7 +66,7 @@ func TestSystemPromptOmitsDictBackedFacets(t *testing.T) {
 
 - [ ] **Step 2: Add `skills` to `TestSystemPromptKeepsServedAndHybridFields`**
 
-Current test body (`internal/enrich/langchain_test.go:78-96`):
+Current test body (`internal/ai/enrich/langchain_test.go:78-96`):
 
 ```go
 func TestSystemPromptKeepsServedAndHybridFields(t *testing.T) {
@@ -118,13 +118,13 @@ func TestSystemPromptKeepsServedAndHybridFields(t *testing.T) {
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `go test ./internal/enrich/... -run TestSystemPromptOmitsDictBackedFacets -v` — Expected: PASS (skills was never in the prompt yet, so its absence still holds; this one should already pass, confirming step 1 didn't break anything).
+Run: `go test ./internal/ai/enrich/... -run TestSystemPromptOmitsDictBackedFacets -v` — Expected: PASS (skills was never in the prompt yet, so its absence still holds; this one should already pass, confirming step 1 didn't break anything).
 
-Run: `go test ./internal/enrich/... -run TestSystemPromptKeepsServedAndHybridFields -v` — Expected: FAIL with `prompt must still request served/hybrid field "skills"`.
+Run: `go test ./internal/ai/enrich/... -run TestSystemPromptKeepsServedAndHybridFields -v` — Expected: FAIL with `prompt must still request served/hybrid field "skills"`.
 
 - [ ] **Step 4: Edit `buildSystemPrompt` to re-request `skills`**
 
-In `internal/enrich/langchain.go`, find this block (currently lines 128-134):
+In `internal/ai/enrich/langchain.go`, find this block (currently lines 128-134):
 
 ```go
 	b.WriteString("\nOther keys (null when unstated): ")
@@ -151,7 +151,7 @@ Replace the last line to add `skills` after the salary fields (matching the pre-
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `go test ./internal/enrich/... -run 'TestSystemPromptOmitsDictBackedFacets|TestSystemPromptKeepsServedAndHybridFields' -v`
+Run: `go test ./internal/ai/enrich/... -run 'TestSystemPromptOmitsDictBackedFacets|TestSystemPromptKeepsServedAndHybridFields' -v`
 
 Expected: both PASS.
 
@@ -159,7 +159,7 @@ Expected: both PASS.
 
 ```bash
 cd /Users/i_strelov/Projects/hire
-git add internal/enrich/langchain.go internal/enrich/langchain_test.go
+git add internal/ai/enrich/langchain.go internal/ai/enrich/langchain_test.go
 git commit -m "enrich: re-request skills in the LLM prompt as a discovery facet"
 ```
 
@@ -168,16 +168,16 @@ git commit -m "enrich: re-request skills in the LLM prompt as a discovery facet"
 ### Task 2: Schema — stop omitting `skills` from the request schema
 
 **Files:**
-- Modify: `internal/enrich/schema.go:23-27` (`unaskedFields`)
-- Test: `internal/enrich/schema_test.go`
+- Modify: `internal/ai/enrich/schema.go:23-27` (`unaskedFields`)
+- Test: `internal/ai/enrich/schema_test.go`
 
 **Interfaces:**
-- Consumes: `requestSchema(askGeo bool) (llmschema.Schema, string, error)` (unchanged signature) and `schemaProps(t *testing.T, askGeo bool) map[string]any` test helper (unchanged, `internal/enrich/schema_test.go:10-23`).
+- Consumes: `requestSchema(askGeo bool) (llmschema.Schema, string, error)` (unchanged signature) and `schemaProps(t *testing.T, askGeo bool) map[string]any` test helper (unchanged, `internal/ai/enrich/schema_test.go:10-23`).
 - Produces: `schemaProps(t, true)["skills"]` now exists. `unaskedFields` no longer contains `"skills"` — `Task 3`'s comment fix references this list.
 
 - [ ] **Step 1: Add `skills` to `TestRequestSchema_CarriesTheFieldsThePromptAsksFor`**
 
-Current test body (`internal/enrich/schema_test.go:67-80`):
+Current test body (`internal/ai/enrich/schema_test.go:67-80`):
 
 ```go
 func TestRequestSchema_CarriesTheFieldsThePromptAsksFor(t *testing.T) {
@@ -215,13 +215,13 @@ func TestRequestSchema_CarriesTheFieldsThePromptAsksFor(t *testing.T) {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `go test ./internal/enrich/... -run TestRequestSchema_CarriesTheFieldsThePromptAsksFor -v`
+Run: `go test ./internal/ai/enrich/... -run TestRequestSchema_CarriesTheFieldsThePromptAsksFor -v`
 
 Expected: FAIL with `schema is missing "skills"`.
 
 - [ ] **Step 3: Remove `skills` from `unaskedFields`**
 
-In `internal/enrich/schema.go`, current:
+In `internal/ai/enrich/schema.go`, current:
 
 ```go
 var unaskedFields = []string{
@@ -243,20 +243,20 @@ var unaskedFields = []string{
 
 - [ ] **Step 4: Run the full schema test file to verify everything still passes**
 
-Run: `go test ./internal/enrich/... -run TestRequestSchema -v`
+Run: `go test ./internal/ai/enrich/... -run TestRequestSchema -v`
 
 Expected: PASS, including `TestRequestSchema_DoesNotAskForDictionaryCoveredFacets` (it iterates `unaskedFields` directly, so removing `"skills"` from that slice automatically stops it being checked there — no edit needed to that test) and the newly-updated `TestRequestSchema_CarriesTheFieldsThePromptAsksFor`.
 
 - [ ] **Step 5: Confirm `unaskedFields`'s doc comment needs no wording change**
 
-Read `internal/enrich/schema.go:18-22` — the comment above `unaskedFields`:
+Read `internal/ai/enrich/schema.go:18-22` — the comment above `unaskedFields`:
 
 ```go
 // unaskedFields are contract fields the prompt deliberately does not request, so the
 // schema must not either. Under strict mode every property is required — leaving one
 // in would order the model to produce a value that `jobview` then discards, which is
 // the token burn `enrich-prompt-trim` removed. They are served from the deterministic
-// dictionaries (`internal/jobderive`), not the LLM.
+// dictionaries (`internal/job/jobderive`), not the LLM.
 ```
 
 This comment describes the slice generically and never names `skills` (unlike
@@ -269,7 +269,7 @@ action" rather than a silently skipped one.
 
 ```bash
 cd /Users/i_strelov/Projects/hire
-git add internal/enrich/schema.go internal/enrich/schema_test.go
+git add internal/ai/enrich/schema.go internal/ai/enrich/schema_test.go
 git commit -m "enrich: stop omitting skills from the request schema"
 ```
 
@@ -278,7 +278,7 @@ git commit -m "enrich: stop omitting skills from the request schema"
 ### Task 3: Comment fix — `Validate`'s doc comment no longer describes `skills` as unrequested
 
 **Files:**
-- Modify: `internal/enrich/enrichment.go:113-121` (the doc comment on `Validate`)
+- Modify: `internal/ai/enrich/enrichment.go:113-121` (the doc comment on `Validate`)
 
 **Interfaces:**
 - Consumes: nothing (comment-only change).
@@ -288,7 +288,7 @@ This task has no RED/GREEN cycle — it is a comment-only fix with nothing to as
 
 - [ ] **Step 1: Confirm the current wording is now stale**
 
-Read `internal/enrich/enrichment.go:113-121`:
+Read `internal/ai/enrich/enrichment.go:113-121`:
 
 ```go
 // Validate checks every SERVED enum field against its controlled vocabulary and
@@ -326,16 +326,16 @@ func (e Enrichment) Validate() error {
 
 - [ ] **Step 3: Sweep for any other stale `skills` reference**
 
-Run: `grep -n "skills" internal/enrich/*.go | grep -v _test.go`
+Run: `grep -n "skills" internal/ai/enrich/*.go | grep -v _test.go`
 
 Expected matches, all already correct after Steps 1-2 and Task 2, nothing else:
 
-- `internal/enrich/enrichment_unmarshal.go:107` — the `Skills sliceOrWrap` unmarshal
+- `internal/ai/enrich/enrichment_unmarshal.go:107` — the `Skills sliceOrWrap` unmarshal
   field (unrelated to this change, always correct).
-- `internal/enrich/enrichment.go:79` — the `Skills []string` struct field itself.
+- `internal/ai/enrich/enrichment.go:79` — the `Skills []string` struct field itself.
 - Two lines inside the new `Validate` comment from Step 2 (the "numbers, skills)
   are unconstrained" line and the new "skills is requested from the LLM too" line).
-- **`internal/enrich/schema.go` must have ZERO matches** — `unaskedFields` no
+- **`internal/ai/enrich/schema.go` must have ZERO matches** — `unaskedFields` no
   longer contains `"skills"` (Task 2 Step 3) and its doc comment never named
   `skills` (Task 2 Step 5), so nothing in that file should mention it.
 
@@ -345,7 +345,7 @@ exists to catch anything this plan's authoring pass missed.
 
 - [ ] **Step 4: Verify the package still builds**
 
-Run: `go build ./internal/enrich/... && go vet ./internal/enrich/...`
+Run: `go build ./internal/ai/enrich/... && go vet ./internal/ai/enrich/...`
 
 Expected: no errors (comment-only change).
 
@@ -353,7 +353,7 @@ Expected: no errors (comment-only change).
 
 ```bash
 cd /Users/i_strelov/Projects/hire
-git add internal/enrich/enrichment.go
+git add internal/ai/enrich/enrichment.go
 git commit -m "enrich: fix Validate's doc comment now that skills is requested again"
 ```
 
@@ -365,9 +365,9 @@ git commit -m "enrich: fix Validate's doc comment now that skills is requested a
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Run the full `internal/enrich` package test suite**
+- [ ] **Step 1: Run the full `internal/ai/enrich` package test suite**
 
-Run: `go test ./internal/enrich/... -v`
+Run: `go test ./internal/ai/enrich/... -v`
 
 Expected: all tests PASS, including every test named in Tasks 1-2 plus the untouched tests (`TestValidateAcceptsOutOfVocabDiscoveryFacets`, `TestSanitizeDropsOutOfVocabValues`, etc. in `enrichment_test.go`) — none of those should need edits, since `Sanitize`/`Validate` behavior is unchanged.
 
@@ -391,9 +391,9 @@ Expected: `Change "restore-skills-discovery" is valid` (already confirmed once w
 
 - [ ] **Step 5: Confirm no version bump or backfill code was introduced**
 
-Run: `git diff f2fb432d..HEAD --stat` (from `/Users/i_strelov/Projects/hire`) and confirm the file list is exactly: `internal/enrich/langchain.go`, `internal/enrich/langchain_test.go`, `internal/enrich/schema.go`, `internal/enrich/schema_test.go`, `internal/enrich/enrichment.go`.
+Run: `git diff f2fb432d..HEAD --stat` (from `/Users/i_strelov/Projects/hire`) and confirm the file list is exactly: `internal/ai/enrich/langchain.go`, `internal/ai/enrich/langchain_test.go`, `internal/ai/enrich/schema.go`, `internal/ai/enrich/schema_test.go`, `internal/ai/enrich/enrichment.go`.
 
-Also run: `git diff f2fb432d..HEAD -- internal/enrich/enrichment.go internal/enrich | grep -n "Version"`
+Also run: `git diff f2fb432d..HEAD -- internal/ai/enrich/enrichment.go internal/ai/enrich | grep -n "Version"`
 
 Expected: no output (or only unrelated matches unconnected to `enrich.Version`) —
 confirms the Global Constraint ("do NOT bump `enrich.Version`; do NOT write any

@@ -5,9 +5,9 @@ Turning a job URL into the company board it belongs to — `(source, board, cano
 nothing but the URL. No network, no database.
 
 ## Always true
-- **One definition, three consumers.** `internal/contribution` uses it to decide which board a
-  pasted link would onboard, `internal/linksource` (board coverage) uses it to find the ingest
-  adapter that can fetch that board, and `internal/boardresolve` uses it to identify an ATS
+- **One definition, three consumers.** `internal/ingest/contribution` uses it to decide which board a
+  pasted link would onboard, `internal/ingest/linksource` (board coverage) uses it to find the ingest
+  adapter that can fetch that board, and `internal/ingest/boardresolve` uses it to identify an ATS
   embedded in a company's own careers page. It lives here so a host added once is recognised by
   all three; it used to live in `contribution`, which `boardresolve` already reached across for.
 - **The `source` MUST be the provider key the catalogue uses** — the string an ingest adapter's
@@ -42,7 +42,7 @@ nothing but the URL. No network, no database.
 ## Limitations
 - **Vanity domains are invisible here.** Recognition keys on host, so a supported ATS behind a
   company's own domain (`careers.peraton.com` on iCIMS, `jobs.ea.com` on Avature) yields
-  nothing — the largest category in the review queue. `internal/boardresolve` fetches the page
+  nothing — the largest category in the review queue. `internal/ingest/boardresolve` fetches the page
   and detects the embedded board; this package stays network-free.
 - Custom-domain ATS (Taleo, SuccessFactors, Oracle, Workday tenants on their own domain) are
   absent on purpose: their board cannot be derived from a URL at all.

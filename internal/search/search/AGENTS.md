@@ -3,22 +3,22 @@
 Meilisearch-backed keyword/faceted search over jobs and companies. The package doc in
 `client.go` explains the index topology; this file covers what the code can't tell you.
 This package also owns the TEI embedding calls (`embed.go`) that feed the pgvector-backed
-`job_semantic_chunks` table — see `internal/embed/AGENTS.md`. There is no live semantic
+`job_semantic_chunks` table — see `internal/ai/embed/AGENTS.md`. There is no live semantic
 search index anymore: the
 `jobs_semantic` Meilisearch index (and `reindex --semantic`/`--from-pg`/`--posted-within`,
 `SearchParams.SemanticRatio`, `Client.SimilarJobs`/`RecommendByVector`/`EmbedText`) were
 removed in openspec/changes/drop-hybrid-search-pgvector-similar — `/jobs/:slug/similar`
-reads a precomputed pgvector lookup instead (`internal/similarjobs`,
+reads a precomputed pgvector lookup instead (`internal/search/similarjobs`,
 `cmd/similar-backfill`), and `/me/recommendations` was dropped outright.
 
 ## Always true
 
 - **A job whose category is unresolved by both the title dictionary and the LLM never
   enters the index.** `search.CategoryUnresolved` (`document.go`) reports true when
-  `jobs.category` is empty (`internal/classify` found nothing in the title) AND the raw
+  `jobs.category` is empty (`internal/dict/classify` found nothing in the title) AND the raw
   LLM enrichment's own `category` is also empty or the catch-all `"other"` — read from
   the raw JSON, not `jobview`'s folded `Enrichment.Category`, which the dictionary
-  column always overwrites (`internal/classify/AGENTS.md`) and so never carries the
+  column always overwrites (`internal/dict/classify/AGENTS.md`) and so never carries the
   LLM's answer. Both `cmd/reindex`'s `splitJobs` and `cmd/search-drain`'s `IndexBatch`
   apply it — added because this bucket was measured at ~65% of the open catalogue
   (broad multi-industry ATS crawls contribute postings like "Industrial Painter" or
@@ -35,7 +35,7 @@ reads a precomputed pgvector lookup instead (`internal/similarjobs`,
   job existing, and a later crawl can hydrate it), so a body-less row is a recoverable ingest
   state, not an error — but a vacancy page with a title and nothing under it is not a listing
   anyone can act on. `cmd/reindex`'s `splitJobs`, `cmd/search-drain`'s `IndexBatch`, and
-  `internal/linkimport` all apply it, alongside `CategoryUnresolved`. Measured at 15,816 live
+  `internal/ingest/linkimport` all apply it, alongside `CategoryUnresolved`. Measured at 15,816 live
   rows (0.48% of the open catalogue) when the rule was added (freehire#1866). The exclusion is
   self-healing: a row re-enters the index the moment a crawl fills its description, with no
   backfill or manual step.
@@ -66,7 +66,7 @@ reads a precomputed pgvector lookup instead (`internal/similarjobs`,
   to enqueue, including `is_tech` (deliberately excluded from `jobhash.Of()`, so an
   is_tech-only flip needs a full reindex or some other change to the same row to reach
   the index).
-- `SubmitJobs` submits **without awaiting** the Meili task (`internal/linkimport`'s single
+- `SubmitJobs` submits **without awaiting** the Meili task (`internal/ingest/linkimport`'s single
   on-demand doc push — `cmd/resolve-url` and the browser extension's "add this page", both
   human-triggered and low-volume, so one unawaited push per action is fine); `IndexJobs`
   awaits (the reindex path AND `cmd/search-drain`'s wave push — a wrong/silently-dropped
@@ -77,7 +77,7 @@ reads a precomputed pgvector lookup instead (`internal/similarjobs`,
   unawaited pushes queue up and saturate host disk IO. That is exactly what happened when
   `cmd/ingest` called it once per crawl across ~169 independent per-board processes; the
   fix routes that traffic through `search_outbox` + `cmd/search-drain` instead (see
-  `internal/searchdrain`), collapsing many small pushes into few, fat, awaited ones.
+  `internal/search/searchdrain`), collapsing many small pushes into few, fat, awaited ones.
 - `swapIndexes` calls `POST /swap-indexes` over raw HTTP, not the SDK: the pinned
   meilisearch-go always serializes a `rename` field that engine v1.13 rejects.
 - Indexed descriptions are capped at `maxIndexedDescriptionRunes`; `maxTotalHits` is the

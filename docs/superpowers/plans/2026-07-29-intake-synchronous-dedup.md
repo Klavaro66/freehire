@@ -21,8 +21,8 @@ This plan is the step-by-step expansion of those tasks; if the two disagree, Ope
 ## Global Constraints
 
 - English only in code, comments, identifiers, commits.
-- `internal/db/` is generated. Edit `internal/db/queries/*.sql`, then run `make sqlc`. Never
-  hand-edit `internal/db/*.sql.go`.
+- `internal/platform/db/` is generated. Edit `internal/platform/db/queries/*.sql`, then run `make sqlc`. Never
+  hand-edit `internal/platform/db/*.sql.go`.
 - Never edit an applied migration. This plan needs no migration — the
   `(company_slug, role_fingerprint)` index already exists (`migrations/0003_role_fingerprint.sql`).
 - Integration tests run with `go test -tags=integration ./internal/<pkg>/` and need Docker.
@@ -35,9 +35,9 @@ This plan is the step-by-step expansion of those tasks; if the two disagree, Ope
 ### Task 1: The two queries
 
 **Files:**
-- Modify: `internal/db/queries/jobs.sql` (add two queries)
-- Generated (do not hand-edit): `internal/db/jobs.sql.go`, `internal/db/querier.go`
-- Test: `internal/db/canonical_job_for_role_integration_test.go` (create)
+- Modify: `internal/platform/db/queries/jobs.sql` (add two queries)
+- Generated (do not hand-edit): `internal/platform/db/jobs.sql.go`, `internal/platform/db/querier.go`
+- Test: `internal/platform/db/canonical_job_for_role_integration_test.go` (create)
 
 **Interfaces:**
 - Produces: `db.CanonicalJobForRole(ctx, CanonicalJobForRoleParams{CompanySlug, RoleFingerprint, Source, ExternalID string}) (db.CanonicalJobForRoleRow, error)` returning `{ID int64; PublicSlug string}`, `pgx.ErrNoRows` when there is no canon.
@@ -45,14 +45,14 @@ This plan is the step-by-step expansion of those tasks; if the two disagree, Ope
 
 - [ ] **Step 1: Write the failing test**
 
-Create `internal/db/canonical_job_for_role_integration_test.go`:
+Create `internal/platform/db/canonical_job_for_role_integration_test.go`:
 
 ```go
 //go:build integration
 
 // Integration tests for the intake's synchronous dedup lookup: which posting, if any, a
 // freshly imported storefront row should be marked a duplicate of.
-// Run with: go test -tags=integration ./internal/db/
+// Run with: go test -tags=integration ./internal/platform/db/
 //
 // NOTE: package db, not db_test — the existing integration tests here live inside the package
 // and share the startPostgres helper from enrichment_integration_test.go. That is why the types
@@ -169,12 +169,12 @@ func TestMarkJobDuplicateOf(t *testing.T) {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `go test -tags=integration ./internal/db/ -run 'TestCanonicalJobForRole|TestMarkJobDuplicateOf'`
+Run: `go test -tags=integration ./internal/platform/db/ -run 'TestCanonicalJobForRole|TestMarkJobDuplicateOf'`
 Expected: compile failure — `q.CanonicalJobForRole` and `q.MarkJobDuplicateOf` are undefined.
 
 - [ ] **Step 3: Add the queries**
 
-Append to `internal/db/queries/jobs.sql`, right after `RecomputeRoleDuplicatesForCompany`:
+Append to `internal/platform/db/queries/jobs.sql`, right after `RecomputeRoleDuplicatesForCompany`:
 
 ```sql
 -- name: CanonicalJobForRole :one
@@ -208,17 +208,17 @@ WHERE id = sqlc.arg(id);
 
 - [ ] **Step 4: Regenerate and run the test**
 
-Run: `make sqlc && go test -tags=integration ./internal/db/ -run 'TestCanonicalJobForRole|TestMarkJobDuplicateOf'`
+Run: `make sqlc && go test -tags=integration ./internal/platform/db/ -run 'TestCanonicalJobForRole|TestMarkJobDuplicateOf'`
 Expected: PASS.
 
 Check the generated signature is the one later tasks rely on:
-`grep -n "func (q \*Queries) CanonicalJobForRole" internal/db/jobs.sql.go`
+`grep -n "func (q \*Queries) CanonicalJobForRole" internal/platform/db/jobs.sql.go`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/db/queries/jobs.sql internal/db/jobs.sql.go internal/db/querier.go \
-        internal/db/canonical_job_for_role_integration_test.go
+git add internal/platform/db/queries/jobs.sql internal/platform/db/jobs.sql.go internal/platform/db/querier.go \
+        internal/platform/db/canonical_job_for_role_integration_test.go
 git commit -m "feat(db): ask for the canonical posting of a role cluster"
 ```
 
@@ -227,8 +227,8 @@ git commit -m "feat(db): ask for the canonical posting of a role cluster"
 ### Task 2: Mark the imported row
 
 **Files:**
-- Modify: `internal/linkimport/linkimport.go` (`Result` struct ~line 33; `write` ~line 170)
-- Test: `internal/linkimport/import_integration_test.go`
+- Modify: `internal/ingest/linkimport/linkimport.go` (`Result` struct ~line 33; `write` ~line 170)
+- Test: `internal/ingest/linkimport/import_integration_test.go`
 
 **Interfaces:**
 - Consumes: `db.CanonicalJobForRole`, `db.MarkJobDuplicateOf` from Task 1.
@@ -237,7 +237,7 @@ git commit -m "feat(db): ask for the canonical posting of a role cluster"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `internal/linkimport/import_integration_test.go`:
+Append to `internal/ingest/linkimport/import_integration_test.go`:
 
 ```go
 func TestImportCollapsesOntoACrawledPosting(t *testing.T) {
@@ -305,16 +305,16 @@ func fingerprintOf(t *testing.T, title, companySlug string) string {
 }
 ```
 
-Imports to add to the test file: `"github.com/strelov1/freehire/internal/jobhash"`.
+Imports to add to the test file: `"github.com/strelov1/freehire/internal/job/jobhash"`.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `go test -tags=integration ./internal/linkimport/ -run TestImportCollapsesOntoACrawledPosting`
+Run: `go test -tags=integration ./internal/ingest/linkimport/ -run TestImportCollapsesOntoACrawledPosting`
 Expected: compile failure — `res.Deduped` undefined.
 
 - [ ] **Step 3: Add the field**
 
-In `internal/linkimport/linkimport.go`, extend `Result`:
+In `internal/ingest/linkimport/linkimport.go`, extend `Result`:
 
 ```go
 	// Deduped reports that the catalogue already held this vacancy under a crawled source, so
@@ -327,12 +327,12 @@ In `internal/linkimport/linkimport.go`, extend `Result`:
 
 - [ ] **Step 4: Run the test to see it fail on behaviour, not compilation**
 
-Run: `go test -tags=integration ./internal/linkimport/ -run TestImportCollapsesOntoACrawledPosting`
+Run: `go test -tags=integration ./internal/ingest/linkimport/ -run TestImportCollapsesOntoACrawledPosting`
 Expected: FAIL with `Deduped = false, want true`.
 
 - [ ] **Step 5: Implement the dedup in write**
 
-In `internal/linkimport/linkimport.go`, replace the body of `write` between `params.RoleFingerprint = …`
+In `internal/ingest/linkimport/linkimport.go`, replace the body of `write` between `params.RoleFingerprint = …`
 and `return Result{…}` with:
 
 ```go
@@ -417,7 +417,7 @@ Add imports if missing: `"errors"` and `"github.com/jackc/pgx/v5"`.
 
 - [ ] **Step 6: Run the whole package**
 
-Run: `go test -tags=integration ./internal/linkimport/`
+Run: `go test -tags=integration ./internal/ingest/linkimport/`
 Expected: PASS, including the pre-existing tests (an ordinary import with no canon must still
 be enqueued and indexed).
 
@@ -429,7 +429,7 @@ first statement, run the test, confirm it FAILS, then restore.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add internal/linkimport/
+git add internal/ingest/linkimport/
 git commit -m "feat(linkimport): a storefront import collapses onto the posting it duplicates"
 ```
 
@@ -438,8 +438,8 @@ git commit -m "feat(linkimport): a storefront import collapses onto the posting 
 ### Task 3: The intake answers found
 
 **Files:**
-- Modify: `internal/handler/intake.go` (`Resolve`)
-- Test: `internal/handler/resolve_job_integration_test.go`
+- Modify: `internal/api/handler/intake.go` (`Resolve`)
+- Test: `internal/api/handler/resolve_job_integration_test.go`
 
 **Interfaces:**
 - Consumes: `linkimport.Result.Deduped` from Task 2.
@@ -448,7 +448,7 @@ git commit -m "feat(linkimport): a storefront import collapses onto the posting 
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `TestResolveJobEndpoint` in `internal/handler/resolve_job_integration_test.go`:
+Add to `TestResolveJobEndpoint` in `internal/api/handler/resolve_job_integration_test.go`:
 
 ```go
 	t.Run("a vacancy we already carry answers found, and still records the board", func(t *testing.T) {
@@ -521,16 +521,16 @@ func fingerprintOf(t *testing.T, title, companySlug string) string {
 }
 ```
 
-Import to add: `"github.com/strelov1/freehire/internal/jobhash"`.
+Import to add: `"github.com/strelov1/freehire/internal/job/jobhash"`.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `go test -tags=integration ./internal/handler/ -run TestResolveJobEndpoint`
+Run: `go test -tags=integration ./internal/api/handler/ -run TestResolveJobEndpoint`
 Expected: FAIL — the status is `review`, not `found`.
 
 - [ ] **Step 3: Implement**
 
-In `internal/handler/intake.go`, inside `Resolve`, extend the outcome switch so a deduped import
+In `internal/api/handler/intake.go`, inside `Resolve`, extend the outcome switch so a deduped import
 answers `found`. Place the new case FIRST, before `!imported`:
 
 ```go
@@ -554,12 +554,12 @@ answers `found`. Place the new case FIRST, before `!imported`:
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `go test -tags=integration ./internal/handler/ -run TestResolveJobEndpoint`
+Run: `go test -tags=integration ./internal/api/handler/ -run TestResolveJobEndpoint`
 Expected: PASS, with every pre-existing subtest still green.
 
 - [ ] **Step 5: Update the docs that state the outcomes**
 
-- `internal/contribution/AGENTS.md`: the outcome list — note that `found` is reachable twice,
+- `internal/ingest/contribution/AGENTS.md`: the outcome list — note that `found` is reachable twice,
   once before any fetch (catalogue hit by URL) and once after an import that collapsed onto an
   existing posting.
 - `web/src/lib/docs/api-spec.ts`: the `/jobs/resolve` description — `found` also answers a link
@@ -571,7 +571,7 @@ Expected: PASS, with every pre-existing subtest still green.
 ```bash
 go build ./... && go vet ./... && gofmt -l internal cmd
 go test ./...
-go test -tags=integration ./internal/handler/ ./internal/linkimport/ ./internal/db/ ./internal/contribution/
+go test -tags=integration ./internal/api/handler/ ./internal/ingest/linkimport/ ./internal/platform/db/ ./internal/ingest/contribution/
 cd web && pnpm lint && pnpm build
 ```
 Expected: build/vet clean, `gofmt -l` silent, all tests pass, web lint 0 errors.
@@ -579,7 +579,7 @@ Expected: build/vet clean, `gofmt -l` silent, all tests pass, web lint 0 errors.
 - [ ] **Step 7: Commit and open the PR**
 
 ```bash
-git add internal/handler/ internal/contribution/AGENTS.md web/src/lib/docs/api-spec.ts docs/API.md
+git add internal/api/handler/ internal/ingest/contribution/AGENTS.md web/src/lib/docs/api-spec.ts docs/API.md
 git commit -m "feat(intake): a link to a vacancy we already carry answers found"
 git push -u origin feat/intake-sync-dedup
 gh pr create --title "feat(intake): collapse a storefront link onto the posting it duplicates" \

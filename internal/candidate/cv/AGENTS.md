@@ -1,7 +1,7 @@
-# internal/cv
+# internal/candidate/cv
 
 Per-user structured CVs (CRUD + seed + tailoring) and on-demand PDF rendering. The HTTP
-surface lives in `internal/handler/cv.go`; this package owns the domain, storage, and
+surface lives in `internal/api/handler/cv.go`; this package owns the domain, storage, and
 rendering.
 
 ## Templates
@@ -113,10 +113,10 @@ arrives through `Document.Style` — see **Typography** and **Fonts** above.
 
 ## The headshot (`portrait`, `headshot`)
 
-The photo is NOT part of `Document` — it is a profile asset owned by `internal/headshot`,
+The photo is NOT part of `Document` — it is a profile asset owned by `internal/candidate/headshot`,
 because a document is client-writable and travels into tailoring prompts. `Render` therefore
 takes it as a fourth argument, `photo []byte`, and the handler fetches it only when
-`tmpl.Photo` (`headshotForTemplate` in `internal/handler/photo.go`); a photoless template
+`tmpl.Photo` (`headshotForTemplate` in `internal/api/handler/photo.go`); a photoless template
 costs no bucket round trip.
 
 Three things a new photo template must respect:
@@ -164,7 +164,7 @@ current résumé seed (`bankedSeeder`: experience bank + `resume_structured`) an
 base CV from the same seed. Same tailored id and agent session; template/margins/style on each
 row are preserved. Upload alone does **not** write `cvs` — it only refreshes the seed source;
 this endpoint is the explicit apply. 409 when the target is not tailored, the seed is unusable,
-or the seed itself exceeds the bullet ceiling (see `internal/cvedit/AGENTS.md`).
+or the seed itself exceeds the bullet ceiling (see `internal/candidate/cvedit/AGENTS.md`).
 
 The tailored copy commits **before** the base refresh, not after: these are two separate
 `CommitDocument` calls, not one transaction, so ordering decides which one a mid-request
@@ -186,7 +186,7 @@ and would need a heuristic repair.
 
 `GET /me/cvs/:id/ats-delta` reports what tailoring did to a CV's ATS readiness. The scoring
 input is the **rendered PDF's text layer**, not the stored document: the orchestration lives in
-`internal/handler/cv_ats_delta.go` (render → `resume.ExtractPDFText` → `skilltag.Parse` →
+`internal/api/handler/cv_ats_delta.go` (render → `resume.ExtractPDFText` → `skilltag.Parse` →
 `atscheck.Score`), and the two-report comparison is `atscheck.Compare`. A document field the
 active template never renders therefore earns nothing — `sidebar` has no certifications block,
 and the handler test pins exactly that.
@@ -248,7 +248,7 @@ One edge remains, deliberately:
 
 ## Who may write a stored CV
 
-Nothing in this package writes `cvs.data`. `internal/cvedit` owns the only path, and the seam
+Nothing in this package writes `cvs.data`. `internal/candidate/cvedit` owns the only path, and the seam
 is held by absence rather than by review: `Store` has no method that writes a document at all
 (its one unexported helper, `tailoredForJob`, is a read), and `Repository` declares none either
 — one declared here, even unused, would be an invitation to write a document with no revision,

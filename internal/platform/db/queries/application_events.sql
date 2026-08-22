@@ -1,6 +1,6 @@
 -- name: ListApplicationEventsInRange :many
 -- One caller's live events over a date range, oldest first — the ledger's first dated
--- read, behind internal/apptimeline and the tracking calendar.
+-- read, behind internal/application/apptimeline and the tracking calendar.
 --
 -- Retracted rows are excluded here as they are in every other reader: a correction the
 -- calendar still showed under the wrong employer would be a correction its author cannot

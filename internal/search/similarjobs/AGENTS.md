@@ -2,7 +2,7 @@
 
 ## Scope
 Precomputes `GET /jobs/:slug/similar`'s data: for every job with embedding chunks
-(`job_semantic_chunks`, written by `internal/embed`) but no current
+(`job_semantic_chunks`, written by `internal/ai/embed`) but no current
 `jobs.similar_job_ids`, runs the nearest-neighbour-over-chunks rollup
 (`db.NearestJobsToJob` — already excludes the source job, closed jobs, and same-company
 jobs) and writes the result. The full design rationale lives in the package doc comment
@@ -10,14 +10,14 @@ jobs) and writes the result. The full design rationale lives in the package doc 
 Decisions 3/4/5 — read those before this file, this only covers what they don't.
 
 ## Always true
-- **No outbox table, unlike `internal/embed`'s `semantic_outbox`.** Finds work with a
+- **No outbox table, unlike `internal/ai/embed`'s `semantic_outbox`.** Finds work with a
   direct `PendingJobIDs` query (`job_semantic_chunks` exists AND
   `similar_computed_at IS NULL`) each round, not a claimed/leased queue — deliberate
   (design.md Decision 4), mirroring `../telagon`'s `cmd/similar-backfill`, this
   worker's direct ancestor. The predicate is idempotent and safe under a re-run or an
   overlapping manual invocation: a job processed twice just gets the same answer
   written twice.
-- **Worker-pool concurrency (`Concurrency`/`-workers`), not `internal/outbox.RunPool`.**
+- **Worker-pool concurrency (`Concurrency`/`-workers`), not `internal/platform/outbox.RunPool`.**
   Each job's work is three independent Postgres round trips (`JobGeneration`'s read,
   the nearest-neighbour query, then a single-row conditional `UPDATE`) — no shared,
   serially-queued backend (unlike `cmd/embed`'s TEI calls) for concurrent jobs to
@@ -44,7 +44,7 @@ Decisions 3/4/5 — read those before this file, this only covers what they don'
 - An empty neighbour list is a valid, intentional write (a job whose only close matches
   are same-company yields none) — it still stamps `similar_computed_at` so the job
   isn't endlessly re-picked.
-- `-similar`'s default (20) matches `internal/handler`'s `maxSimilarLimit` — keep them
+- `-similar`'s default (20) matches `internal/api/handler`'s `maxSimilarLimit` — keep them
   in sync; a future limit increase needs this bumped (and a re-run) too, not just the
   handler.
 

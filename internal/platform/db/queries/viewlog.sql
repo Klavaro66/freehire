@@ -1,5 +1,5 @@
 -- View-log aggregation queries, used by cmd/rollup-views. The worker parses nginx
--- access logs off the request path (see internal/viewlog), then resolves slugs and
+-- access logs off the request path (see internal/application/viewlog), then resolves slugs and
 -- applies per-(day, job) unique counts here.
 
 -- name: ResolveSlugsToJobIDs :many

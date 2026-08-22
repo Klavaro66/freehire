@@ -1,6 +1,6 @@
 # pii-filter
 
-Local PII span-detection endpoint that backs `internal/pii` (the `PII_FILTER_URL` detector).
+Local PII span-detection endpoint that backs `internal/candidate/pii` (the `PII_FILTER_URL` detector).
 It serves the **openai/privacy-filter** model (ONNX q4) over CPU and returns spans already
 mapped to freehire's Kind vocabulary (`NAME`, `ADDRESS`, `EMAIL`, `PHONE`, `LINK`).
 

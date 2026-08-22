@@ -24,7 +24,7 @@ SELECT t.user_id, t.job_id, t.viewed_at, a.applied_at, t.saved_at,
 -- Mark a job as applied for a user. Idempotent and independent of a prior view:
 -- it inserts the row (viewed_at defaults) or updates applied_at in place, and
 -- seeds stage='applied' when the stage is unset OR still 'preparing' — CV
--- tailoring's board placement (internal/handler/cv.go's EnsureOnBoard) sets
+-- tailoring's board placement (internal/api/handler/cv.go's EnsureOnBoard) sets
 -- 'preparing' with no applied_at, and a real apply signal is exactly the event
 -- that should promote it. Any other existing stage survives a re-apply
 -- unchanged. When (and only when) applied_at transitions from
@@ -170,7 +170,7 @@ LIMIT $2;
 -- already carries, or a notes-only call, records nothing: the ledger holds
 -- transitions, and a row per no-op would make "how long did this stage last"
 -- unanswerable. The event carries no trusted date (source is the caller, not the
--- employer), which is why nothing times it yet — see internal/appevent.
+-- employer), which is why nothing times it yet — see internal/application/appevent.
 WITH prior AS (
     SELECT a.stage FROM applications a WHERE a.user_id = sqlc.arg(user_id) AND a.job_id = sqlc.arg(job_id)::bigint
 ), touch AS (

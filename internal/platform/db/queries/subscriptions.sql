@@ -102,7 +102,7 @@ RETURNING m.subscription_id, m.job_id;
 -- deliverability check, same soft-skip role as the Telegram link), and the
 -- delivery-timing context (live, not snapshotted, same as the channel checks
 -- above) — the account's timezone and its saved-search digest frequency
--- settings, read via internal/deliverywindow before a digest is sent.
+-- settings, read via internal/application/deliverywindow before a digest is sent.
 SELECT s.id, s.user_id, s.channel, s.destination, s.last_digest_sent_at,
        ss.name AS saved_search_name,
        u.email AS account_email,
@@ -122,7 +122,7 @@ WHERE s.id = $1;
 
 -- name: MarkDigestSent :exec
 -- Stamp the subscription's last daily-digest send instant, so
--- internal/deliverywindow.DigestDue reads "already sent today" on any later pass
+-- internal/application/deliverywindow.DigestDue reads "already sent today" on any later pass
 -- within the same local calendar day. Only called after a successful `daily`-mode
 -- delivery — `instant`-mode subscriptions never touch this column.
 UPDATE subscriptions

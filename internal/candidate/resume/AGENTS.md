@@ -1,7 +1,7 @@
 # Résumé identity
 
 ## Scope
-`internal/resume` — one stored CV per user, the structured extract stamped to that
+`internal/candidate/resume` — one stored CV per user, the structured extract stamped to that
 upload, and `Owned` — the candidate-owned override block that outlives the file and now
 covers identity *and* the flat/scalar part of the semantic body (headline, summary,
 languages, certifications, education), not identity alone. See `owned.go`'s own doc

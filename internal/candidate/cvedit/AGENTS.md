@@ -1,4 +1,4 @@
-# internal/cvedit
+# internal/candidate/cvedit
 
 The only path that writes a stored CV. Every change becomes a revision: the operations that
 made it, the inverses that would undo it, who made it, and through which entry point.

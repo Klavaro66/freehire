@@ -9,7 +9,7 @@ The verdict is TIME-DEPENDENT, so it is computed on read, never stored.
 ## Always true
 - **Two tiers of evidence, and the tiers are the point** (classify.go:1-13). STRUCTURAL
   criteria describe the shape of a posting — `evergreen_posting` (from
-  `internal/jobreality`'s class) and `ats_absent` (the cross-check stamp). OUTCOME criteria
+  `internal/job/jobreality`'s class) and `ats_absent` (the cross-check stamp). OUTCOME criteria
   describe what happened to people — `silent_applications` and `user_reports`. Codes and
   their fixed order: classify.go:34-41, with `CriterionCodes` the same vocabulary as an
   ordered value. `CriteriaTotal` is `len(CriterionCodes)` — the served denominator
@@ -33,7 +33,7 @@ The verdict is TIME-DEPENDENT, so it is computed on read, never stored.
   able to mark a posting by itself.
 - **`ContributorGate = 2` is one number with two consequences** (classify.go:48-59). The
   classifier requires it, and the serving layer withholds the contributor count below the
-  same threshold (`internal/jobview/ghost_classify.go:52`). A served count of one would
+  same threshold (`internal/job/jobview/ghost_classify.go:52`). A served count of one would
   deanonymise the single applicant to the employer, and one account must not be able to
   mark an honest posting alone — lowering it breaks a privacy guarantee and an abuse
   guarantee at once. Contributors are distinct people across BOTH channels: a person who
@@ -49,12 +49,12 @@ The verdict is TIME-DEPENDENT, so it is computed on read, never stored.
   than accusing the catalogue from a frozen snapshot; the worker therefore re-stamps a still-
   absent posting on every run instead of leaving the stamp alone (crosscheck.go:34-36).
   A posting already correct in the database produces no write.
-- **Outcome judgement reuses `internal/userjob`'s silence ladder** (evidence.go:49-52,
+- **Outcome judgement reuses `internal/application/userjob`'s silence ladder** (evidence.go:49-52,
   68-77). An application counts as silent only when `userjob.SilenceStateFor` returns
   outright `silent`; a user report counts only after the reported apply date clears the
   `applied` stage's own threshold. Restating thresholds here would let the same application
   be judged by two ladders with nothing binding them.
-- **A closed job carries no signal** (`internal/jobview/ghost_classify.go:29-31`) — the
+- **A closed job carries no signal** (`internal/job/jobview/ghost_classify.go:29-31`) — the
   posting is already down, so there is nobody left to warn.
 - Title matching in the cross-check goes through `jobhash.RoleKey("", title)` — title alone,
   scoped by the fixed company. A title that yields no key is skipped, never stamped
@@ -65,10 +65,10 @@ The verdict is TIME-DEPENDENT, so it is computed on read, never stored.
   `GHOST_CRITERION_VALUES`; the SPA's checklist is keyed off it.
 - `cmd/ghost-crosscheck` (main.go + report.go) — the worker that runs `Crosscheck` per
   company and applies the stamp/clear writes.
-- `internal/handler/ghost_evidence.go` — gathers per-job outcome evidence in two batched
+- `internal/api/handler/ghost_evidence.go` — gathers per-job outcome evidence in two batched
   queries for a page of jobs; fail-soft (a lookup failure downgrades the signal rather than
   failing the read).
-- `internal/handler/jobs.go` — the job read path that attaches the signal.
-- `internal/jobview/ghost_classify.go` — `ClassifyGhost`, the serving projection: omits the
+- `internal/api/handler/jobs.go` — the job read path that attaches the signal.
+- `internal/job/jobview/ghost_classify.go` — `ClassifyGhost`, the serving projection: omits the
   field at level `none`, withholds counts below the gate, exposes `ATSCheckedAt` only when
   the criterion fired.

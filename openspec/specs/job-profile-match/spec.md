@@ -24,7 +24,7 @@ The system SHALL expose `GET /api/v1/jobs/:slug/match` behind `RequireAuthOrKey`
 
 ### Requirement: Skill classification and coverage formula
 
-Each job skill SHALL be classified as **exact** when the profile contains that canonical skill, else **adjacent** when the profile contains a neighbour of it per the curated adjacency dictionary (`internal/verdict/adjacent.go`), else **missing**. An adjacent classification SHALL carry the `via` skill — the specific held neighbour that satisfied it. Coverage percent SHALL be `round((exact_count + 0.5 × adjacent_count) / total × 100)`, where an exact match weighs 1 and an adjacent match weighs one half.
+Each job skill SHALL be classified as **exact** when the profile contains that canonical skill, else **adjacent** when the profile contains a neighbour of it per the curated adjacency dictionary (`internal/job/verdict/adjacent.go`), else **missing**. An adjacent classification SHALL carry the `via` skill — the specific held neighbour that satisfied it. Coverage percent SHALL be `round((exact_count + 0.5 × adjacent_count) / total × 100)`, where an exact match weighs 1 and an adjacent match weighs one half.
 
 #### Scenario: Exact takes precedence over adjacent
 

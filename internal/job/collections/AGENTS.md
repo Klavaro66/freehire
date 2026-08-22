@@ -22,7 +22,7 @@ are matched; `cmd/import-collections` writes `companies.collections`, and the se
   corporate forms; a dataset naming "Acme Robotics Limited" then asked for a slug ingest can no
   longer produce, matched nothing, and said nothing. The rule has to be ONE rule because
   `Members` looks its output up in a map keyed by the catalogue's own company slug — see
-  [docs/agents/company-identity.md](../../docs/agents/company-identity.md). What still separates
+  [docs/agents/company-identity.md](../../../docs/agents/company-identity.md). What still separates
   a credential is `DropAmbiguous` and the gates, not the spelling.
 - **Hand lists are guarded, because they silently depend on that rule.** Every entry must be a
   fixed point of `CompanySlug`; the test that pins this found three `eastern_roots.txt` entries

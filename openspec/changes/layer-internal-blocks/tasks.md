@@ -49,14 +49,14 @@ it deliberately and confirm it fails, then restore.
 
 ## 6. Documentation
 
-- [ ] 6.1 An `AGENTS.md` per block: what the block is, what it may import, what it must not.
-- [ ] 6.2 Rewrite the 202 `internal/<pkg>/AGENTS.md` links across `CLAUDE.md` and `docs/`. Restructure the root module table by block.
-- [ ] 6.3 Update `docs/architecture.md` and the `CLAUDE.md` Layout section to describe blocks rather than a flat `internal/`.
+- [x] 6.1 An `AGENTS.md` per block: what the block is, what it may import, what it must not.
+- [x] 6.2 Rewrite the 202 `internal/<pkg>/AGENTS.md` links across `CLAUDE.md` and `docs/`. Restructure the root module table by block.
+- [x] 6.3 Update `docs/architecture.md` and the `CLAUDE.md` Layout section to describe blocks rather than a flat `internal/`.
 
 ## 7. Verification
 
-- [ ] 7.1 `gofmt -l .` empty; `go build ./...`; `go vet ./...`; `go test ./...`.
-- [ ] 7.2 `go vet -tags=integration ./...`, then `go test -tags=integration ./...` (needs Docker).
-- [ ] 7.3 `go run ./cmd/validate-sources`; `make sqlc` produces no diff.
-- [ ] 7.4 Spot-run one binary per block-owning worker path to confirm wiring survived: `go run ./cmd/queue-metrics` with no `PROM_TEXTFILE_DIR` (must be a no-op that never opens the pool) and `go build ./cmd/...`.
-- [ ] 7.5 Record the four remaining `ingest` → higher-block edges (`linkimport`→`enrich`, `linkimport`→`search`, `telegram`→`llm`, `telegram`→`llmschema`) in `internal/ingest/AGENTS.md` as the service-extraction seam.
+- [x] 7.1 `gofmt -l .` empty; `go build ./...`; `go vet ./...`; `go test ./...`.
+- [x] 7.2 `go vet -tags=integration ./...`, then `go test -tags=integration ./...` (needs Docker).
+- [x] 7.3 `go run ./cmd/validate-sources`; `make sqlc` produces no diff.
+- [x] 7.4 Spot-run one binary per block-owning worker path to confirm wiring survived: `go run ./cmd/queue-metrics` with no `PROM_TEXTFILE_DIR` (must be a no-op that never opens the pool) and `go build ./cmd/...`.
+- [x] 7.5 Recorded the four remaining `ingest` → higher-block edges in `internal/ingest/AGENTS.md` as the service-extraction seam.
