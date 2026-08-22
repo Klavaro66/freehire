@@ -4,9 +4,9 @@ Built first, and testable on its own before the repo has any blocks: the checker
 graph and a table and returns violations, so it can be driven red-green against fixtures
 rather than against the real 144-package tree.
 
-- [ ] 1.1 Write `internal/arch/layering` — the block table (package → block) and the layer table (block → layer 1..8), as data, in one file. It is the single source both the checker and the generated `depguard` rules read.
-- [ ] 1.2 Write the checker: takes a `map[pkg][]importedPkg` plus the two tables, returns a list of violations. Drive it with fixture graphs covering all six spec scenarios — unassigned package, unknown block, upward import, same-layer cross-block import, downward import, intra-block import.
-- [ ] 1.3 Add the real-graph entry point (reads `go list -f` output including `TestImports` and `XTestImports`). Assert only that it parses and produces a violation list; do NOT yet assert the list is empty.
+- [x] 1.1 Write `internal/arch/layering` — the block table (package → block) and the layer table (block → layer 1..8), as data, in one file. It is the single source both the checker and the generated `depguard` rules read.
+- [x] 1.2 Write the checker: takes a `map[pkg][]importedPkg` plus the two tables, returns a list of violations. Drive it with fixture graphs covering all six spec scenarios — unassigned package, unknown block, upward import, same-layer cross-block import, downward import, intra-block import.
+- [x] 1.3 Add the real-graph entry point (reads `go list -f` output including `TestImports` and `XTestImports`). Assert only that it parses and produces a violation list; do NOT yet assert the list is empty.
 
 ## 2. Prerequisite extractions
 
