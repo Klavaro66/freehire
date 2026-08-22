@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -77,7 +78,7 @@ func (w workable) Resolve(ctx context.Context, raw string) (sources.Job, bool, e
 			Title:       j.Title,
 			Company:     humanizeBoard(account), // the widget API carries no company name
 			Location:    joinNonEmpty(j.City, j.State, j.Country),
-			Description: sources.SanitizeHTML(j.Description),
+			Description: htmltext.Sanitize(j.Description),
 			Remote:      j.Telecommuting,
 			PostedAt:    sources.ParseDate(j.PublishedOn),
 		}, true, nil

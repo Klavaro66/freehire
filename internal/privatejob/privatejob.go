@@ -13,9 +13,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/job"
 	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/sources"
 )
 
 // Source values for the two private-job origins the jd-tailor-intake endpoint writes.
@@ -57,11 +57,11 @@ func NewWriter(q Queries) *Writer { return &Writer{q: q} }
 // Create derives facets from in (see internal/jobderive) and persists a new private job
 // owned by userID. source must be SourcePasted or SourceWeblink. The description is
 // sanitized to the same HTML allowlist every other write path uses (see
-// internal/sources.SanitizeHTML) before derivation and storage — a private submission
+// internal/htmltext.Sanitize) before derivation and storage — a private submission
 // can carry a scraped third-party page's markup, and the job-detail view renders
 // jobs.description as trusted HTML.
 func (w *Writer) Create(ctx context.Context, userID int64, source string, in Input) (job.Job, error) {
-	description := sources.SanitizeHTML(in.Description)
+	description := htmltext.Sanitize(in.Description)
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		title = firstLine(description)

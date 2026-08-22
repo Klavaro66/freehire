@@ -57,6 +57,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/jobhash"
 	"github.com/strelov1/freehire/internal/sources"
 	"github.com/strelov1/freehire/internal/worker"
@@ -230,7 +231,7 @@ func repairDescription(source, stored string) string {
 	}
 	repaired := stored
 	if decoded != stored || strings.Contains(decoded, anchorMarker) || strings.Contains(decoded, literalNewlineMarker) {
-		repaired = sources.SanitizeHTML(decoded)
+		repaired = htmltext.Sanitize(decoded)
 	}
 	if source == himalayasSource {
 		repaired = sources.StripHimalayasSelfPromo(repaired)

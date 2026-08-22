@@ -138,9 +138,9 @@ func TestEveryPackageInTheRepoIsAssignedToABlock(t *testing.T) {
 // pendingExtraction names the packages the block table already places but the prerequisite
 // extractions have not created yet. It is a ratchet in both directions: a package missing
 // from the repo AND absent here fails, and a package that now exists but is still listed
-// here fails too. So creating provider (task 2.2) or silence (task 2.4) without deleting
+// here fails too. So creating silence (task 2.4) without deleting
 // its line is a test failure, and the list cannot quietly outlive its purpose.
-var pendingExtraction = []string{"provider", "silence"}
+var pendingExtraction = []string{"silence"}
 
 func TestBlockTableNamesNoPackageThatDoesNotExist(t *testing.T) {
 	present := make(map[string]bool)
@@ -204,8 +204,6 @@ func remapped(t *testing.T) map[string][]string {
 // EXACTLY these and no others, in both directions: a new upward edge fails, and an edge
 // that has been fixed without being struck off this list fails too.
 var plannedViolations = map[string]string{
-	"job/catalogstats -> ingest/sources":     "2.2 carve the provider vocabulary out of sources",
-	"job/privatejob -> ingest/sources":       "2.2 carve the provider vocabulary out of sources",
 	"job/ghost -> application/userjob":       "2.4 carve the silence model out of userjob",
 	"job/ghostreport -> application/userjob": "2.4 carve the silence model out of userjob",
 	"platform/db -> dict/normalize":          "2.6 drop normalize.JobSlug from the db integration tests",

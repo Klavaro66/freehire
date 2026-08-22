@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -66,11 +67,11 @@ func (r remoteYeah) Resolve(ctx context.Context, raw string) (sources.Job, bool,
 		return sources.Job{}, false, fmt.Errorf("linksource: remoteyeah job %s has no JobPosting ld+json", slug)
 	}
 
-	desc := sources.SanitizeHTML(p.Description)
+	desc := htmltext.Sanitize(p.Description)
 	if salary := salaryParagraph(p.BaseSalary); salary != "" {
 		// Sanitize the salary fragment too: its currency is third-party JSON-LD text and
 		// the description is rendered with {@html}, so an unsanitized prefix is stored XSS.
-		desc = sources.SanitizeHTML(salary) + desc
+		desc = htmltext.Sanitize(salary) + desc
 	}
 	return sources.Job{
 		ExternalID:  slug,

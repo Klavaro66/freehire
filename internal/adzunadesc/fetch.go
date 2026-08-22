@@ -9,6 +9,7 @@ import (
 
 	xhtml "golang.org/x/net/html"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -86,5 +87,5 @@ func FetchDescription(ctx context.Context, t Transport, url string) (string, err
 	// Unescape BEFORE sanitizing, matching internal/linksource's generic resolver: some
 	// ATS pages entity-encode the HTML inside their ld+json string, and decoding first is
 	// what lets the sanitizer see real tags to keep or strip rather than literal text.
-	return sources.SanitizeHTML(html.UnescapeString(p.Description)), nil
+	return htmltext.Sanitize(html.UnescapeString(p.Description)), nil
 }

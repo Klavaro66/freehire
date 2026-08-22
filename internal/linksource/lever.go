@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -92,7 +93,7 @@ func (l lever) Resolve(ctx context.Context, raw string) (sources.Job, bool, erro
 		Title:       p.Text,
 		Company:     humanizeBoard(company), // the per-posting API carries no company name
 		Location:    p.Categories.Location,
-		Description: sources.SanitizeHTML(body.String()),
+		Description: htmltext.Sanitize(body.String()),
 		Remote:      sources.IsRemote(p.Categories.Location),
 		PostedAt:    sources.ParseEpochMillis(p.CreatedAt),
 	}, true, nil

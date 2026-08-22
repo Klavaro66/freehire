@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -77,7 +78,7 @@ func (h habrCareer) Resolve(ctx context.Context, raw string) (sources.Job, bool,
 		Title:       p.Title,
 		Company:     p.Company,
 		Location:    p.Location,
-		Description: sources.SanitizeHTML(p.Description),
+		Description: htmltext.Sanitize(p.Description),
 		Remote:      sources.IsRemote(p.Location),
 		// Habr's ld+json datePosted is bogus (~a month ahead of the real date, with a later
 		// validThrough), which would pin every Habr job to the top of the freshest-first

@@ -34,7 +34,7 @@ func RoleFingerprint(p db.UpsertJobParams) string {
 }
 
 // htmlTag matches a single HTML tag. Descriptions are stored as sanitized HTML (an
-// ingest-time bluemonday prose allowlist, see internal/sources.SanitizeHTML), so tags
+// ingest-time bluemonday prose allowlist, see internal/htmltext.Sanitize), so tags
 // are well-formed and their text is entity-escaped — there is no stray "<"/">" in
 // visible text for this to over-strip.
 var htmlTag = regexp.MustCompile(`<[^>]*>`)

@@ -5,6 +5,7 @@ import (
 	"html"
 	"net/url"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -92,7 +93,7 @@ func (g generic) Resolve(ctx context.Context, raw string) (sources.Job, bool, er
 		// Decoding first also turns an entity-encoded `&lt;script&gt;` into a real one
 		// the sanitizer then strips — the same order the teamtailor/breezy board
 		// adapters use, so it is both correct and safe.
-		Description: sources.SanitizeHTML(html.UnescapeString(p.Description)),
+		Description: htmltext.Sanitize(html.UnescapeString(p.Description)),
 		Remote:      isTelecommute(p.JobLocationType),
 		PostedAt:    sources.ParseDate(p.DatePosted),
 	}, true, nil

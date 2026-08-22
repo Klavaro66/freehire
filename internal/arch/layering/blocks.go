@@ -8,9 +8,9 @@ import (
 // Layers places each block on a layer, counting up from 1 at the bottom. A block may
 // import only blocks on a strictly lower layer.
 //
-// ai sits low because llm is a client library with no upward dependencies; ingest sits
-// high because submission/moderation reach into job and linkimport reaches into search and
-// enrich. The order was derived from the measured import graph, not chosen — see
+// ai sits low because what remains in it — enrich, embed, llmkey — reaches no further than
+// platform and dict; ingest sits high because submission/moderation reach into job and
+// linkimport reaches into search and enrich. The order was derived from the graph — see
 // docs/superpowers/specs/2026-08-22-internal-module-split-design.md.
 var Layers = map[string]int{
 	"platform":    1,
@@ -46,7 +46,7 @@ var blocks = map[string][]string{
 	},
 	"dict": {
 		"classify", "companyname", "industrytag", "lang", "location", "normalize",
-		"provider", "roletag", "roletype", "skilladjacency", "skillbundle", "skilltag",
+		"roletag", "roletype", "skilladjacency", "skillbundle", "skilltag",
 		"vocab", "wordmatch",
 	},
 	"ai": {
@@ -63,9 +63,9 @@ var blocks = map[string][]string{
 		"matchanalysis", "pii", "resume", "resumeextract",
 	},
 	"job": {
-		"catalogstats", "collections", "ghost", "ghostreport", "job", "jobdedup",
-		"jobderive", "jobfacts", "jobhash", "jobreality", "jobview", "liveness",
-		"outboundurl", "privatejob", "silence", "verdict", "ycdir",
+		"collections", "ghost", "ghostreport", "job", "jobdedup", "jobderive", "jobfacts",
+		"jobhash", "jobreality", "jobview", "liveness", "outboundurl", "privatejob",
+		"silence", "verdict", "ycdir",
 	},
 	"application": {
 		"appevent", "apptimeline", "calmatch", "calsync", "deliverywindow", "followup",
@@ -77,9 +77,15 @@ var blocks = map[string][]string{
 		"facetsnapshot", "savedsearch", "search", "searchdrain", "searchintent",
 		"similarjobs",
 	},
+	// catalogstats is here, not in job, because it imports nothing from job at all: it
+	// takes cache, db and testdb from platform, sources from here, and reaches the
+	// catalogue's row counts through an injected Estimator. Its two headline figures are
+	// facts about the adapter registry — how many places the crawler can read, and how many
+	// of those are ATS platforms — and both are computed in-process on the READ path too
+	// (load.go), so they cannot be handed over in the snapshot.
 	"ingest": {
-		"adzunadesc", "applyform", "atsboard", "atsdetect", "boardresolve", "contribution",
-		"jdresolve", "linkimport", "linksource", "moderation", "pipeline",
+		"adzunadesc", "applyform", "atsboard", "atsdetect", "boardresolve", "catalogstats",
+		"contribution", "jdresolve", "linkimport", "linksource", "moderation", "pipeline",
 		"screeninganswers", "sources", "submission", "telegram",
 	},
 	"engage": {

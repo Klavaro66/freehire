@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/job"
 	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/sources"
 	"github.com/strelov1/freehire/internal/vocab"
 )
 
@@ -151,7 +151,7 @@ func (s *Service) Create(ctx context.Context, actorID int64, in CreateInput) (jo
 	// Moderator descriptions are bulk-imported from scraped pages and rendered with
 	// {@html}; sanitize to the same allowlist as every other source so no active
 	// markup is ever persisted (stored XSS). Done once and reused for derivation.
-	description := sources.SanitizeHTML(in.Description)
+	description := htmltext.Sanitize(in.Description)
 	f, err := derive(source, in.URL, in.Title, in.Company, in.Location, description, in.Remote, in.structured())
 	if err != nil {
 		return job.Job{}, job.Extras{}, err
@@ -184,7 +184,7 @@ func (s *Service) Update(ctx context.Context, actorID int64, slug string, p Upda
 	location := stringOr(p.Location, curF.Location)
 	// Sanitize a supplied description before persisting (stored XSS); re-sanitizing the
 	// already-clean current value is idempotent.
-	description := sources.SanitizeHTML(stringOr(p.Description, curF.Description))
+	description := htmltext.Sanitize(stringOr(p.Description, curF.Description))
 	remote := curF.Remote
 	if p.Remote != nil {
 		remote = *p.Remote

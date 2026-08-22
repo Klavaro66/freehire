@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -70,9 +71,9 @@ func (g geekjob) Resolve(ctx context.Context, raw string) (sources.Job, bool, er
 		return sources.Job{}, false, fmt.Errorf("linksource: geekjob vacancy %s has no JobPosting ld+json", id)
 	}
 
-	desc := sources.SanitizeHTML(p.Description)
+	desc := htmltext.Sanitize(p.Description)
 	if salary := salaryParagraph(p.BaseSalary); salary != "" {
-		desc = sources.SanitizeHTML(salary) + desc
+		desc = htmltext.Sanitize(salary) + desc
 	}
 	return sources.Job{
 		ExternalID:  id,

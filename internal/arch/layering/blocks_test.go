@@ -85,7 +85,6 @@ func TestEveryPackageIsAssignedExactlyOnce(t *testing.T) {
 // move script silently leaves them at the top of internal/.
 func TestCarvedOutPackagesArePlaced(t *testing.T) {
 	for pkg, block := range map[string]string{
-		"provider":      "dict",
 		"silence":       "job",
 		"arch/layering": "platform",
 	} {

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 
+	"github.com/strelov1/freehire/internal/htmltext"
 	"github.com/strelov1/freehire/internal/sources"
 )
 
@@ -88,7 +89,7 @@ func (b bairesdev) Resolve(ctx context.Context, raw string) (sources.Job, bool, 
 		URL:         fmt.Sprintf("https://applicants.bairesdev.com/job/%s/%s/apply", careerID, jobID),
 		Title:       p.Title,
 		Company:     company,
-		Description: sources.SanitizeHTML(desc),
+		Description: htmltext.Sanitize(desc),
 		Remote:      isTelecommute(p.JobLocationType),
 		PostedAt:    posted,
 	}, true, nil
