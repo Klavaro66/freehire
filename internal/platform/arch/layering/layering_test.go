@@ -158,8 +158,16 @@ func TestViolationMessagesNameTheProblem(t *testing.T) {
 		v    layering.Violation
 		want string
 	}{
-		{"unassigned", layering.Violation{Kind: layering.KindUnassigned, From: "x/internal/orphan"}, "directly under internal/"},
-		{"unknown block", layering.Violation{Kind: layering.KindUnknownBlock, From: "x/internal/q/r", Block: "q"}, `unknown block "q"`},
+		{
+			name: "unassigned",
+			v:    layering.Violation{Kind: layering.KindUnassigned, From: "x/internal/orphan"},
+			want: "directly under internal/",
+		},
+		{
+			name: "unknown block",
+			v:    layering.Violation{Kind: layering.KindUnknownBlock, From: "x/internal/q/r", Block: "q"},
+			want: `unknown block "q"`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.v.String(); !strings.Contains(got, tc.want) || !strings.Contains(got, tc.v.From) {

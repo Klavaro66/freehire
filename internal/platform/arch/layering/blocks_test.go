@@ -72,7 +72,8 @@ func TestEveryPackageIsAssignedExactlyOnce(t *testing.T) {
 	}
 	// Assignment is the flattened view the move script drives from; it must agree.
 	if len(seen) != len(layering.Assignment) {
-		t.Errorf("Assignment has %d entries, blocks hold %d packages", len(layering.Assignment), len(seen))
+		t.Errorf("Assignment has %d entries, blocks hold %d packages",
+			len(layering.Assignment), len(seen))
 	}
 	for p, b := range seen {
 		if layering.Assignment[p] != b {
@@ -81,41 +82,33 @@ func TestEveryPackageIsAssignedExactlyOnce(t *testing.T) {
 	}
 }
 
-// The three packages carved out by the prerequisite extractions must be placed, or the
-// move script silently leaves them at the top of internal/.
-func TestCarvedOutPackagesArePlaced(t *testing.T) {
+// Placements a future edit is most likely to "correct" back into a cycle, pinned so that
+// undoing one is a test failure rather than a quiet reintroduction. The location tests
+// above check that a package sits where the table says; this checks that the table still
+// says what the analysis concluded. Each of these contradicts what the package name
+// suggests, and the reasoning is in blocks.go's comments.
+func TestPlacementsThatContradictTheirNameArePinned(t *testing.T) {
 	for pkg, block := range map[string]string{
-		"silence":       "job",
-		"applydate":     "job",
-		"arch/layering": "platform",
+		"llm":           "platform",  // transport, not AI: it knows nothing of the domain
+		"llmschema":     "platform",  // same
+		"catalogstats":  "ingest",    // imports nothing from job; counts the adapter registry
+		"ratelimit":     "api",       // HTTP middleware, and it imports auth
+		"realtime":      "api",       // same
+		"ghost":         "job",       // the posting's reality, not an application's
+		"ghostreport":   "job",       // same
+		"jobreality":    "job",       // same
+		"liveness":      "job",       // same
+		"matchanalysis": "candidate", // reaches resumeextract, jobmatch, hardconstraint
+		"mailpreview":   "engage",    // imports eight engage packages
+		"facetsnapshot": "search",    // wraps search
+		"searchintent":  "search",    // same
+		"submission":    "ingest",    // manual job intake, not an application
+		"moderation":    "ingest",    // same
+		"silence":       "job",       // carved out of userjob so ghost can reach it
+		"applydate":     "job",       // same
 	} {
 		if got := layering.Assignment[pkg]; got != block {
-			t.Errorf("Assignment[%q] = %q, want %q", pkg, got, block)
-		}
-	}
-}
-
-// The six placements that contradict the package name are the ones a future edit is most
-// likely to "correct" back into a cycle. Pin them.
-func TestNonObviousPlacementsArePinned(t *testing.T) {
-	for pkg, block := range map[string]string{
-		"ratelimit":     "api",
-		"realtime":      "api",
-		"ghost":         "job",
-		"ghostreport":   "job",
-		"jobreality":    "job",
-		"liveness":      "job",
-		"matchanalysis": "candidate",
-		"mailpreview":   "engage",
-		"facetsnapshot": "search",
-		"searchintent":  "search",
-		"submission":    "ingest",
-		"moderation":    "ingest",
-		"llm":           "platform",
-		"llmschema":     "platform",
-	} {
-		if got := layering.Assignment[pkg]; got != block {
-			t.Errorf("Assignment[%q] = %q, want %q — see the design's cycle analysis", pkg, got, block)
+			t.Errorf("Assignment[%q] = %q, want %q — see the reasoning in blocks.go", pkg, got, block)
 		}
 	}
 }

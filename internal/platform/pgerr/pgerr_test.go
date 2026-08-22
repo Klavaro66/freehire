@@ -96,7 +96,10 @@ func TestOnlyThisPackageUnwrapsAPgError(t *testing.T) {
 	// Anchored at the module root rather than at a counted "../..": the block move made
 	// that two levels short of the repo, so the walk silently stopped covering cmd/ while
 	// still scanning enough files to clear the vacuous-pass floor below.
-	root := moduleRoot(t)
+	root, rootErr := modroot.Find()
+	if rootErr != nil {
+		t.Fatal(rootErr)
+	}
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -135,13 +138,4 @@ func TestOnlyThisPackageUnwrapsAPgError(t *testing.T) {
 			"classifier would pass unnoticed", scanned)
 	}
 	_ = offenders
-}
-
-func moduleRoot(t *testing.T) string {
-	t.Helper()
-	root, err := modroot.Find()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
 }

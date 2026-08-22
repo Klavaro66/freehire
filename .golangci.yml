@@ -26,7 +26,6 @@ linters:
         # names. internal/platform/arch/layering holds the same table and reports the
         # whole graph at once; this reports the offending import line.
         block-platform:
-          list-mode: lax
           files: ["**/internal/platform/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/dict
@@ -50,7 +49,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "platform is layer 1; api is layer 8. A block imports only blocks strictly below it."
         block-dict:
-          list-mode: lax
           files: ["**/internal/dict/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/ai
@@ -72,7 +70,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "dict is layer 2; api is layer 8. A block imports only blocks strictly below it."
         block-ai:
-          list-mode: lax
           files: ["**/internal/ai/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/identity
@@ -92,7 +89,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "ai is layer 3; api is layer 8. A block imports only blocks strictly below it."
         block-identity:
-          list-mode: lax
           files: ["**/internal/identity/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/ai
@@ -112,7 +108,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "identity is layer 3; api is layer 8. A block imports only blocks strictly below it."
         block-candidate:
-          list-mode: lax
           files: ["**/internal/candidate/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/job
@@ -128,7 +123,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "candidate is layer 4; api is layer 8. A block imports only blocks strictly below it."
         block-job:
-          list-mode: lax
           files: ["**/internal/job/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/application
@@ -142,7 +136,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "job is layer 5; api is layer 8. A block imports only blocks strictly below it."
         block-application:
-          list-mode: lax
           files: ["**/internal/application/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/search
@@ -154,7 +147,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "application is layer 6; api is layer 8. A block imports only blocks strictly below it."
         block-search:
-          list-mode: lax
           files: ["**/internal/search/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/application
@@ -166,7 +158,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "search is layer 6; api is layer 8. A block imports only blocks strictly below it."
         block-engage:
-          list-mode: lax
           files: ["**/internal/engage/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/ingest
@@ -174,7 +165,6 @@ linters:
             - pkg: github.com/strelov1/freehire/internal/api
               desc: "engage is layer 7; api is layer 8. A block imports only blocks strictly below it."
         block-ingest:
-          list-mode: lax
           files: ["**/internal/ingest/**"]
           deny:
             - pkg: github.com/strelov1/freehire/internal/engage

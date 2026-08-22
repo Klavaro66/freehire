@@ -1,11 +1,12 @@
 package layering_test
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/strelov1/freehire/internal/platform/arch/layering"
@@ -13,41 +14,41 @@ import (
 
 const modulePath = "github.com/strelov1/freehire"
 
-// buildTags must name every constraint used in the repo. `go list` without them reports
-// the untagged graph, and 222 files carry //go:build integration — including in-package
-// tests in internal/platform/db that import across blocks. A guard that cannot see them passes over
-// the exact case CLAUDE.md warns about: green everywhere except CI, which runs the tagged
-// suite. Adding the tags is safe here because the repo has no negated constraint and no
-// legacy `// +build` line, so the tagged build is a strict superset.
+// buildTags must name every constraint the repo uses. `go list` without them reports the
+// untagged graph, and 222 files sit behind //go:build integration — many of them
+// in-package tests, whose imports constrain the package itself. A guard that cannot see
+// them passes over exactly the case AGENTS.md warns about: green in every local command
+// except the tagged vet, then a failure in CI, which runs the tagged suite.
+//
+// Naming them is sound rather than merely convenient: the repo has no negated constraint
+// and no legacy `// +build` line, so the tagged build is a strict superset.
 const buildTags = "integration,llmlive"
 
-// repoGraph shells out to `go list` for the real import graph of internal/. Test imports
+// loadGraph reads the real import graph of internal/ once per test binary. Test imports
 // are included deliberately: a _test.go file can create a cross-layer dependency the
-// production build never reveals, and the analysis this layering came from counted them.
-func repoGraph(t *testing.T) map[string][]string {
-	t.Helper()
-
+// production build never reveals.
+var loadGraph = sync.OnceValues(func() (map[string][]string, error) {
 	const sep = "\x1f"
 	format := "{{.ImportPath}}" + sep +
 		"{{join .Imports \",\"}}" + sep +
 		"{{join .TestImports \",\"}}" + sep +
 		"{{join .XTestImports \",\"}}"
 
-	cmd := exec.CommandContext(t.Context(), "go", "list", "-tags", buildTags, "-f", format, modulePath+"/internal/...")
-	out, err := cmd.Output()
+	out, err := exec.CommandContext(context.Background(), "go", "list",
+		"-tags", buildTags, "-f", format, modulePath+"/internal/...").Output()
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			t.Fatalf("go list: %v\n%s", err, exit.Stderr)
+			return nil, errors.New(err.Error() + "\n" + string(exit.Stderr))
 		}
-		t.Fatalf("go list: %v", err)
+		return nil, err
 	}
 
 	graph := make(map[string][]string)
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		parts := strings.Split(line, sep)
 		if len(parts) != 4 {
-			t.Fatalf("unparseable go list line: %q", line)
+			return nil, errors.New("unparseable go list line: " + line)
 		}
 		var imports []string
 		for _, group := range parts[1:] {
@@ -60,14 +61,24 @@ func repoGraph(t *testing.T) map[string][]string {
 		graph[parts[0]] = imports
 	}
 	if len(graph) == 0 {
-		t.Fatal("go list returned no packages; the guard would pass vacuously")
+		return nil, errors.New("go list returned no packages; the guard would pass vacuously")
+	}
+	return graph, nil
+})
+
+func repoGraph(t *testing.T) map[string][]string {
+	t.Helper()
+	graph, err := loadGraph()
+	if err != nil {
+		t.Fatalf("go list: %v", err)
 	}
 	return graph
 }
 
-// relName strips the module and internal/ prefixes, and the block segment when the package
-// already sits in a block. It therefore names a package the same way before and after the
-// move, which is what lets this test assert coverage throughout.
+// relName is a package's name relative to its block: internal/dict/normalize is
+// "normalize", internal/identity/auth/oauth is "auth/oauth". A package directly under
+// internal/ has no block to strip and yields its whole path, which is a violation
+// TestEveryPackageSitsWhereAssignmentSaysItShould reports by name.
 func relName(importPath string) string {
 	rest, ok := strings.CutPrefix(importPath, modulePath+"/internal/")
 	if !ok {
@@ -82,14 +93,9 @@ func relName(importPath string) string {
 }
 
 // atExpectedLocation reports whether a package sits at exactly the path Assignment gives
-// it. This is stricter than "is under some block", and deliberately: a package the move
-// script drops in the WRONG block is still under a block, and the layering check only
-// catches it if the mistake happens to cross a layer. Two blocks a layer apart would hide
-// it entirely.
-//
-// It also settles the pre-move case cleanly. internal/job and internal/search are packages
-// whose names collide with block names, so "is the head segment a block name" would call
-// a hypothetical internal/search/foo moved when nothing has moved.
+// it. Stricter than "is under some block", and deliberately: a package dropped in the
+// WRONG block is still under a block, and the layering check catches that only if the
+// mistake happens to cross a layer. Two blocks on adjacent layers would hide it entirely.
 func atExpectedLocation(importPath string) bool {
 	name := relName(importPath)
 	block, ok := layering.Assignment[name]
@@ -100,18 +106,11 @@ func atExpectedLocation(importPath string) bool {
 }
 
 func TestEveryPackageSitsWhereAssignmentSaysItShould(t *testing.T) {
-	graph := repoGraph(t)
-
-	placed, misplaced := 0, []string(nil)
-	for importPath := range graph {
-		if atExpectedLocation(importPath) {
-			placed++
-			continue
+	var misplaced []string
+	for importPath := range repoGraph(t) {
+		if !atExpectedLocation(importPath) {
+			misplaced = append(misplaced, importPath)
 		}
-		misplaced = append(misplaced, importPath)
-	}
-	if placed == 0 {
-		t.Skipf("the move has not started: none of the %d packages is at its assigned path", len(graph))
 	}
 	slices.Sort(misplaced)
 	for _, importPath := range misplaced {
@@ -135,13 +134,6 @@ func TestEveryPackageInTheRepoIsAssignedToABlock(t *testing.T) {
 	}
 }
 
-// pendingExtraction names the packages the block table already places but the prerequisite
-// extractions have not created yet. It is a ratchet in both directions: a package missing
-// from the repo AND absent here fails, and a package that now exists but is still listed
-// here fails too. So creating silence (task 2.4) without deleting
-// its line is a test failure, and the list cannot quietly outlive its purpose.
-var pendingExtraction []string
-
 func TestBlockTableNamesNoPackageThatDoesNotExist(t *testing.T) {
 	present := make(map[string]bool)
 	for importPath := range repoGraph(t) {
@@ -149,7 +141,7 @@ func TestBlockTableNamesNoPackageThatDoesNotExist(t *testing.T) {
 	}
 	var stale []string
 	for name := range layering.Assignment {
-		if !present[name] && !slices.Contains(pendingExtraction, name) {
+		if !present[name] {
 			stale = append(stale, name)
 		}
 	}
@@ -157,99 +149,13 @@ func TestBlockTableNamesNoPackageThatDoesNotExist(t *testing.T) {
 	if len(stale) > 0 {
 		t.Errorf("block table names packages that do not exist: %v", stale)
 	}
-	for _, name := range pendingExtraction {
-		if present[name] {
-			t.Errorf("%q now exists; remove it from pendingExtraction", name)
-		}
-		// An entry in neither the repo nor the block table excuses nothing and would sit
-		// here forever unnoticed.
-		if _, assigned := layering.Assignment[name]; !assigned {
-			t.Errorf("pendingExtraction names %q, which the block table does not place", name)
-		}
-	}
 }
 
-// remapped rewrites every real import path into the path it will have after the move, by
-// looking each package up in Assignment. It lets the layering be evaluated against the
-// current tree, so the prerequisite extractions are a red-to-green ratchet rather than a
-// plan that is only checked once the move has already happened.
-func remapped(t *testing.T) map[string][]string {
-	t.Helper()
-
-	move := func(importPath string) string {
-		name := relName(importPath)
-		if name == "" {
-			return importPath
-		}
-		block, ok := layering.Assignment[name]
-		if !ok {
-			return importPath
-		}
-		return modulePath + "/internal/" + block + "/" + name
-	}
-
-	out := make(map[string][]string)
-	for pkg, imports := range repoGraph(t) {
-		moved := make([]string, 0, len(imports))
-		for _, imp := range imports {
-			moved = append(moved, move(imp))
-		}
-		out[move(pkg)] = moved
-	}
-	return out
-}
-
-// plannedViolations are the upward edges still awaiting a prerequisite extraction, each
-// tagged with the task that removes it. Empty: every one has landed, so the block table
-// now describes a graph that already layers cleanly, before a single directory has moved. The test below asserts the post-move graph has
-// EXACTLY these and no others, in both directions: a new upward edge fails, and an edge
-// that has been fixed without being struck off this list fails too.
-var plannedViolations = map[string]string{}
-
-func TestPostMoveGraphHasOnlyThePlannedViolations(t *testing.T) {
-	seen := map[string]bool{}
-	for _, v := range layering.Check(remapped(t), layering.Layers) {
-		key := fmt.Sprintf("%s -> %s", relToBlock(v.From), relToBlock(v.To))
-		seen[key] = true
-		if _, planned := plannedViolations[key]; !planned {
-			t.Errorf("unplanned layering violation: %s (layer %d -> %d)", key, v.FromLayer, v.ToLayer)
-		}
-	}
-	for key, task := range plannedViolations {
-		if !seen[key] {
-			t.Errorf("%q no longer violates — task %s is done, strike it off plannedViolations", key, task)
-		}
-	}
-}
-
-// relToBlock renders a post-move import path as "<block>/<pkg>", which is how the design
-// and the task list name these edges.
-func relToBlock(importPath string) string {
-	rest, _ := strings.CutPrefix(importPath, modulePath+"/internal/")
-	return rest
-}
-
-// The repo-wide assertion, and the thing task 3.3 turns on. It skips only while the move
-// has not started at all — every internal package still directly under internal/, so every
-// one reports as unassigned. The moment a single package lands in a block, this test starts
-// failing on anything that is wrong, so it cannot be forgotten.
+// The repo-wide assertion: every import in internal/, production and test alike, respects
+// the layering. depguard enforces the same rule one import line at a time; this reports
+// the whole graph in one pass, which is what makes a broad violation diagnosable.
 func TestRepoRespectsTheLayering(t *testing.T) {
-	graph := repoGraph(t)
-
-	// "Not started" means no package sits at its assigned path yet. Counting unassigned
-	// packages instead would not do: a nested package like internal/identity/auth/apple parses its
-	// parent as a block name, so it reports unknown-block rather than unassigned.
-	placed := 0
-	for importPath := range graph {
-		if atExpectedLocation(importPath) {
-			placed++
-		}
-	}
-	if placed == 0 {
-		t.Skipf("the move has not started: none of the %d packages is at its assigned path", len(graph))
-	}
-
-	violations := layering.Check(graph, layering.Layers)
+	violations := layering.Check(repoGraph(t), layering.Layers)
 	if len(violations) == 0 {
 		return
 	}

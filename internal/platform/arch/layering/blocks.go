@@ -63,9 +63,9 @@ var blocks = map[string][]string{
 		"matchanalysis", "pii", "resume", "resumeextract",
 	},
 	"job": {
-		"applydate", "collections", "ghost", "ghostreport", "job", "jobdedup", "jobderive", "jobfacts",
-		"jobhash", "jobreality", "jobview", "liveness", "outboundurl", "privatejob",
-		"silence", "verdict", "ycdir",
+		"applydate", "collections", "ghost", "ghostreport", "job", "jobdedup",
+		"jobderive", "jobfacts", "jobhash", "jobreality", "jobview", "liveness",
+		"outboundurl", "privatejob", "silence", "verdict", "ycdir",
 	},
 	"application": {
 		"appevent", "apptimeline", "calmatch", "calsync", "deliverywindow", "followup",

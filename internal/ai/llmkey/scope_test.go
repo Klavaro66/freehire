@@ -31,7 +31,10 @@ func TestBackgroundEntryPointsResolveNoUserCredential(t *testing.T) {
 	// "../" from this file. The block move buried this package one level deeper and a
 	// hardcoded depth simply stopped finding cmd/ — an lstat error here, but one directory
 	// higher it would have walked an empty tree and passed while checking nothing.
-	root := moduleRoot(t)
+	root, rootErr := modroot.Find()
+	if rootErr != nil {
+		t.Fatal(rootErr)
+	}
 	roots := map[string]string{
 		"cmd":                               filepath.Join(root, "cmd"),
 		"internal/ai/enrich":                filepath.Join(root, "internal", "ai", "enrich"),
@@ -73,13 +76,4 @@ func TestBackgroundEntryPointsResolveNoUserCredential(t *testing.T) {
 			t.Fatalf("walk %s: %v", label, err)
 		}
 	}
-}
-
-func moduleRoot(t *testing.T) string {
-	t.Helper()
-	root, err := modroot.Find()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
 }

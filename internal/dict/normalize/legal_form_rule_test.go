@@ -40,7 +40,10 @@ const minTokensForAList = 5
 // A comment cannot hold that. Adding a fourth list is easy, reviews miss it, and nothing
 // breaks until a company quietly stops earning a credential.
 func TestOnlyOneLegalFormListExists(t *testing.T) {
-	root := moduleRoot(t)
+	root, rootErr := modroot.Find()
+	if rootErr != nil {
+		t.Fatal(rootErr)
+	}
 
 	var checkedCanonical bool
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -114,13 +117,4 @@ func countFormTokens(t *testing.T, path string) int {
 		return true
 	})
 	return len(found)
-}
-
-func moduleRoot(t *testing.T) string {
-	t.Helper()
-	root, err := modroot.Find()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
 }
