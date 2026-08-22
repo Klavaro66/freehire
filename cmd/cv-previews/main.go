@@ -11,7 +11,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/strelov1/freehire/internal/cv"
+	"github.com/strelov1/freehire/internal/candidate/cv"
 )
 
 func main() {

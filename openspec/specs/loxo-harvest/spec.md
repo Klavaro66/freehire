@@ -37,7 +37,7 @@ is absent, empty, or unreachable SHALL be skipped and never abort the run.
 ### Requirement: Tech-relevance counting
 
 For each validated board the tool SHALL count how many of its postings classify as
-tech (via `internal/classify`) and report that count, so an operator can avoid
+tech (via `internal/dict/classify`) and report that count, so an operator can avoid
 seeding boards that carry no tech vacancies.
 
 #### Scenario: Tech count reported per board

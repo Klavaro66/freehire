@@ -7,7 +7,7 @@
 
 Every crawl rewrites every row it re-sees, whether or not anything changed.
 
-`UpsertJob` (`internal/db/queries/jobs.sql:194`) ends in `ON CONFLICT (source, external_id)
+`UpsertJob` (`internal/platform/db/queries/jobs.sql:194`) ends in `ON CONFLICT (source, external_id)
 DO UPDATE SET ...` with no `WHERE`. A re-ingest of an untouched posting therefore writes a
 full new tuple: the ~2.5 KB `description`, every `text[]`, `content_hash`, plus
 `last_seen_at = now()` and `updated_at = now()`. In Postgres that is a new row version — a
@@ -21,7 +21,7 @@ search index and nowhere else: by the time the flag is read, Postgres has alread
 the row.
 
 The same statement carries a second, worse offender. Its `company_upsert` CTE
-(`internal/db/queries/jobs.sql:215`) does `ON CONFLICT (slug) DO UPDATE SET name, updated_at
+(`internal/platform/db/queries/jobs.sql:215`) does `ON CONFLICT (slug) DO UPDATE SET name, updated_at
 = now()` unconditionally, once per job. A board with 5,000 postings updates its company row
 5,000 times in a single crawl.
 
@@ -90,7 +90,7 @@ Non-goals — deliberately deferred:
 
 ### 1. `RefreshUnchangedJob` — the cheap write
 
-A new query in `internal/db/queries/jobs.sql`:
+A new query in `internal/platform/db/queries/jobs.sql`:
 
 ```sql
 -- name: RefreshUnchangedJob :one
@@ -111,7 +111,7 @@ Three constraints, each load-bearing:
   writing.
 - **`updated_at` is not stamped.** The column comes to mean "content last changed" rather
   than "last crawled". Two readers see it today: the jobs sitemap serves it as `<lastmod>`
-  (`internal/handler/sitemap.go`), where a timestamp that stops claiming every posting
+  (`internal/api/handler/sitemap.go`), where a timestamp that stops claiming every posting
   changed on every crawl is the honest signal, and `jobview` puts it on the public wire. It
   is also the precondition for an incremental reindex — `ListJobsUpdatedAfter` exists but is
   dormant (no caller, and `cmd/reindex` has no `--since` flag, whatever the query's comment
@@ -121,8 +121,8 @@ Three constraints, each load-bearing:
   closed. Falling through to `UpsertJob` is what reopens it.
 
 **Why the stale-derivation question does not arise.** `RoleFingerprint`
-(`internal/jobhash/rolefingerprint.go:23`) reads `company_slug`, `title` and `description`;
-all three are inputs to `jobhash.Of` (`internal/jobhash/jobhash.go:23`). Equal
+(`internal/job/jobhash/rolefingerprint.go:23`) reads `company_slug`, `title` and `description`;
+all three are inputs to `jobhash.Of` (`internal/job/jobhash/jobhash.go:23`). Equal
 `content_hash` therefore implies equal `role_fingerprint`, so skipping its refresh cannot
 leave it stale. The same subset argument covers every deterministic facet the upsert
 rewrites.
@@ -176,7 +176,7 @@ The two other `company_upsert` CTEs, in `UpsertManualJob` and `UpdateManualJob`,
 per moderator action and are left alone.
 
 Side effect, and an improvement: `companies.updated_at` is read as sitemap `<lastmod>`
-(`internal/db/queries/companies.sql:92`). Today every hiring company reports "just now" on
+(`internal/platform/db/queries/companies.sql:92`). Today every hiring company reports "just now" on
 every crawl, which is the pattern search engines learn to ignore. It becomes truthful.
 
 ### 5. Storage parameters
@@ -193,7 +193,7 @@ out as its own migration with a `lock_timeout`, not batched with others.
 
 ## Testing
 
-Integration tests (`//go:build integration`, `internal/db`, testcontainers):
+Integration tests (`//go:build integration`, `internal/platform/db`, testcontainers):
 
 - Re-ingesting an identical posting advances `last_seen_at`, leaves `updated_at` untouched,
   and reports `inserted=false, changed=false`.
@@ -204,7 +204,7 @@ Integration tests (`//go:build integration`, `internal/db`, testcontainers):
   company still updates it.
 - `TouchJob` on an open row leaves `updated_at`; on a closed row it reopens and stamps it.
 
-Unit test in `internal/jobhash`: assert every `RoleFingerprint` input is also an `Of` input,
+Unit test in `internal/job/jobhash`: assert every `RoleFingerprint` input is also an `Of` input,
 so a future field added to the fingerprint but not the hash fails here instead of silently
 going stale on the cheap path.
 

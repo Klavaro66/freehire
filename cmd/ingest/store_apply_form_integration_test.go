@@ -13,12 +13,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/applyform"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/job"
-	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/pipeline"
-	"github.com/strelov1/freehire/internal/testdb"
+	"github.com/strelov1/freehire/internal/ingest/applyform"
+	"github.com/strelov1/freehire/internal/ingest/pipeline"
+	"github.com/strelov1/freehire/internal/job/job"
+	"github.com/strelov1/freehire/internal/job/jobderive"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/testdb"
 )
 
 func recruiteePosting(externalID, title string) job.Job {

@@ -64,7 +64,7 @@ check lives in the service path rather than in a prompt. Autopilot walks the
 whole vacancy in a single pass and snapshots the CV first, so the run is
 undoable.
 
-Live: /tailor/<job> · Code: `internal/cvedit`, `internal/assistant` · Deep dive: [internal/cvedit/AGENTS.md](../internal/cvedit/AGENTS.md)
+Live: /tailor/<job> · Code: `internal/candidate/cvedit`, `internal/ai/assistant` · Deep dive: [internal/candidate/cvedit/AGENTS.md](../internal/candidate/cvedit/AGENTS.md)
 ```
 
 **Find** — faceted search over the catalogue; collections and role landings;

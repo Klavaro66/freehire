@@ -10,7 +10,7 @@ schema and one wire shape.
 
 **The extension point is the source, not the core.** Adding a company is one
 entry in the provider's board file (`sources/<provider>.yml`). Adding an ATS
-platform is one new adapter in `internal/sources` plus one line in `sources.All`.
+platform is one new adapter in `internal/ingest/sources` plus one line in `sources.All`.
 Adding a Telegram channel is one entry in `sources/telegram.yml`. If your feature
 fits that shape, it is welcome.
 
@@ -67,7 +67,7 @@ go test -tags=integration ./...   # needs Docker (testcontainers)
 
 Regenerate committed artifacts when their source changed, and commit the result:
 
-- Changed `internal/db/queries/*.sql` or `migrations/` → `make sqlc`.
+- Changed `internal/platform/db/queries/*.sql` or `migrations/` → `make sqlc`.
 - Changed the Go contract types → `make gen-contracts`.
 
 For the frontend (`web/`):
@@ -82,10 +82,10 @@ cd ../web && pnpm install && pnpm run check && pnpm run build
 This is the most welcome kind of contribution. See `AGENTS.md` for the source
 adapter contract and the dedup/lifecycle conventions. In short:
 
-- An ATS board adapter implements the `Source` interface in `internal/sources`
+- An ATS board adapter implements the `Source` interface in `internal/ingest/sources`
   and is registered in `sources.All`.
 - A single outbound-link resolver implements `LinkSource` in
-  `internal/linksource` and is registered in `linksource.All`.
+  `internal/ingest/linksource` and is registered in `linksource.All`.
 - Always validate board slugs against the live provider before adding them — a
   board that yields nothing looks identical to a healthy one in the logs.
 

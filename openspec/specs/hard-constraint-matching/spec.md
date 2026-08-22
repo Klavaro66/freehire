@@ -5,7 +5,7 @@ TBD - created by archiving change add-hard-constraint-matcher. Update Purpose af
 ## Requirements
 ### Requirement: Deterministic hard-constraint evaluation
 
-The system SHALL provide a pure, deterministic evaluator (`internal/hardconstraint`) that compares a job's structured requirements against a caller's structured résumé across six categories — experience-years, education, language, work-authorization, location-and-work-mode, and certification — and returns a list of typed blockers. Each blocker MUST carry a category, a severity, a numeric score-cap, a human-readable reason, an anti-hallucination action string, and a boolean `met` flag. The evaluator MUST perform no I/O and no LLM calls; it operates only on the plain structs its callers pass in, in the same dict-only discipline as `internal/jobmatch` and `internal/classify`.
+The system SHALL provide a pure, deterministic evaluator (`internal/candidate/hardconstraint`) that compares a job's structured requirements against a caller's structured résumé across six categories — experience-years, education, language, work-authorization, location-and-work-mode, and certification — and returns a list of typed blockers. Each blocker MUST carry a category, a severity, a numeric score-cap, a human-readable reason, an anti-hallucination action string, and a boolean `met` flag. The evaluator MUST perform no I/O and no LLM calls; it operates only on the plain structs its callers pass in, in the same dict-only discipline as `internal/candidate/jobmatch` and `internal/dict/classify`.
 
 #### Scenario: Unmet experience requirement produces a blocker
 

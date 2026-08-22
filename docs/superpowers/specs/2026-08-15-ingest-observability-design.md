@@ -36,7 +36,7 @@ Do not rebuild any of this:
 | Prometheus | `litellm-prometheus-1` on `204.168.137.149`, scrape interval 15s |
 | Grafana | `litellm-grafana-1`, published at `grafana.freehire.me` behind an nginx IP allowlist |
 | Scrape jobs for host-2 | `host2-node` (:9100), `host2-postgres` (:9187), `hire-api` (:9091 blue, :9092 green), `meilisearch` (:9200) |
-| Per-run worker metrics | `internal/worker/metrics.go` writes `freehire_worker_last_run_{timestamp_seconds,duration_seconds,success}` into `PROM_TEXTFILE_DIR`; 229 series are live |
+| Per-run worker metrics | `internal/platform/worker/metrics.go` writes `freehire_worker_last_run_{timestamp_seconds,duration_seconds,success}` into `PROM_TEXTFILE_DIR`; 229 series are live |
 | Alert rules, versioned | `freehire-ops/provision/litellm-host/grafana/provisioning/alerting/rules.yaml`, group `host2-infra`, folder `Infra Alerts` |
 | Telegram contact point | `telegram-ops`, already receiving the five infra rules |
 
@@ -72,7 +72,7 @@ its own schedule; Prometheus scrapes node_exporter as it already does.
 Rejected alternatives:
 
 - **A custom collector on `cmd/server`'s existing `/metrics` listener**
-  (`internal/observability/observability.go:68`). Cheapest to wire, but prod runs blue and
+  (`internal/platform/observability/observability.go:68`). Cheapest to wire, but prod runs blue and
   green simultaneously, so every database-wide gauge is emitted twice and every query and
   alert rule grows a permanent `max by(...)` wrapper. Worse, the collector would run per
   scrape: 15s × 2 colours is eight `COUNT(*)` passes per minute over tables of ~1M rows,
@@ -90,18 +90,18 @@ under test.
 
 ```
 cmd/queue-metrics/main.go        new run-once worker
-internal/db/queries/metrics.sql  the aggregate queries
-internal/worker/metrics.go       extract the atomic write into an exported helper
+internal/platform/db/queries/metrics.sql  the aggregate queries
+internal/platform/worker/metrics.go       extract the atomic write into an exported helper
 ```
 
-`internal/worker/metrics.go:66-74` already implements the write-then-rename that keeps
+`internal/platform/worker/metrics.go:66-74` already implements the write-then-rename that keeps
 node_exporter from reading a half-written file. Extract it as
 `worker.WriteTextfile(dir, name, body string) error` and have `writeRunMetrics` call it too,
 rather than duplicating the pattern in the new worker.
 
-`cmd/queue-metrics` follows the standard shape from `internal/worker/AGENTS.md`:
+`cmd/queue-metrics` follows the standard shape from `internal/platform/worker/AGENTS.md`:
 `worker.Main(run)`, `worker.Bootstrap`, `worker.ExitCode`. Because `worker.Main` already
-calls `writeRunMetrics` (`internal/worker/main.go:30`), the new worker publishes its own
+calls `writeRunMetrics` (`internal/platform/worker/main.go:30`), the new worker publishes its own
 `freehire_worker_last_run_*{exported_job="queue-metrics"}` series for free — which alert
 rule 7 below depends on.
 
@@ -239,9 +239,9 @@ This is a required follow-up step, not an aspiration.
 
 - `cmd/queue-metrics`: a golden test on the rendered `.prom` text — exact metric names,
   `# HELP` / `# TYPE` lines, and label sets. This is the contract the alert rules bind to.
-- `internal/db`: an integration test (`//go:build integration`) covering the three
+- `internal/platform/db`: an integration test (`//go:build integration`) covering the three
   aggregate queries against a seeded database, including the `failed_at` split.
-- `internal/worker`: extend the existing `metrics_test.go` to cover `WriteTextfile`
+- `internal/platform/worker`: extend the existing `metrics_test.go` to cover `WriteTextfile`
   directly, keeping the atomic-rename assertions.
 
 Per `CLAUDE.md`, run `go vet -tags=integration ./...` before pushing.

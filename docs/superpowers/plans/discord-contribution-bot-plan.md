@@ -12,12 +12,12 @@ These bind every task. Copy this section verbatim into each reviewer's context.
   `intakeService.Resolve` or any part of the intake pipeline — only reply prompting the user to
   link. This preserves `link-contributions`' existing "authenticated only" requirement unchanged.
   Do not add any "resolve without recording" variant to `intakeService`.
-- **`intakeService.Resolve` (internal/handler/intake.go) is called unchanged** — same signature,
+- **`intakeService.Resolve` (internal/api/handler/intake.go) is called unchanged** — same signature,
   same behavior, for the new Discord surface exactly as it already is for
   web/telegram/extension/cli. Do not modify `intake.go`.
 - **Feature is fully inert unless ALL of `DiscordBotToken`, `DiscordApplicationID`,
   `DiscordPublicKey`, `DiscordGuildID` are set** — mirrors the Telegram bot's all-or-nothing
-  config gate (`internal/handler/telegram.go`'s `telegramEnabled`/`webhookSecured` pattern).
+  config gate (`internal/api/handler/telegram.go`'s `telegramEnabled`/`webhookSecured` pattern).
   A deployment must never reach a state where the bot is live but the interactions webhook is
   unauthenticated.
 - **`discord_links` mirrors `telegram_links` exactly**: `user_id bigint NOT NULL` (PK, FK ->
@@ -36,12 +36,12 @@ These bind every task. Copy this section verbatim into each reviewer's context.
 - **`go build ./...` and `go vet ./...` must stay clean after every task.**
 - **Changing any handler constructor signature requires `go vet -tags=integration ./...`**
   before that task is considered done — plain `go test ./...` does not compile build-tagged
-  files (152 of them across 13 packages, `internal/handler` alone has 65). Docker is available
+  files (152 of them across 13 packages, `internal/api/handler` alone has 65). Docker is available
   in this environment, so the actual tagged integration suite
-  (`go test -tags=integration ./internal/handler/...`) can and should be run wherever a task
-  touches `internal/handler`, not just vet-checked.
-- **Mirror existing patterns, don't invent new ones.** `internal/handler/telegram.go` +
-  `internal/telegramnotify/client.go` are the direct precedent for everything in this plan.
+  (`go test -tags=integration ./internal/api/handler/...`) can and should be run wherever a task
+  touches `internal/api/handler`, not just vet-checked.
+- **Mirror existing patterns, don't invent new ones.** `internal/api/handler/telegram.go` +
+  `internal/engage/telegramnotify/client.go` are the direct precedent for everything in this plan.
   When in doubt about a naming/shape/error-handling choice, match what those two files already
   do.
 - **Terse commit messages, no comments explaining WHAT** (only WHY, and only when non-obvious) —
@@ -78,16 +78,16 @@ Read `migrations/0001_init.sql` (search `telegram_links`) to confirm the exact D
 convention (table, then PK constraint, then FK constraint as separate `ALTER TABLE` statements)
 before writing this file, and follow it.
 
-**sqlc queries** — new file `internal/db/queries/discord_links.sql`, following
-`internal/db/queries/telegram_links.sql`'s shape exactly (read it first):
+**sqlc queries** — new file `internal/platform/db/queries/discord_links.sql`, following
+`internal/platform/db/queries/telegram_links.sql`'s shape exactly (read it first):
 - `UpsertDiscordLink` (insert ... on conflict (user_id) do update, mirrors `UpsertTelegramLink`)
 - `GetDiscordLink` (`:one`, by `user_id`)
 - `GetUserIDByDiscordID` (`:one`, `SELECT user_id FROM discord_links WHERE discord_id = $1 ORDER BY linked_at DESC LIMIT 1`)
 - `DeleteDiscordLink` (by `user_id`)
 
-Run `make sqlc` after adding the query file (regenerates `internal/db`).
+Run `make sqlc` after adding the query file (regenerates `internal/platform/db`).
 
-**Config** — in `internal/config/config.go`, add to the `Settings` struct and `Load()`:
+**Config** — in `internal/platform/config/config.go`, add to the `Settings` struct and `Load()`:
 ```go
 DiscordBotToken       string
 DiscordApplicationID  string
@@ -102,13 +102,13 @@ group (read that block in `config.go` first for placement/comment style).
 migration file present and follows the `telegram_links` DDL shape. No dedicated test for this
 task — correctness is verified by the integration test in Task 5 exercising the real schema.
 
-## Task 2: internal/discordbot client package
+## Task 2: internal/engage/discordbot client package
 
-New package `internal/discordbot`, the Discord-side counterpart to `internal/telegramnotify`.
-Read `internal/telegramnotify/client.go` first for the file's shape/style (small client struct,
+New package `internal/engage/discordbot`, the Discord-side counterpart to `internal/engage/telegramnotify`.
+Read `internal/engage/telegramnotify/client.go` first for the file's shape/style (small client struct,
 `NewClient`/`NewClientWithBase` pair — the `WithBase` variant exists specifically so tests can
 point the client at an `httptest.Server` instead of the real API; do the same here) and
-`internal/telegramnotify/linktokens.go` (or wherever `LinkTokens` lives — grep for it) for the
+`internal/engage/telegramnotify/linktokens.go` (or wherever `LinkTokens` lives — grep for it) for the
 token issue/parse/TTL shape.
 
 Build:
@@ -139,7 +139,7 @@ Build:
   JWT secret parameter and a TTL constant analogous to `telegramLinkTTL` (10 minutes) — name it
   appropriately for this package.
 
-**Tests** (`internal/discordbot/*_test.go`, table-driven, no network/DB needed):
+**Tests** (`internal/engage/discordbot/*_test.go`, table-driven, no network/DB needed):
 - `VerifySignature`: valid signature passes; tampered body fails; wrong timestamp fails; garbage
   hex fails without panicking.
 - `DiscordLinkTokens`: issue then parse round-trips the user id; an expired token fails to parse;
@@ -147,11 +147,11 @@ Build:
 - `EditOriginalResponse` / `RegisterCommands`: use `httptest.NewServer` (via `NewClientWithBase`)
   to assert the request method, path, and body shape; a non-2xx response returns an error.
 
-**Done when**: `go build ./...` and `go test ./internal/discordbot/...` are clean.
+**Done when**: `go build ./...` and `go test ./internal/engage/discordbot/...` are clean.
 
 ## Task 3: Discord handler — linking surface
 
-New file `internal/handler/discord.go`. Read `internal/handler/telegram.go` in full first — this
+New file `internal/api/handler/discord.go`. Read `internal/api/handler/telegram.go` in full first — this
 task mirrors its `telegramHandlers` struct, `newTelegramHandlers`, `telegramEnabled`,
 `webhookSecured`, `LinkTelegram`, `TelegramLinkStatus`, `UnlinkTelegram`, and the top half of
 `TelegramWebhook` (everything up to where it dispatches into contribution handling) as closely
@@ -159,7 +159,7 @@ as the Discord API's shape allows. Also add the trivial `SurfaceDiscord` constan
 since this task is the first consumer of it.
 
 Build:
-- `internal/contribution/contribution.go`: add `SurfaceDiscord = "discord"` alongside the
+- `internal/ingest/contribution/contribution.go`: add `SurfaceDiscord = "discord"` alongside the
   existing `Surface*` constants, and add it to the `NormalizeSurface` switch's accepted list.
 - `discordHandlers` struct: `queries *db.Queries`, a `*discordbot.Client`, a
   `*discordbot.DiscordLinkTokens`, the four config strings needed at request time
@@ -197,35 +197,35 @@ Build:
   with a confirmation or failure message. This is a synchronous, non-deferred reply (the DB
   upsert is fast — no need for the deferred-response dance Task 4 uses for `/contribute`).
 
-**Tests** (`internal/handler/discord_test.go`, no DB — use a fake/nil queries where the linking
+**Tests** (`internal/api/handler/discord_test.go`, no DB — use a fake/nil queries where the linking
 endpoints allow it, or scope tests to what's reachable without one; read
-`internal/handler/telegram_test.go` for the existing signature-guard test style and mirror it):
+`internal/api/handler/telegram_test.go` for the existing signature-guard test style and mirror it):
 - Missing/invalid Ed25519 signature -> 403, no processing.
 - Valid PING -> PONG (`{"type":1}`).
 - `/link` with a valid token upserts the link and replies ephemeral-success (this may need a
-  lightweight DB — if `internal/handler`'s existing test helpers include an in-memory or
+  lightweight DB — if `internal/api/handler`'s existing test helpers include an in-memory or
   fake-queries pattern for handler unit tests, use it; otherwise defer full-flow verification to
   Task 5's integration test and keep this test to signature/PING/command-routing only).
 - `/link` with an expired/garbage token -> failure reply, no DB write attempted.
 - Feature-disabled (partial config) -> linking endpoints report `enabled: false`, interactions
   endpoint responds `404`.
 
-**Done when**: `go build ./...`, `go vet ./...`, and `go test ./internal/handler/... ./internal/contribution/...`
+**Done when**: `go build ./...`, `go vet ./...`, and `go test ./internal/api/handler/... ./internal/ingest/contribution/...`
 are clean. Do NOT wire `discordHandlers.register` into `handler.go` yet — Task 4 does that once
 `/contribute` exists too, so the router only gains the new routes once the handler is complete.
 
 ## Task 4: Discord handler — contribution surface
 
-Extends `internal/handler/discord.go` from Task 3. Read the rest of
-`internal/handler/telegram.go` (`handleTelegramContribution`, `processTelegramContribution`,
+Extends `internal/api/handler/discord.go` from Task 3. Read the rest of
+`internal/api/handler/telegram.go` (`handleTelegramContribution`, `processTelegramContribution`,
 `intakeReply`, `jobURL`, `companyURL`, and the `telegramContribTimeout` constant) — this task is
 the Discord-shaped mirror of all of it.
 
 Build:
 - Extract `intakeReply`'s `switch out.Status { ... }` body (and the `jobURL`/`companyURL`
-  helpers it uses) out of `internal/handler/telegram.go` into a shared, surface-agnostic
+  helpers it uses) out of `internal/api/handler/telegram.go` into a shared, surface-agnostic
   function — e.g. `func renderIntakeOutcome(out intakeOutcome, frontendOrigin string) string` in
-  `internal/handler/intake.go` or a new small `internal/handler/intake_reply.go` — so both
+  `internal/api/handler/intake.go` or a new small `internal/api/handler/intake_reply.go` — so both
   `telegramHandlers` and `discordHandlers` call the same function instead of duplicating the
   switch. Update `telegram.go`'s call site accordingly; its existing tests must keep passing
   unchanged (the extraction must be behavior-preserving).
@@ -242,12 +242,12 @@ Build:
      helper from above).
   4. A `Resolve` error (not a normal outcome — a storage failure) logs and edits with a generic
      "something went wrong" message, mirroring `processTelegramContribution`'s error branch.
-- Wire `discordHandlers.register(api, mw)` into `internal/handler/handler.go` alongside
+- Wire `discordHandlers.register(api, mw)` into `internal/api/handler/handler.go` alongside
   `telegramH.register(api, mw)` (grep `handler.go` for where `telegramH` is constructed and
   registered, and add the equivalent `discordH := newDiscordHandlers(...)` +
   `discordH.register(api, mw)` calls with the new config fields from Task 1's `Settings`).
 
-**Tests** (extend `internal/handler/discord_test.go`):
+**Tests** (extend `internal/api/handler/discord_test.go`):
 - `/contribute` command-option parsing (the `url` string option is read correctly).
 - Command dispatch: unknown command name doesn't panic and replies with a generic error.
 - `renderIntakeOutcome` (or whatever the extracted helper is named): table-driven test over every
@@ -255,20 +255,20 @@ Build:
   Telegram's existing wording (compare against what `intakeReply` used to produce, or add a test
   that both `telegramHandlers` and `discordHandlers` render the same outcome to the same text
   where the surface doesn't matter). This is the "no regression from the extraction" check —
-  `internal/handler`'s EXISTING telegram tests must still pass; if the extraction moved logic
+  `internal/api/handler`'s EXISTING telegram tests must still pass; if the extraction moved logic
   telegram's tests exercised, verify they still cover it post-move.
 
 Full DB-backed coverage (linked user's `/contribute` actually rewards, etc.) belongs in Task 5's
 integration test, not here.
 
-**Done when**: `go build ./...`, `go vet ./...`, `go test ./internal/handler/... ./internal/contribution/...`
-clean, and `internal/handler/telegram_test.go` + any other existing telegram-related unit tests
+**Done when**: `go build ./...`, `go vet ./...`, `go test ./internal/api/handler/... ./internal/ingest/contribution/...`
+clean, and `internal/api/handler/telegram_test.go` + any other existing telegram-related unit tests
 still pass unmodified (confirms the `intakeReply` extraction didn't regress Telegram).
 
 ## Task 5: Integration tests
 
-New file `internal/handler/discord_integration_test.go` (`//go:build integration`), mirroring
-`internal/handler/telegram_contribution_integration_test.go` — read it in full first, including
+New file `internal/api/handler/discord_integration_test.go` (`//go:build integration`), mirroring
+`internal/api/handler/telegram_contribution_integration_test.go` — read it in full first, including
 `startPostgres(t)` and how it stubs the outbound Telegram API via `httptest.NewServer` +
 `NewClientWithBase`. Do the same for Discord (`discordbot.NewClientWithBase`), and additionally
 construct Discord's Ed25519-signed request headers using a real generated keypair (generate one
@@ -294,7 +294,7 @@ Cover, per `openspec/changes/discord-contribution-bot/specs/**/*.md`'s scenarios
 **Verification for this task** (run both, from the module root):
 ```
 go vet -tags=integration ./...
-go test -tags=integration ./internal/handler/...
+go test -tags=integration ./internal/api/handler/...
 ```
 Docker is available in this environment — actually run the tagged suite, don't just vet-check
 it. Paste the pass/fail summary into the task report.
@@ -305,7 +305,7 @@ it. Paste the pass/fail summary into the task report.
 
 New oneshot binary `cmd/discord-register-commands/main.go`. Read one or two existing simple
 `cmd/*/main.go` binaries first (e.g. `cmd/migrate` or another small oneshot worker — check
-`internal/worker` bootstrap conventions per `AGENTS.md`'s "worker.Bootstrap is mandatory" note,
+`internal/platform/worker` bootstrap conventions per `AGENTS.md`'s "worker.Bootstrap is mandatory" note,
 though this binary does NOT need `DATABASE_URL` or the DB-touching parts of that convention —
 confirm from the worker package whether `Bootstrap` requires a DB connection unconditionally; if
 it does, this binary should NOT use it, since design.md is explicit this needs no
@@ -352,7 +352,7 @@ Task 3.
 
 ## Task 8: Docs
 
-Add a short note — in `internal/handler/AGENTS.md` if there's a Telegram-config section to mirror
+Add a short note — in `internal/api/handler/AGENTS.md` if there's a Telegram-config section to mirror
 there, otherwise the top-level `AGENTS.md`'s worker/config listing, whichever already documents
 `TELEGRAM_BOT_TOKEN` et al. (grep for it first) — covering the four new env vars
 (`DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_GUILD_ID`) and the

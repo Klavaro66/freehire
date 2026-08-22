@@ -8,18 +8,18 @@ agree once word-break hyphens are removed (`"cfoinsights"` vs `"cfo-insights"`).
 
 **Architecture:** Two independent, additive changes to the existing per-company suppression
 pass — no schema-breaking change, no new Go driver logic. (1) The `ats`/`agg` CTE filters in
-`internal/db/queries/jobs.sql` compare `replace(company_slug, '-', '')` instead of the raw
+`internal/platform/db/queries/jobs.sql` compare `replace(company_slug, '-', '')` instead of the raw
 column, widening which ATS/aggregator rows are considered for the same company. (2) A new
 partial expression index keeps that comparison index-backed instead of falling back to a seq
 scan per company in the reindex loop.
 
-**Tech Stack:** PostgreSQL, sqlc (v1.31.1, generates `internal/db/*.go` from
-`internal/db/queries/*.sql`), Go integration tests (`-tags=integration`, testcontainers).
+**Tech Stack:** PostgreSQL, sqlc (v1.31.1, generates `internal/platform/db/*.go` from
+`internal/platform/db/queries/*.sql`), Go integration tests (`-tags=integration`, testcontainers).
 
 ## Global Constraints
 
 - English only: code, comments, commit messages, migration text.
-- Never hand-edit generated `internal/db/*.go` files — regenerate with sqlc and commit
+- Never hand-edit generated `internal/platform/db/*.go` files — regenerate with sqlc and commit
   whatever it produces.
 - Legal-suffix spelling variance (`"Cfoinsights Inc"` vs `"Cfoinsights"`) is explicitly out of
   scope for this change (design doc: `docs/superpowers/specs/2026-08-05-aggregator-company-slug-fold-dedup-design.md`).
@@ -36,10 +36,10 @@ scan per company in the reindex loop.
 ### Task 1: Fold the company_slug comparison in the suppression query
 
 **Files:**
-- Modify: `internal/db/queries/jobs.sql:562-573` (doc comment), `:586` (the `ats` CTE filter),
+- Modify: `internal/platform/db/queries/jobs.sql:562-573` (doc comment), `:586` (the `ats` CTE filter),
   `:602` (the `agg` CTE filter)
-- Modify (generated, do not hand-edit): `internal/db/jobs.sql.go`
-- Test: `internal/db/aggregator_dedup_integration_test.go`
+- Modify (generated, do not hand-edit): `internal/platform/db/jobs.sql.go`
+- Test: `internal/platform/db/aggregator_dedup_integration_test.go`
 
 **Interfaces:**
 - Consumes: `Queries.SuppressAggregatorDuplicatesForCompany(ctx, SuppressAggregatorDuplicatesForCompanyParams{Company, Aggregators})` — unchanged signature, only the query body changes.
@@ -48,7 +48,7 @@ scan per company in the reindex loop.
 
 - [ ] **Step 1: Write the failing test**
 
-Add this test to `internal/db/aggregator_dedup_integration_test.go` (after
+Add this test to `internal/platform/db/aggregator_dedup_integration_test.go` (after
 `TestSuppressAggregator_MarksAggregatorDuplicateOfATS`, following the same helper pattern as
 `TestCompaniesWithAggregatorPostings_OnlyAggregatorCompanies`, which already overrides
 `.Company`/`.CompanySlug` on the params struct returned by `atsJob`/`aggJob`):
@@ -62,7 +62,7 @@ func TestSuppressAggregator_FoldsCompanySlugWordSeparatorVariance(t *testing.T) 
 	// Two sources spell the same employer differently: greenhouse's raw company name has a
 	// space ("CFO Insights" -> "cfo-insights"), arbeitnow's has none ("Cfoinsights" ->
 	// "cfoinsights"). company_slug is normalize.Slug(name), which never strips legal
-	// suffixes (internal/normalize/slug.go), so the only difference here is where the
+	// suffixes (internal/dict/normalize/slug.go), so the only difference here is where the
 	// word-break hyphen landed.
 	ats := atsJob("cfoinsights:6500265003", "Founder Associate (MBA Graduate)", []string{"GB"})
 	ats.Company = "CFO Insights"
@@ -88,7 +88,7 @@ func TestSuppressAggregator_FoldsCompanySlugWordSeparatorVariance(t *testing.T) 
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `go test -tags=integration ./internal/db/ -run TestSuppressAggregator_FoldsCompanySlugWordSeparatorVariance -v`
+Run: `go test -tags=integration ./internal/platform/db/ -run TestSuppressAggregator_FoldsCompanySlugWordSeparatorVariance -v`
 
 Expected: FAIL — `aggDup` is `-1` (unsuppressed), not the ATS row's id, because the current
 query requires exact `company_slug` equality and `"cfoinsights"` (the aggregator's slug,
@@ -99,7 +99,7 @@ Needs Docker running locally (testcontainers spins up Postgres for `startPostgre
 
 - [ ] **Step 3: Update the doc comment and both CTE filters**
 
-In `internal/db/queries/jobs.sql`, change the doc comment above the query (currently ending
+In `internal/platform/db/queries/jobs.sql`, change the doc comment above the query (currently ending
 `... Run AFTER RecomputeRoleDuplicatesForCompany so ATS reposts have already collapsed to
 their canon.`) by appending one sentence:
 
@@ -151,23 +151,23 @@ Run: `make sqlc` (uses Docker). If Docker cannot run sqlc's own container in thi
 environment, install the pinned version and run it directly instead:
 `go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 && $(go env GOPATH)/bin/sqlc generate`
 (confirm the version matches the `// versions: sqlc v1.31.1` header already in
-`internal/db/jobs.sql.go` before installing).
+`internal/platform/db/jobs.sql.go` before installing).
 
-Then: `git diff --stat internal/db/` — expect only `internal/db/jobs.sql.go` to have changed
-(the embedded query string), not `internal/db/querier.go` or the
+Then: `git diff --stat internal/platform/db/` — expect only `internal/platform/db/jobs.sql.go` to have changed
+(the embedded query string), not `internal/platform/db/querier.go` or the
 `SuppressAggregatorDuplicatesForCompanyParams` struct, since no parameter was added or
 renamed.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `go test -tags=integration ./internal/db/ -run TestSuppressAggregator_FoldsCompanySlugWordSeparatorVariance -v`
+Run: `go test -tags=integration ./internal/platform/db/ -run TestSuppressAggregator_FoldsCompanySlugWordSeparatorVariance -v`
 
 Expected: PASS.
 
 - [ ] **Step 6: Run the full aggregator-suppression test file to check for regressions**
 
-Run: `go test -tags=integration ./internal/db/ -run TestSuppressAggregator -v` and
-`go test -tags=integration ./internal/db/ -run TestCompaniesWithAggregatorPostings -v`
+Run: `go test -tags=integration ./internal/platform/db/ -run TestSuppressAggregator -v` and
+`go test -tags=integration ./internal/platform/db/ -run TestCompaniesWithAggregatorPostings -v`
 
 Expected: PASS — all of `TestSuppressAggregator_MarksAggregatorDuplicateOfATS`,
 `_EmptyCountryStillMatches`, `_DifferentCountryNotSuppressed`, `_NeverDemotesATS`,
@@ -179,7 +179,7 @@ these single-company-slug scenarios can regress.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/db/queries/jobs.sql internal/db/jobs.sql.go internal/db/aggregator_dedup_integration_test.go
+git add internal/platform/db/queries/jobs.sql internal/platform/db/jobs.sql.go internal/platform/db/aggregator_dedup_integration_test.go
 git commit -m "fix(db): fold company_slug word-separator variance in aggregator suppression
 
 Two sources spelling the same employer differently (\"Cfoinsights\" vs \"CFO
@@ -214,8 +214,8 @@ Create `migrations/0074_jobs_open_company_slug_folded_idx.sql`:
 
 ```sql
 -- Partial expression index backing SuppressAggregatorDuplicatesForCompany's cross-source
--- company match (internal/db/queries/jobs.sql). company_slug is normalize.Slug(name) — plain
--- transliteration and hyphenation, no legal-suffix stripping (internal/normalize/slug.go) —
+-- company match (internal/platform/db/queries/jobs.sql). company_slug is normalize.Slug(name) — plain
+-- transliteration and hyphenation, no legal-suffix stripping (internal/dict/normalize/slug.go) —
 -- so two sources spelling the same employer with a different word break ("Cfoinsights" vs
 -- "CFO Insights") produce different slugs ("cfoinsights" vs "cfo-insights"). The suppression
 -- pass now compares replace(company_slug, '-', ''); without this index that predicate
@@ -256,12 +256,12 @@ go build ./...
 go vet ./...
 go vet -tags=integration ./...
 go test ./...
-go test -tags=integration ./internal/db/
+go test -tags=integration ./internal/platform/db/
 ```
 
 Expected: all pass with no errors. `go vet -tags=integration ./...` is the guard this repo's
 `AGENTS.md` requires before every push — it compiles all 152 integration-tagged test files
-across 13 packages, not just `internal/db`, catching any signature drift this change might
+across 13 packages, not just `internal/platform/db`, catching any signature drift this change might
 have caused elsewhere (none is expected, since no exported signature changed).
 
 - [ ] **Step 5: Commit**
@@ -291,8 +291,8 @@ that the planner prefers it at prod's row counts and selectivity.
 - **Spec coverage:** the design doc's two Decisions (folded SQL comparison; new partial
   index, `IF NOT EXISTS` convention) map to Task 1 and Task 2 respectively. The design's
   Non-Goals (legal-suffix folding, `company_slug`'s stored value, cluster-copies key) are
-  untouched by both tasks — confirmed no task modifies `internal/jobderive/jobderive.go`,
-  `internal/normalize/*.go`, or `ListRoleClusterCopies`.
+  untouched by both tasks — confirmed no task modifies `internal/job/jobderive/jobderive.go`,
+  `internal/dict/normalize/*.go`, or `ListRoleClusterCopies`.
 - **Placeholder scan:** no TBD/TODO; every step has literal, runnable commands or code.
 - **Type consistency:** `SuppressAggregatorDuplicatesForCompanyParams{Company, Aggregators}`
   is referenced identically in Task 1 (existing test helper `suppressAggregators`) and is not

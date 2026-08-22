@@ -45,17 +45,17 @@ switch is instant since nothing is fetched.
 
 Both already exist as columns (`jobs.employment_type`, `jobs.seniority`,
 `migrations/0001_init.sql:254,259`) and as override slots on the derivation input
-(`jobderive.Input.EmploymentType`/`.Seniority`, `internal/jobderive/jobderive.go:51,53`,
+(`jobderive.Input.EmploymentType`/`.Seniority`, `internal/job/jobderive/jobderive.go:51,53`,
 precedence "structured signal → title dictionary → description",
 `jobderive.go:135–158`) — but `moderation.CreateInput` never populates them
-(`internal/moderation/moderation.go:239–262` builds `jobderive.Input` without either).
+(`internal/ingest/moderation/moderation.go:239–262` builds `jobderive.Input` without either).
 This wires the same path `work_mode`/`regions` already use:
 
-- `createJobRequest` (`internal/handler/jobs_moderation.go:17`) gains `EmploymentType`,
+- `createJobRequest` (`internal/api/handler/jobs_moderation.go:17`) gains `EmploymentType`,
   `Seniority` — same shape as `WorkMode`.
 - `CreateInput.structured()` (`moderation.go:220`) validates them with the existing
   `validEnum` helper against `vocab.EmploymentTypeValues`/`vocab.SeniorityValues`
-  (`internal/vocab/vocab.go:31,34`) — an out-of-vocabulary value is dropped, degrading to
+  (`internal/dict/vocab/vocab.go:31,34`) — an out-of-vocabulary value is dropped, degrading to
   dictionary derivation exactly like an unknown `work_mode` does today.
 - `derive()` (`moderation.go:239`) passes both into `jobderive.Input`.
 - A migration (`0094` — `0093` was taken by a parallel PR by the time this shipped) adds
@@ -75,26 +75,26 @@ to "Work format" in the Details tab.
 ### 3. Prefill from a job URL
 
 The form's URL field gains a "Fill in from this link" action. It does not touch the
-existing paste-a-link contribution flow (`POST /jobs/resolve`, `internal/handler/contributions.go:45`)
+existing paste-a-link contribution flow (`POST /jobs/resolve`, `internal/api/handler/contributions.go:45`)
 at all — that flow imports directly into the catalog and rewards credits, which is the
 wrong outcome for a submission that is supposed to reach a moderator queue. What it
-reuses is the *parsing engine* underneath both flows: `internal/linksource`, the same
+reuses is the *parsing engine* underneath both flows: `internal/ingest/linksource`, the same
 registry `linkimport.Importer` already holds (host-scoped adapters for greenhouse,
 ashby, lever, workable, habrcareer, remoteyeah, geekjob, bairesdev → board coverage over
-every ATS `internal/atsboard` recognizes → a generic `JobPosting` schema.org fallback for
-an arbitrary careers page, `internal/linksource/registry.go:49–75`). This is materially
+every ATS `internal/ingest/atsboard` recognizes → a generic `JobPosting` schema.org fallback for
+an arbitrary careers page, `internal/ingest/linksource/registry.go:49–75`). This is materially
 broader than hand-writing fetchers for a handful of ATS platforms, and it is already
 built, tested, and running in production behind `/jobs/resolve`.
 
 No new method was needed: `linkimport.Importer` already exposes
 `Resolve(ctx, raw string, known Board) (linksource.Resolved, bool, error)`
-(`internal/linkimport/linkimport.go:126`) — `Import` is defined as `Resolve` + `Write`,
-and `Resolve` alone is the exact seam `internal/jdresolve` already uses to branch on
+(`internal/ingest/linkimport/linkimport.go:126`) — `Import` is defined as `Resolve` + `Write`,
+and `Resolve` alone is the exact seam `internal/ingest/jdresolve` already uses to branch on
 source before deciding how to persist, proven not to write by its own
 `TestResolve_DoesNotWriteAnything`. The prefill handler calls
 `im.Resolve(ctx, url, linkimport.Board{})` directly and reads the parsed `sources.Job`
 (title/company/location/description, and — when the platform states them structurally —
-`WorkMode`/`Seniority`/`EmploymentType`/`Skills`, `internal/sources/source.go:33–57`) off
+`WorkMode`/`Seniority`/`EmploymentType`/`Skills`, `internal/ingest/sources/source.go:33–57`) off
 `resolved.Job`; `ok=false` when nothing matched or the page is not a single posting.
 
 New handler: `POST /submissions/prefill { url }`, `mw.key` + `mw.outboundFetch` (the same
@@ -119,10 +119,10 @@ must not have it clobbered.
 | `web/src/lib/facets.ts` | edit — export `SENIORITY_OPTIONS`, `EMPLOYMENT_TYPE_OPTIONS` |
 | `web/src/lib/types.ts` | edit — `SubmissionInput` gains `employment_type`/`seniority`; new `PrefillResult` type |
 | `web/src/lib/api.ts` | edit — `prefillSubmission(url)` calling `POST /submissions/prefill` |
-| `internal/handler/jobs_moderation.go` | edit — `createJobRequest`/`toCreateInput` gain the two fields |
-| `internal/moderation/moderation.go` | edit — `CreateInput`, `structured()`, `derive()` wire them into `jobderive.Input` |
-| `internal/linkimport/linkimport.go` | edit — new `Preview` method, no persistence |
-| `internal/handler/submissions.go` | edit — new `POST /submissions/prefill` route (`api.Post("/submissions", ...)` sits at `submissions.go:33`) |
+| `internal/api/handler/jobs_moderation.go` | edit — `createJobRequest`/`toCreateInput` gain the two fields |
+| `internal/ingest/moderation/moderation.go` | edit — `CreateInput`, `structured()`, `derive()` wire them into `jobderive.Input` |
+| `internal/ingest/linkimport/linkimport.go` | edit — new `Preview` method, no persistence |
+| `internal/api/handler/submissions.go` | edit — new `POST /submissions/prefill` route (`api.Post("/submissions", ...)` sits at `submissions.go:33`) |
 | `migrations/0093_submission_employment_seniority.sql` | new — `job_submissions.employment_type`/`.seniority` columns |
 | `cmd/gen-contracts` output (`web/src/lib/types.ts` generated section) | regenerate after the Go wire types change |
 

@@ -4,8 +4,8 @@
 
 The account's timezone, its saved-search digest frequency (instant/daily),
 and its quiet-hours window — the controls that decide *when* a notification
-actually goes out, read by `internal/notify`, `internal/reminder`, and
-`internal/nudge` via the shared `internal/deliverywindow` package.
+actually goes out, read by `internal/engage/notify`, `internal/engage/reminder`, and
+`internal/engage/nudge` via the shared `internal/application/deliverywindow` package.
 
 ## Requirements
 

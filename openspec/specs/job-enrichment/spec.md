@@ -29,7 +29,7 @@ be additive: writing it SHALL NOT modify any raw source field (`title`,
 ### Requirement: Enrichment fields follow a typed contract with controlled vocabularies
 
 The system SHALL define the enrichment payload as a single typed Go contract in
-`internal/enrich` whose fields and allowed values are the schema's source of
+`internal/ai/enrich` whose fields and allowed values are the schema's source of
 truth. Every field SHALL be optional and omitted when not determined. Enum
 fields SHALL accept only their defined vocabulary values; `skills`, `cities`,
 `countries`, and `regions` SHALL be arrays; `skills` values SHALL be normalized

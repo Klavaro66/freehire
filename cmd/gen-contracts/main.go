@@ -14,18 +14,18 @@ import (
 
 	"github.com/gzuidhof/tygo/tygo"
 
-	"github.com/strelov1/freehire/internal/appevent"
-	"github.com/strelov1/freehire/internal/classify"
-	"github.com/strelov1/freehire/internal/collections"
-	"github.com/strelov1/freehire/internal/ghost"
-	"github.com/strelov1/freehire/internal/industrytag"
-	"github.com/strelov1/freehire/internal/location"
-	"github.com/strelov1/freehire/internal/mailclassify"
-	"github.com/strelov1/freehire/internal/roletag"
-	"github.com/strelov1/freehire/internal/skilltag"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/userjob"
-	"github.com/strelov1/freehire/internal/vocab"
+	"github.com/strelov1/freehire/internal/application/appevent"
+	"github.com/strelov1/freehire/internal/application/mailclassify"
+	"github.com/strelov1/freehire/internal/application/userjob"
+	"github.com/strelov1/freehire/internal/dict/classify"
+	"github.com/strelov1/freehire/internal/dict/industrytag"
+	"github.com/strelov1/freehire/internal/dict/location"
+	"github.com/strelov1/freehire/internal/dict/roletag"
+	"github.com/strelov1/freehire/internal/dict/skilltag"
+	"github.com/strelov1/freehire/internal/dict/vocab"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/job/collections"
+	"github.com/strelov1/freehire/internal/job/ghost"
 )
 
 const outputPath = "web/src/lib/generated/contracts.ts"
@@ -86,26 +86,26 @@ func genStructs() (string, error) {
 	cfg := &tygo.Config{
 		Packages: []*tygo.PackageConfig{
 			{
-				Path:         "github.com/strelov1/freehire/internal/enrich",
+				Path:         "github.com/strelov1/freehire/internal/ai/enrich",
 				OutputPath:   enrichTS,
 				IncludeFiles: []string{"enrichment.go"},
 			},
 			{
-				Path:         "github.com/strelov1/freehire/internal/jobview",
+				Path:         "github.com/strelov1/freehire/internal/job/jobview",
 				OutputPath:   jobviewTS,
 				IncludeFiles: []string{"jobview.go", "card.go", "reality.go", "ghost.go"},
 				TypeMappings: map[string]string{"enrich.Enrichment": "Enrichment"},
 			},
 			{
 				// The curated skill bundles the verdict reports coverage of.
-				Path:         "github.com/strelov1/freehire/internal/skillbundle",
+				Path:         "github.com/strelov1/freehire/internal/dict/skillbundle",
 				OutputPath:   bundleTS,
 				IncludeFiles: []string{"skillbundle.go"},
 			},
 			{
 				// The market-coverage verdict wire shape (Verdict + Gap + SkillRow +
 				// []skillbundle.Bundle → Bundle).
-				Path:         "github.com/strelov1/freehire/internal/verdict",
+				Path:         "github.com/strelov1/freehire/internal/job/verdict",
 				OutputPath:   verdictTS,
 				IncludeFiles: []string{"verdict.go"},
 				TypeMappings: map[string]string{"skillbundle.Bundle": "Bundle"},
@@ -115,7 +115,7 @@ func genStructs() (string, error) {
 				// the rest of the package is the capture: the stored Form keeps each
 				// platform's own identifiers and option values, which exist to be handed
 				// back to that platform and are of no use to a browser.
-				Path:         "github.com/strelov1/freehire/internal/applyform",
+				Path:         "github.com/strelov1/freehire/internal/ingest/applyform",
 				OutputPath:   applyformTS,
 				IncludeFiles: []string{"display.go"},
 			},
@@ -123,7 +123,7 @@ func genStructs() (string, error) {
 				// The CV ATS-readiness report wire shape (Report + Check + Status) and the
 				// two-report comparison (Delta + CategoryChange). Self-contained — only
 				// primitives, []Check and []CategoryChange.
-				Path:         "github.com/strelov1/freehire/internal/atscheck",
+				Path:         "github.com/strelov1/freehire/internal/candidate/atscheck",
 				OutputPath:   atscheckTS,
 				IncludeFiles: []string{"atscheck.go", "delta.go"},
 			},
@@ -132,27 +132,27 @@ func genStructs() (string, error) {
 				// Coverage). lineitem.go is deliberately excluded: its LineItem and Status are
 				// the same shape atscheck already emitted, and the panel renders both scorers'
 				// rows through one component, so the generated LineItem is shared.
-				Path:         "github.com/strelov1/freehire/internal/cvmatch",
+				Path:         "github.com/strelov1/freehire/internal/candidate/cvmatch",
 				OutputPath:   cvmatchTS,
 				IncludeFiles: []string{"cvmatch.go"},
 			},
 			{
 				// The per-job profile-match wire shape (JobMatch + AdjacentSkill).
-				Path:         "github.com/strelov1/freehire/internal/jobmatch",
+				Path:         "github.com/strelov1/freehire/internal/candidate/jobmatch",
 				OutputPath:   jobmatchTS,
 				IncludeFiles: []string{"jobmatch.go"},
 			},
 			{
 				// The hard-constraint blocker wire shape (Blocker + Category/Severity enums).
 				// Only blocker.go — the evaluator inputs/logic are server-only.
-				Path:         "github.com/strelov1/freehire/internal/hardconstraint",
+				Path:         "github.com/strelov1/freehire/internal/candidate/hardconstraint",
 				OutputPath:   hardconstraintTS,
 				IncludeFiles: []string{"blocker.go"},
 			},
 			{
 				// The on-demand LLM fit analysis wire shape (Analysis + Dimension +
 				// Requirement). Only matchanalysis.go — analyzer.go holds server-only types.
-				Path:         "github.com/strelov1/freehire/internal/matchanalysis",
+				Path:         "github.com/strelov1/freehire/internal/candidate/matchanalysis",
 				OutputPath:   matchanalysisTS,
 				IncludeFiles: []string{"matchanalysis.go"},
 				TypeMappings: map[string]string{"hardconstraint.Blocker": "Blocker"},
@@ -161,7 +161,7 @@ func genStructs() (string, error) {
 				// The read-only structured résumé wire shape (Structured + Experience +
 				// Education). Only structured.go — resumeextract.go holds the server-only
 				// Extractor.
-				Path:         "github.com/strelov1/freehire/internal/resumeextract",
+				Path:         "github.com/strelov1/freehire/internal/candidate/resumeextract",
 				OutputPath:   resumeextractTS,
 				IncludeFiles: []string{"structured.go"},
 			},
@@ -170,7 +170,7 @@ func genStructs() (string, error) {
 				// Experience + Education + SkillGroup + Language + Project +
 				// Certification) and the tailoring Patch. Only the wire files — seed/store/
 				// renderer are server-only.
-				Path:       "github.com/strelov1/freehire/internal/cv",
+				Path:       "github.com/strelov1/freehire/internal/candidate/cv",
 				OutputPath: cvTS,
 				// autopilot.go carries the run report's wire shape; its server-side rules
 				// (sanitizing, the owner-scoped writes) live in autopilot_store.go and stay here.
@@ -180,14 +180,14 @@ func genStructs() (string, error) {
 				// One entry in a CV's history feed. Only the wire file: the operations, the
 				// path policy and the repository are the server's, and the feed carries the
 				// addresses a revision touched rather than what it did with them.
-				Path:         "github.com/strelov1/freehire/internal/cvedit",
+				Path:         "github.com/strelov1/freehire/internal/candidate/cvedit",
 				OutputPath:   cveditTS,
 				IncludeFiles: []string{"wire.go"},
 			},
 			{
 				// The candidate's own screening answers wire shape (Answers). Only
 				// screeninganswers.go — store.go and repository.go are server-only.
-				Path:         "github.com/strelov1/freehire/internal/screeninganswers",
+				Path:         "github.com/strelov1/freehire/internal/ingest/screeninganswers",
 				OutputPath:   screeninganswersTS,
 				IncludeFiles: []string{"screeninganswers.go"},
 			},
@@ -334,22 +334,22 @@ func genVocab() string {
 	b.WriteString(emitVocab("Relocation", "RELOCATION_VALUES", vocab.RelocationValues))
 	b.WriteString(emitVocab("EnglishLevel", "ENGLISH_LEVEL_VALUES", vocab.EnglishLevelValues))
 	b.WriteString(emitVocab("CompanyType", "COMPANY_TYPE_VALUES", vocab.CompanyTypeValues))
-	// The company feedback category vocabulary (internal/companyfeedback), generated
+	// The company feedback category vocabulary (internal/engage/companyfeedback), generated
 	// so the review form's category picker can't drift from the DB CHECK constraint.
 	b.WriteString(emitVocab("CompanyFeedbackType", "COMPANY_FEEDBACK_TYPE_VALUES", vocab.CompanyFeedbackTypeValues))
 	// The report-reason vocabulary for flagging a specific feedback entry, generated
 	// so the report picker can't drift from the DB CHECK constraint.
 	b.WriteString(emitVocab("CompanyFeedbackReportReason", "COMPANY_FEEDBACK_REPORT_REASON_VALUES", vocab.CompanyFeedbackReportReasonValues))
 	b.WriteString(emitVocab("Domain", "DOMAIN_VALUES", vocab.DomainValues))
-	// The curated company-industry vocabulary (internal/industrytag) — the level
+	// The curated company-industry vocabulary (internal/dict/industrytag) — the level
 	// beneath domains. Generated in both halves, values and labels, so the filter's
 	// options cannot drift from the dictionary the column is written through.
 	b.WriteString(emitVocab("Industry", "INDUSTRY_VALUES", industrytag.Canonicals()))
 	b.WriteString(emitMap("IndustryLabels", "INDUSTRY_LABELS", industrytag.Labels()))
-	// The six AI skill-signature archetype slugs (internal/aiarchetype), generated
+	// The six AI skill-signature archetype slugs (internal/ai/aiarchetype), generated
 	// so the AI Specialization filter's valid values can't drift from the rule table.
 	b.WriteString(emitVocab("AIArchetype", "AI_ARCHETYPE_VALUES", vocab.AIArchetypeValues))
-	// The role-type vocabulary (internal/roletype), generated for the same reason:
+	// The role-type vocabulary (internal/dict/roletype), generated for the same reason:
 	// the filter's one pill must not drift from the dictionary. It holds a single
 	// value, and the absence of one means "no management marker", never
 	// "individual contributor" — nothing in the SPA may label it as the latter.

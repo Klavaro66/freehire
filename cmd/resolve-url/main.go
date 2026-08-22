@@ -1,5 +1,5 @@
 // Command resolve-url ingests individual job postings by URL. It is the operator-facing
-// surface of internal/linkimport: some vacancies live only as a single detail page that no
+// surface of internal/ingest/linkimport: some vacancies live only as a single detail page that no
 // board feed enumerates (a Teamtailor custom-domain site with an empty listing, a Breezy
 // private-link posting), so a board entry cannot reach them. resolve-url takes one or more
 // job URLs (as arguments or on stdin) and imports each — the per-ATS adapters first
@@ -19,12 +19,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/boardresolve"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/linkimport"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/boardresolve"
+	"github.com/strelov1/freehire/internal/ingest/linkimport"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 func main() { worker.Main(run) }

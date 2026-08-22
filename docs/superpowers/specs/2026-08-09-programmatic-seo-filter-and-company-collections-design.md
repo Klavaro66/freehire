@@ -8,7 +8,7 @@
 `freehire` already has a unified `/collections/[slug]` programmatic SEO surface
 covering **two** kinds of collection: filter collections (`FILTER_COLLECTIONS` in
 `web/src/lib/collections.ts` — remote-region, skill, category, seniority, role
-landings, frontend-only) and company collections (`internal/collections`'s
+landings, frontend-only) and company collections (`internal/job/collections`'s
 registry — YC, Techstars, a16z, Big Tech, Unicorns, visa-sponsor registers —
 propagated onto every job as `jobs.collections` and resolved through the same
 route via `COLLECTIONS` in `web/src/lib/generated/contracts.ts`). Two gaps limit
@@ -31,7 +31,7 @@ covered by the design below since the two kinds share one route.
 ## Non-goals
 
 - No new company-collection page type or route — `/collections/yc` and its
-  siblings already exist (`internal/collections`'s registry, unified with
+  siblings already exist (`internal/job/collections`'s registry, unified with
   `FILTER_COLLECTIONS` through `collectionBySlug`). Nothing here duplicates that.
 
 - No auto-generated cross-product of every facet combination. Combinations stay
@@ -51,7 +51,7 @@ covered by the design below since the two kinds share one route.
 
 `collections/[slug]/+page.server.ts` already calls `serverApi(fetch).searchJobs(...)`
 to SSR the first page of jobs, and that response's `meta.total` is the exact
-same live count already available today (see `internal/handler` job list
+same live count already available today (see `internal/api/handler` job list
 response shape: `{"data": ..., "meta": {"total": ...}}`). No new fetch, no
 caching — the number is already in hand at render time.
 
@@ -75,8 +75,8 @@ existing entry shape (`slug`, `title`, `description`, `params`) and existing
 discipline (verify each new entry has a healthy live count via
 `searchJobs(params, 0, 0).total` before adding it — do this as part of
 implementation, not design). Candidate axes to grow, using only facet values
-that already exist as first-class dictionary entries (`internal/skilltag`,
-`internal/location` region/country codes, `internal/classify` role/category):
+that already exist as first-class dictionary entries (`internal/dict/skilltag`,
+`internal/dict/location` region/country codes, `internal/dict/classify` role/category):
 
 - More country-level remote landings beyond the current six regions (e.g.
   additional single-country remote pages where demand is plausible: Canada,
@@ -84,7 +84,7 @@ that already exist as first-class dictionary entries (`internal/skilltag`,
 - More skill landings beyond the current set, for skilltag canonicals not yet
   covered.
 - Role-level landings (e.g. `frontend-engineer`, `data-engineer`) alongside
-  the existing hand-curated `role` entries, reusing `internal/classify`
+  the existing hand-curated `role` entries, reusing `internal/dict/classify`
   category/role vocabulary.
 
 No structural change to the `FilterCollection` type or the route — this is
@@ -97,7 +97,7 @@ detail page) rendering a fixed-size set of internal links (target ~4-6) built
 from two independent sources, evaluated at SSR time using data the job page
 already has loaded — its own facets, and its own `collections` field (already
 populated by the existing propagation from company membership, per
-`internal/collections`):
+`internal/job/collections`):
 
 - **Source A — job facets:** the current job's role/category, region
   (country/remote-region), and skills, matched against existing
@@ -107,7 +107,7 @@ populated by the existing propagation from company membership, per
 - **Source B — company collections:** the job's own `collections` field (e.g.
   `['yc']` for a YC-backed company's job) matched against the existing
   `COLLECTIONS` registry (`web/src/lib/generated/contracts.ts`, mirroring
-  `internal/collections`) — no new data source, this field already exists on
+  `internal/job/collections`) — no new data source, this field already exists on
   every job today.
 - **Fill logic:** concatenate A then B matches (order: most specific first —
   skill/role before region, job facets before company collections), dedupe by

@@ -1,10 +1,10 @@
-# internal/industrytag Implementation Plan
+# internal/dict/industrytag Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn `companies.industries` from a two-vocabulary display field into a curated, dict-only facet users can filter on.
 
-**Architecture:** A new `internal/industrytag` package owns an alias→canonical map, exactly as `internal/skilltag` owns skills. Every writer (`cmd/import-yc`, a new import worker) passes raw tags through `Canonicalize` before they reach the column, and unknown tags emit nothing. `UpsertYCCompany` stops replacing columns it does not own. The facet is wired into Meilisearch and the UI last, once the data is clean.
+**Architecture:** A new `internal/dict/industrytag` package owns an alias→canonical map, exactly as `internal/dict/skilltag` owns skills. Every writer (`cmd/import-yc`, a new import worker) passes raw tags through `Canonicalize` before they reach the column, and unknown tags emit nothing. `UpsertYCCompany` stops replacing columns it does not own. The facet is wired into Meilisearch and the UI last, once the data is clean.
 
 **Tech Stack:** Go 1.25, sqlc, pgx, Meilisearch, SvelteKit.
 
@@ -18,18 +18,18 @@ Spec: `docs/superpowers/specs/2026-08-15-industrytag-design.md`
 - Before committing any `*.go`: `gofmt -w` those paths, then `go vet ./...` and `go test ./...`.
 - Before pushing: `go vet -tags=integration ./...`.
 - Never write to `companies` columns owned by `RefreshCompanyFacets`: `job_count`, `regions`, `countries`, `domains`, `company_types`, `company_sizes`, `remote_regions`.
-- `internal/db/` is generated. Edit `internal/db/queries/*.sql`, then run `make sqlc`.
+- `internal/platform/db/` is generated. Edit `internal/platform/db/queries/*.sql`, then run `make sqlc`.
 
 ---
 
 ### Task 1: The `industrytag` package
 
 **Files:**
-- Create: `internal/industrytag/industrytag.go`
-- Create: `internal/industrytag/dictionaries.go`
-- Create: `internal/industrytag/labels.go`
-- Test: `internal/industrytag/industrytag_test.go`
-- Test: `internal/industrytag/dictionaries_test.go`
+- Create: `internal/dict/industrytag/industrytag.go`
+- Create: `internal/dict/industrytag/dictionaries.go`
+- Create: `internal/dict/industrytag/labels.go`
+- Test: `internal/dict/industrytag/industrytag_test.go`
+- Test: `internal/dict/industrytag/dictionaries_test.go`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -87,12 +87,12 @@ func TestCanonicalize(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `go test ./internal/industrytag/ -run TestCanonicalize -v`
+Run: `go test ./internal/dict/industrytag/ -run TestCanonicalize -v`
 Expected: FAIL — build error, `undefined: Canonicalize`.
 
 - [ ] **Step 3: Write the implementation**
 
-`internal/industrytag/industrytag.go`:
+`internal/dict/industrytag/industrytag.go`:
 
 ```go
 // Package industrytag resolves free-text industry labels to a curated canonical
@@ -102,7 +102,7 @@ Expected: FAIL — build error, `undefined: Canonicalize`.
 // verticals derived from job enrichment, and 42% of tagged companies land in its
 // "other" bucket. This dictionary names what those companies actually do.
 //
-// Dict-only, like internal/skilltag and internal/location: a tag outside the
+// Dict-only, like internal/dict/skilltag and internal/dict/location: a tag outside the
 // dictionary produces nothing. Guessing would put a third spelling into a column
 // that already mixes two.
 package industrytag
@@ -154,10 +154,10 @@ func Canonicalize(tags []string) []string {
 
 Add `"slices"` to the import block.
 
-`internal/industrytag/dictionaries.go`: package clause, then the generated
+`internal/dict/industrytag/dictionaries.go`: package clause, then the generated
 `aliases` map from `scratch/company-dump/industrytag-seed.go.txt`.
 
-`internal/industrytag/labels.go`:
+`internal/dict/industrytag/labels.go`:
 
 ```go
 package industrytag
@@ -201,12 +201,12 @@ func Canonicals() []string {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `go test ./internal/industrytag/ -run TestCanonicalize -v`
+Run: `go test ./internal/dict/industrytag/ -run TestCanonicalize -v`
 Expected: PASS, all six subtests.
 
 - [ ] **Step 5: Write the dictionary invariant tests**
 
-`internal/industrytag/dictionaries_test.go`:
+`internal/dict/industrytag/dictionaries_test.go`:
 
 ```go
 package industrytag
@@ -255,17 +255,17 @@ func TestEveryCanonicalHasALabel(t *testing.T) {
 
 - [ ] **Step 6: Run the invariant tests and fix the dictionary until they pass**
 
-Run: `go test ./internal/industrytag/ -v`
+Run: `go test ./internal/dict/industrytag/ -v`
 Expected: PASS. Failures here mean the seed needs editing, not the code — fix
 `dictionaries.go` / `labels.go`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-gofmt -w internal/industrytag/
+gofmt -w internal/dict/industrytag/
 go vet ./... && go test ./...
-git add internal/industrytag/
-git commit -m "Add internal/industrytag: curated industry vocabulary"
+git add internal/dict/industrytag/
+git commit -m "Add internal/dict/industrytag: curated industry vocabulary"
 ```
 
 ---
@@ -273,9 +273,9 @@ git commit -m "Add internal/industrytag: curated industry vocabulary"
 ### Task 2: Stop `UpsertYCCompany` from clobbering other sources
 
 **Files:**
-- Modify: `internal/db/queries/companies.sql:239-270` (`UpsertYCCompany`)
+- Modify: `internal/platform/db/queries/companies.sql:239-270` (`UpsertYCCompany`)
 - Modify: `cmd/import-yc/main.go:185-206` (`recordToParams`)
-- Test: `internal/db/company_yc_integration_test.go`
+- Test: `internal/platform/db/company_yc_integration_test.go`
 
 **Interfaces:**
 - Consumes: `industrytag.Canonicalize` from Task 1.
@@ -283,7 +283,7 @@ git commit -m "Add internal/industrytag: curated industry vocabulary"
 
 - [ ] **Step 1: Write the failing integration test**
 
-Append to `internal/db/company_yc_integration_test.go` (the file already carries
+Append to `internal/platform/db/company_yc_integration_test.go` (the file already carries
 `//go:build integration`):
 
 ```go
@@ -338,12 +338,12 @@ func TestUpsertYCCompanyPreservesExistingValues(t *testing.T) {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `go test -tags=integration ./internal/db/ -run TestUpsertYCCompanyPreservesExistingValues -v`
+Run: `go test -tags=integration ./internal/platform/db/ -run TestUpsertYCCompanyPreservesExistingValues -v`
 Expected: FAIL — tagline is `"YC tagline"`, website is gone, industries are `{fintech}`.
 
 - [ ] **Step 3: Change the query**
 
-In `internal/db/queries/companies.sql`, replace the three offending lines of the
+In `internal/platform/db/queries/companies.sql`, replace the three offending lines of the
 `ON CONFLICT (slug) DO UPDATE SET` block:
 
 ```sql
@@ -376,7 +376,7 @@ In `cmd/import-yc/main.go`, inside `recordToParams`, replace
 		Industries:    industrytag.Canonicalize(r.Industries),
 ```
 
-Add `"github.com/strelov1/freehire/internal/industrytag"` to the imports. Check the
+Add `"github.com/strelov1/freehire/internal/dict/industrytag"` to the imports. Check the
 module path against the top of `go.mod` before writing it.
 
 `Canonicalize` already returns a non-nil slice, so `nonNil` is no longer needed
@@ -384,15 +384,15 @@ here; leave the helper alone if other call sites use it.
 
 - [ ] **Step 5: Run the tests**
 
-Run: `go test -tags=integration ./internal/db/ -run TestUpsertYCCompany -v && go test ./cmd/import-yc/...`
+Run: `go test -tags=integration ./internal/platform/db/ -run TestUpsertYCCompany -v && go test ./cmd/import-yc/...`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-gofmt -w internal/db/ cmd/import-yc/
+gofmt -w internal/platform/db/ cmd/import-yc/
 go vet ./... && go test ./... && go vet -tags=integration ./...
-git add internal/db/ cmd/import-yc/
+git add internal/platform/db/ cmd/import-yc/
 git commit -m "Make UpsertYCCompany merge instead of replace, canonicalize industries"
 ```
 
@@ -403,7 +403,7 @@ git commit -m "Make UpsertYCCompany merge instead of replace, canonicalize indus
 **Files:**
 - Create: `cmd/import-company-industries/main.go`
 - Create: `cmd/import-company-industries/main_test.go`
-- Modify: `internal/db/queries/companies.sql` (add two queries)
+- Modify: `internal/platform/db/queries/companies.sql` (add two queries)
 
 **Interfaces:**
 - Consumes: `industrytag.Canonicalize` from Task 1.
@@ -415,7 +415,7 @@ unions the canonicalized markets in. Both are idempotent.
 
 - [ ] **Step 1: Add the queries**
 
-In `internal/db/queries/companies.sql`:
+In `internal/platform/db/queries/companies.sql`:
 
 ```sql
 -- name: ListCompanyIndustriesPage :many
@@ -493,7 +493,7 @@ Expected: FAIL — `undefined: parseSource`.
 
 ```go
 // Command import-company-industries rewrites companies.industries through the
-// internal/industrytag dictionary, and optionally merges a company dump into it.
+// internal/dict/industrytag dictionary, and optionally merges a company dump into it.
 //
 //	import-company-industries                 # normalize the existing column only
 //	import-company-industries companies.jsonl # normalize, then merge the dump
@@ -515,10 +515,10 @@ import (
 	"os"
 	"slices"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/industrytag"
-	"github.com/strelov1/freehire/internal/normalize"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/dict/industrytag"
+	"github.com/strelov1/freehire/internal/dict/normalize"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 const pageSize = 1000
@@ -726,9 +726,9 @@ believing the result.
 - [ ] **Step 7: Commit**
 
 ```bash
-gofmt -w cmd/import-company-industries/ internal/db/
+gofmt -w cmd/import-company-industries/ internal/platform/db/
 go vet ./... && go test ./...
-git add cmd/import-company-industries/ internal/db/
+git add cmd/import-company-industries/ internal/platform/db/
 git commit -m "Add import-company-industries worker: normalize and merge industries"
 ```
 
@@ -738,7 +738,7 @@ git commit -m "Add import-company-industries worker: normalize and merge industr
 
 **Files:**
 - Modify: `internal/search/company.go:113-140`
-- Modify: `internal/handler/companies.go`
+- Modify: `internal/api/handler/companies.go`
 - Test: `internal/search/company_test.go`
 
 **Interfaces:**
@@ -789,9 +789,9 @@ Expected: PASS.
 - [ ] **Step 5: Commit and reindex**
 
 ```bash
-gofmt -w internal/search/ internal/handler/
+gofmt -w internal/search/ internal/api/handler/
 go vet ./... && go test ./...
-git add internal/search/ internal/handler/
+git add internal/search/ internal/api/handler/
 git commit -m "Expose industries as a company facet"
 ```
 

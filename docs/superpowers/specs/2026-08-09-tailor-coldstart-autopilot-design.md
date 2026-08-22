@@ -10,7 +10,7 @@ autopilot) is a manual, opt-in action rather than the cold-start default.
 
 Two issues found together during live QA of PR #1658:
 
-1. **Seeding is unbounded.** `experienceFromBank()` (`internal/experience/professional.go`)
+1. **Seeding is unbounded.** `experienceFromBank()` (`internal/candidate/experience/professional.go`)
    takes every publishable atom under every employment with no cap. As a candidate
    accumulates more banked achievements over time (chat confirmations, repeated
    tailoring sessions), every subsequently-seeded CV gets longer and less curated —
@@ -39,11 +39,11 @@ screen becomes dead code.
 ## Scope
 
 **In scope:**
-- `internal/cv`: the `Tailor()`/`Store` bootstrap no longer requires a cached fit
+- `internal/candidate/cv`: the `Tailor()`/`Store` bootstrap no longer requires a cached fit
   analysis. It seeds/creates the base CV as today, then — instead of stopping there —
   kicks off the autopilot curation run as part of the SAME cold start, before handing
   the workspace to the candidate.
-- The fit analysis (`internal/matchanalysis`) is triggered in the background at the
+- The fit analysis (`internal/candidate/matchanalysis`) is triggered in the background at the
   same moment, independently, not blocking the response. Reuses the existing
   streamed-compute path; only the trigger site and blocking-ness change.
 - Frontend: the CV preview shows the autopilot run happening live — bullets and
@@ -66,7 +66,7 @@ implementation-shaped, not architecture-shaped:
 1. **Does the autopilot run consume anything metered today**, and should making it
    the automatic cold-start default (rather than an explicit click) count against
    some quota, the way the fit analysis has its 10/30-day cap? Needs checking
-   `internal/llmkey`/wherever autopilot's cost is currently attributed.
+   `internal/ai/llmkey`/wherever autopilot's cost is currently attributed.
 2. **Live-streaming the build into the preview is new work, not a rewire.** Today an
    agent turn refetches and replaces the whole `Document` once, at turn end
    (`web/src/routes/tailor/[slug]/+page.svelte`'s agent-turn handling). Showing the

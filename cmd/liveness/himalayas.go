@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/strelov1/freehire/internal/liveness"
+	"github.com/strelov1/freehire/internal/job/liveness"
 )
 
 // himalayasSitemapIndexURL is himalayas.app's own index of what is currently live (see
@@ -15,7 +15,7 @@ import (
 // page itself — which Cloudflare's bot management 403s on every plain GET, verified from
 // both a dev machine and prod — this endpoint answers with a normal 200, no challenge,
 // no proxy needed. himalayas pages its own ingest feed to a recency-limited slice (see
-// internal/sources/himalayas.go's himalayasMaxPages), which is what leaves an aged-out
+// internal/ingest/sources/himalayas.go's himalayasMaxPages), which is what leaves an aged-out
 // company's posting unreachable by the ingest sweep in the first place; the sitemap
 // carries no such limit, so it is real evidence of what is still live rather than a
 // guess, at the cost of one run-wide fetch (a few MB) instead of one GET per candidate.

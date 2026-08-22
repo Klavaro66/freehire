@@ -6,7 +6,7 @@ The side panel's conversation with freehire's assistant: the transport a turn ru
 over, how a turn is cancelled, how a conversation survives the panel closing, and
 what the user sees while the agent works.
 
-The assistant itself is hire's (`internal/assistant`); this capability is only the
+The assistant itself is hire's (`internal/ai/assistant`); this capability is only the
 panel's half of it. The conversation runs under the `browse` preset, which is what
 gives its agent the page tool.
 

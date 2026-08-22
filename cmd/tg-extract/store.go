@@ -10,12 +10,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/enrich"
-	"github.com/strelov1/freehire/internal/job"
-	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/pgconv"
-	"github.com/strelov1/freehire/internal/telegram"
+	"github.com/strelov1/freehire/internal/ai/enrich"
+	"github.com/strelov1/freehire/internal/ingest/telegram"
+	"github.com/strelov1/freehire/internal/job/job"
+	"github.com/strelov1/freehire/internal/job/jobderive"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/pgconv"
 )
 
 // buildParams constructs the UpsertJob params for one Telegram-sourced job through

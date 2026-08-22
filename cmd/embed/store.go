@@ -7,8 +7,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/embed"
+	"github.com/strelov1/freehire/internal/ai/embed"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // dbStore adapts the generated queries + pool to embed.Store. It is the only place the

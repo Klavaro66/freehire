@@ -18,7 +18,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/strelov1/freehire/internal/mailpreview"
+	"github.com/strelov1/freehire/internal/engage/mailpreview"
 )
 
 func main() {

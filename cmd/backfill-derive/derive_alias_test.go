@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobhash"
+	"github.com/strelov1/freehire/internal/job/jobhash"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // TestDeriveRow_ResolvesThroughTheAliasRegistry guards the merges against this worker.

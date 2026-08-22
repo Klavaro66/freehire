@@ -7,7 +7,7 @@ TBD - created by archiving change resume-skill-gap. Update Purpose after archive
 
 The system SHALL provide `POST /api/v1/me/resume/extract`, guarded by cookie session
 authentication (`RequireAuth`), that turns an uploaded resume into a list of canonical skill
-slugs using the existing deterministic `internal/skilltag` dictionary. The endpoint SHALL
+slugs using the existing deterministic `internal/dict/skilltag` dictionary. The endpoint SHALL
 accept either a PDF file via `multipart/form-data` (field `file`) or plain text via
 `application/json` (`{"text": "..."}`), dispatched by `Content-Type`. PDF text extraction
 SHALL decode any text-bearing PDF regardless of font encoding — including CID fonts with

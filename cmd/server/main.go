@@ -13,26 +13,26 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
-	appleauth "github.com/strelov1/freehire/internal/auth/apple"
-	"github.com/strelov1/freehire/internal/auth/oauth"
-	"github.com/strelov1/freehire/internal/blobstore"
-	"github.com/strelov1/freehire/internal/cache"
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/credits"
-	"github.com/strelov1/freehire/internal/cv"
-	"github.com/strelov1/freehire/internal/database"
-	"github.com/strelov1/freehire/internal/gmailsync"
-	"github.com/strelov1/freehire/internal/handler"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/llmkey"
-	"github.com/strelov1/freehire/internal/matchanalysis"
-	"github.com/strelov1/freehire/internal/observability"
-	"github.com/strelov1/freehire/internal/pii"
-	"github.com/strelov1/freehire/internal/ratelimit"
-	"github.com/strelov1/freehire/internal/realtime"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/speech"
-	"github.com/strelov1/freehire/internal/tokencrypt"
+	"github.com/strelov1/freehire/internal/ai/credits"
+	"github.com/strelov1/freehire/internal/ai/llmkey"
+	"github.com/strelov1/freehire/internal/ai/speech"
+	"github.com/strelov1/freehire/internal/api/handler"
+	"github.com/strelov1/freehire/internal/api/ratelimit"
+	"github.com/strelov1/freehire/internal/api/realtime"
+	"github.com/strelov1/freehire/internal/application/gmailsync"
+	"github.com/strelov1/freehire/internal/candidate/cv"
+	"github.com/strelov1/freehire/internal/candidate/matchanalysis"
+	"github.com/strelov1/freehire/internal/candidate/pii"
+	appleauth "github.com/strelov1/freehire/internal/identity/auth/apple"
+	"github.com/strelov1/freehire/internal/identity/auth/oauth"
+	"github.com/strelov1/freehire/internal/platform/blobstore"
+	"github.com/strelov1/freehire/internal/platform/cache"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/database"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/observability"
+	"github.com/strelov1/freehire/internal/platform/tokencrypt"
+	"github.com/strelov1/freehire/internal/search/search"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -79,7 +79,7 @@ func main() {
 	defer pool.Close()
 
 	// Redis is a required dependency, like Postgres — it backs the shared rate
-	// limiter (internal/ratelimit) with no in-memory fallback mode. A malformed
+	// limiter (internal/api/ratelimit) with no in-memory fallback mode. A malformed
 	// REDIS_URL is fatal at startup rather than degrading rate limiting silently.
 	redisOpts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
@@ -123,7 +123,7 @@ func main() {
 		// (the nginx container); a direct public caller is not trusted.
 		ProxyHeader:             "X-Real-IP", // Fiber has no constant for this header
 		EnableTrustedProxyCheck: true,
-		// Shared with internal/ratelimit, which does not count a peer we trust to
+		// Shared with internal/api/ratelimit, which does not count a peer we trust to
 		// assert someone else's address — chiefly our own SSR, which reaches the
 		// API over loopback. One definition so the two cannot disagree.
 		TrustedProxies: ratelimit.TrustedCIDRs,
@@ -268,7 +268,7 @@ func main() {
 
 	// PII detector for de-identifying CV text before it reaches the LLM. Nil when
 	// PII_FILTER_URL is unset, which fails the CV→LLM paths closed (no analysis) rather
-	// than leaking PII (see internal/pii, internal/matchanalysis, internal/resumeextract).
+	// than leaking PII (see internal/candidate/pii, internal/candidate/matchanalysis, internal/candidate/resumeextract).
 	var piiDetector pii.Detector
 	if cfg.PIIFilterURL != "" {
 		piiDetector = pii.NewHTTPDetector(cfg.PIIFilterURL, nil)

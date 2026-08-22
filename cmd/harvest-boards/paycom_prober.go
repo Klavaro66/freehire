@@ -9,7 +9,7 @@ import (
 
 // paycomProber validates a Paycom portal "<clientkey>" by reading the per-portal session JWT
 // from its SSR page, then counting open postings via the regional Mantle API. Paycom exposes
-// the employer name at /api/ats/company-name. See internal/sources/paycom.go for the contract.
+// the employer name at /api/ats/company-name. See internal/ingest/sources/paycom.go for the contract.
 type paycomProber struct{}
 
 var (

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/embed"
-	"github.com/strelov1/freehire/internal/search"
+	"github.com/strelov1/freehire/internal/ai/embed"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 // searchIndexer adapts the search client to embed.Indexer: compute each open job's

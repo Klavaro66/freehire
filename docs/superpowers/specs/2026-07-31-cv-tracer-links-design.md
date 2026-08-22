@@ -37,9 +37,9 @@ CV, not proof, and mail-security scanners inflate it. The UI must not overclaim.
 
 ## Architecture
 
-### `internal/tracerlink` — new domain package
+### `internal/platform/tracerlink` — new domain package
 
-Fiber-free and pgx-free, following `internal/jobtracking`. It owns:
+Fiber-free and pgx-free, following `internal/application/jobtracking`. It owns:
 
 - `Targets(doc cv.Document) []Target` — which links are eligible and their `source_path`.
 - `Token(companySlug string) string` — token minting.
@@ -47,11 +47,11 @@ Fiber-free and pgx-free, following `internal/jobtracking`. It owns:
 - `VisitorHash(salt, ip, userAgent string) string` — HMAC.
 
 All pure. The HTTP handler and the sqlc queries live where they always do
-(`internal/handler/cv.go`, `internal/db/queries/tracer_links.sql`).
+(`internal/api/handler/cv.go`, `internal/platform/db/queries/tracer_links.sql`).
 
 ### The redirect lives in Go, not SvelteKit
 
-`app.Get("/cv/:token")` beside `/health` (`internal/handler/handler.go:349`), plus
+`app.Get("/cv/:token")` beside `/health` (`internal/api/handler/handler.go:349`), plus
 `location /cv/ { proxy_pass $backend; }` in `web/nginx.conf`, which today routes only `/api/`
 and `/health` to the backend.
 
@@ -65,7 +65,7 @@ line of nginx config is cheaper than an unverifiable input.
 `cvs.data` is the jsonb the candidate edits and the tailoring agent patches. Tracer state does
 not belong in it.
 
-`renderPayload` (`internal/cv/renderer.go:130`) gains `link_hrefs`, an array aligned by index
+`renderPayload` (`internal/candidate/cv/renderer.go:130`) gains `link_hrefs`, an array aligned by index
 with `links`, and the same for projects. Templates move from `link(l)[#l]` to `link(href)[#l]`,
 falling back to `l` when `href` is empty. A stored CV is unchanged, and a CV rendered with the
 toggle off produces visually identical output to today (verified as SVG — see Testing).
@@ -131,7 +131,7 @@ anonymisation in appearance only. The salt comes from `TRACER_LINK_SALT`.
 
 ### `last_click_at` on `cvs` — the denormalisation
 
-`ListUserJobs` (`internal/db/queries/user_jobs.sql:127`) already carries four correlated
+`ListUserJobs` (`internal/platform/db/queries/user_jobs.sql:127`) already carries four correlated
 subqueries per row (`email_count`, `reminder_fire_at`, `last_activity_at`,
 `has_pending_suggestion`) and is server-rendered. Reading the click history there would mean a
 fifth, joining three tables (`cv_link_clicks → cv_tracer_links → cvs`), since only `cvs.job_id`
@@ -142,7 +142,7 @@ non-bot clicks only. The board then reads one column via `(user_id, job_id)`. Th
 in the CV editor reads the event table directly — it renders one CV, not a hundred cards.
 
 The rejected alternative was a rollup from nginx access logs, by analogy with
-`internal/viewlog`. The analogy breaks: a job view needs no database to be served, so moving
+`internal/application/viewlog`. The analogy breaks: a job view needs no database to be served, so moving
 its counting out of the request path is free. A token redirect *must* read the database to
 know where to send the visitor, so the log route saves exactly one INSERT and costs a worker,
 a flock, a lag before numbers appear, and a second log parser.
@@ -178,7 +178,7 @@ The no-op `DO UPDATE` exists because `ON CONFLICT DO NOTHING` returns no row: on
 `RETURNING` yields nothing and the caller would have to read the token in a second statement —
 reintroducing the race the upsert removes. Same idiom as `UpsertJob`.
 
-Eligibility: links are stored without a scheme (`"github.com/jrivera"`, `internal/cv/preview.go:20`),
+Eligibility: links are stored without a scheme (`"github.com/jrivera"`, `internal/candidate/cv/preview.go:20`),
 so a target qualifies when it normalises to http(s). `mailto:`, `tel:`, empty values, and our
 own domain are skipped.
 
@@ -254,11 +254,11 @@ and off by default, and the 180-day retention.
 
 ## Testing
 
-Unit (`internal/tracerlink`): eligibility (scheme-less, `mailto:`, `tel:`, own domain,
+Unit (`internal/platform/tracerlink`): eligibility (scheme-less, `mailto:`, `tel:`, own domain,
 malformed), token format, UA classification including the `HEAD` rule, hash stability under a
 fixed salt.
 
-Integration (`internal/db`, build tag): rendering the same CV twice yields the same tokens;
+Integration (`internal/platform/db`, build tag): rendering the same CV twice yields the same tokens;
 changing a destination yields a new token while the old one still resolves.
 
 Handler: unknown token → 410; a failing click write still returns 302; the toggle cannot be
@@ -274,7 +274,7 @@ Two tripwires:
   leaking into the default path.
 
 Compare rendered output as SVG, not PDF: a Typst PDF embeds a creation timestamp, so two
-renders of one source differ byte-for-byte (`internal/cv/AGENTS.md`).
+renders of one source differ byte-for-byte (`internal/candidate/cv/AGENTS.md`).
 
 ## Rollout
 

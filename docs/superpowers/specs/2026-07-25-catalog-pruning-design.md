@@ -47,8 +47,8 @@ company-level kill candidates: zero technical evidence across their whole histor
 ## Decisions
 
 - **Dictionary expansion only.** The LLM's `enrichment.category` stays unserved
-  discovery material (`Sanitize`, `internal/enrich/enrichment.go:258-265`). It is
-  read by humans to find terms worth adding to `internal/classify`; it never
+  discovery material (`Sanitize`, `internal/ai/enrich/enrichment.go:258-265`). It is
+  read by humans to find terms worth adding to `internal/dict/classify`; it never
   reaches `jobs.category`. The dict-only production convention holds.
 - **Physical DELETE**, not `closed_at`. The disk win (description + enrichment of
   ~1.5M rows) is the point, and `closed_at` means "the employer closed it", not
@@ -128,8 +128,8 @@ Nothing changes in the database schema except one new archive table.
 
 **Reused as-is**
 
-- `classify.IsNonTech` (`internal/classify/nontech.go:133`) →
-  `jobderive.deriveIsTech` (`internal/jobderive/jobderive.go:190`) → `is_tech`.
+- `classify.IsNonTech` (`internal/dict/classify/nontech.go:133`) →
+  `jobderive.deriveIsTech` (`internal/job/jobderive/jobderive.go:190`) → `is_tech`.
   Growing `nonTechTitleTerms` moves the labelling with no code change in derive.
 - `cmd/backfill-derive` already re-derives `is_tech` and counts it in
   `facetsMoved`. Run once at the end of the whole campaign, not per iteration.
@@ -139,7 +139,7 @@ Nothing changes in the database schema except one new archive table.
 **New**
 
 1. **Ingest filter.** One predicate, two call sites: between `normalizeJob` and
-   `r.Store.Save` in the batch path (`internal/pipeline/pipeline.go:336`) and the
+   `r.Store.Save` in the batch path (`internal/ingest/pipeline/pipeline.go:336`) and the
    stream path (`:476`). `normalizeJob` goes through `job.New` → `jobderive.Derive`,
    so the aggregate already carries `IsTech` — no extra work. Rejections increment
    a separate `stats.Rejected`, never `Skipped`, so they do not pollute board
@@ -219,21 +219,21 @@ title.
 
 ## Testing
 
-- `internal/classify` — for every added term, a positive case **and** a negative
+- `internal/dict/classify` — for every added term, a positive case **and** a negative
   case with a real IT title that must not match. This is the file's existing
   discipline: a bare `technician` fails review because the "Field Service
   Technician / DevOps" negative test catches it.
 - `cmd/prune` — the rule predicate is pure and table-driven: bucket × `is_tech` ×
   category × source → delete/keep, plus cases for the manual-source exclusions and
   the duplicate-cluster extension.
-- `internal/pipeline` — rejections land in `Rejected` not `Skipped`; batch and
+- `internal/ingest/pipeline` — rejections land in `Rejected` not `Skipped`; batch and
   stream paths behave identically; `cmd/tg-extract` is unaffected.
 - No new integration tests. Batched DELETE is ordinary SQL; the `testcontainers`
-  suite in `internal/db` is not warranted for it.
+  suite in `internal/platform/db` is not warranted for it.
 
 ## Known gotcha
 
-`jobhash.Of` (`internal/jobhash/jobhash.go:31-49`) includes `category` but **not**
+`jobhash.Of` (`internal/job/jobhash/jobhash.go:31-49`) includes `category` but **not**
 `is_tech`. Growing `nonTechTitleTerms` moves only `is_tech`, so `content_hash` does
 not move and the incremental indexer pushes nothing. Irrelevant for deleted rows
 (`search.DeleteJobs` handles them), but it means an `is_tech` flip on a *surviving*

@@ -3,7 +3,7 @@
 ## Purpose
 Turn the silence signal into an action: assemble a follow-up message for an application that has
 gone quiet, and record that the candidate chased — without disturbing what silence measures. The
-assembler is deterministic and I/O-free (`internal/followup`); the system never transmits the
+assembler is deterministic and I/O-free (`internal/application/followup`); the system never transmits the
 message.
 
 ## Requirements

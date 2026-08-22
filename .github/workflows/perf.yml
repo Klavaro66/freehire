@@ -57,7 +57,7 @@ jobs:
           # stack this smoke boots, so a change there alters the request path's
           # runtime even when no Go or Svelte file moved.
           if git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
-            | grep -qE '^(internal/handler/|internal/search/|internal/jobview/|web/|perf/|Dockerfile|docker-compose\.yml|\.github/workflows/perf\.yml)'; then
+            | grep -qE '^(internal/api/handler/|internal/search/search/|internal/job/jobview/|web/|perf/|Dockerfile|docker-compose\.yml|\.github/workflows/perf\.yml)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "Request-path files changed — running the full smoke."
           else

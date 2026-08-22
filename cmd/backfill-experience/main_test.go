@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/resumeextract"
+	"github.com/strelov1/freehire/internal/candidate/resumeextract"
 )
 
 // The worker's cost claim rests entirely here: a user whose structure is current must be

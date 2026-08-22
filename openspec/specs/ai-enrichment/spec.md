@@ -58,7 +58,7 @@ re-queued.
 
 ### Requirement: Enrichment is extracted from a job's description by an LLM provider
 
-The system SHALL define a `Provider` abstraction in `internal/enrich` that, given a
+The system SHALL define a `Provider` abstraction in `internal/ai/enrich` that, given a
 job's source fields (at minimum `title`, `company`, `location`, `remote`,
 `description`), returns a populated `Enrichment` value. The provider SHALL constrain
 the **served** enum fields to their allowed values by carrying the controlled
@@ -70,7 +70,7 @@ be constrained by the schema: the prompt permits a label of the model's own when
 allowed value fits, and an enum would foreclose the novel value that mechanism exists
 to collect (see "Unserved discovery facets are captured raw, not validated"). The
 request schema SHALL describe exactly the fields the prompt asks for and no others,
-so the dictionary-covered facets served by `internal/jobderive` are absent from both;
+so the dictionary-covered facets served by `internal/job/jobderive` are absent from both;
 under a strict schema a field left in is a field the model is required to produce.
 Fields not determinable from the input SHALL be returned as `null`, not guessed — a
 strict request schema admits no absent key — and a `null` SHALL be indistinguishable
@@ -303,7 +303,7 @@ failed, and dead-lettered. A failure on one entry SHALL NOT abort the run.
 
 ### Requirement: Unserved discovery facets are captured raw, not validated
 
-The enrichment prompt SHALL NOT request the dictionary-covered facets `work_mode`, `seniority`, `category`, or `skills`, nor the non-enum dict-derived `posting_language` and `experience_years_min`, nor the dict-covered `employment_type`, `education_level`, and `english_level` — the read layer serves all of these from the deterministic dictionaries (`internal/jobderive`), so the LLM's copies are never served and paying output tokens for them is waste.
+The enrichment prompt SHALL NOT request the dictionary-covered facets `work_mode`, `seniority`, `category`, or `skills`, nor the non-enum dict-derived `posting_language` and `experience_years_min`, nor the dict-covered `employment_type`, `education_level`, and `english_level` — the read layer serves all of these from the deterministic dictionaries (`internal/job/jobderive`), so the LLM's copies are never served and paying output tokens for them is waste.
 
 The prompt SHALL continue to request `countries`/`regions` as the sole discovery
 facets — the dict-then-LLM hybrid where the LLM fills only the unpinned geographic

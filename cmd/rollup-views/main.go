@@ -31,9 +31,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/viewlog"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/application/viewlog"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() { worker.Main(run) }

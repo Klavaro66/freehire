@@ -20,11 +20,11 @@ that tailoring alone produces, in its own Kanban column ahead of Applied,
 which auto-promotes to `applied` the moment a real apply signal fires. It
 supersedes reusing `stage = "applied"` for the tailoring side-effect.
 
-Also rolled in: `internal/handler/cv.go`'s `trackingBoarder.EnsureOnBoard`
+Also rolled in: `internal/api/handler/cv.go`'s `trackingBoarder.EnsureOnBoard`
 currently tags its automatic stage-set with `appevent.SourceUser`, which the
 `appevent` package documents as "the two ways a candidate records something
 themselves." An automatic platform action belongs under `appevent.SourceSystem`
-instead (exactly what `internal/nudge` already does for its own automatic
+instead (exactly what `internal/engage/nudge` already does for its own automatic
 stage change) — this PR fixes that misattribution at the same call site.
 
 ## Goals / Non-Goals
@@ -51,7 +51,7 @@ stage change) — this PR fixes that misattribution at the same call site.
   beyond what the generic stage-vocabulary API already allows (it becomes a
   normal member of `Stages`, so the existing `PATCH /me/tracking/:slug`
   already accepts it like any other stage — no new endpoint).
-- No change to `internal/db/queries/jobs.sql` schema — `applications.stage`
+- No change to `internal/platform/db/queries/jobs.sql` schema — `applications.stage`
   stays untyped `text`, no CHECK constraint exists today and none is added.
 
 ## Decisions
@@ -60,13 +60,13 @@ stage change) — this PR fixes that misattribution at the same call site.
 
 **Choice:**
 
-- `internal/userjob/stages.go`: add `"preparing"` to `Stages`, first in
+- `internal/application/userjob/stages.go`: add `"preparing"` to `Stages`, first in
   pipeline order.
-- `internal/userjob/groups.go`: add
+- `internal/application/userjob/groups.go`: add
   `{ID: "preparing", Label: "Preparing", Stages: []string{"preparing"}}` as
   the first entry of `Groups` (ahead of `applied`); add
   `"preparing": "Preparing"` to `stageLabels`.
-- `internal/userjob/pipeline.go`: add `"preparing": 0` to `activeRank`
+- `internal/application/userjob/pipeline.go`: add `"preparing": 0` to `activeRank`
   (below `applied`'s `1`).
 
 **Why:** `TestEveryStageIsRankedOrTerminal` exists specifically because a
@@ -97,7 +97,7 @@ no code required for either.
 
 ### 3. Auto-promotion `preparing → applied` lives in `MarkJobApplied`'s SQL
 
-**Choice:** In `internal/db/queries/user_jobs.sql`, change `MarkJobApplied`'s
+**Choice:** In `internal/platform/db/queries/user_jobs.sql`, change `MarkJobApplied`'s
 upsert from:
 
 ```sql
@@ -127,13 +127,13 @@ poll/promote. Rejected: `MarkJobApplied` already runs inside the locked
 transaction (`LockJobForApply`) that owns every other applied-transition
 side effect (`applied_count` bump, the `applied` ledger event) — adding a
 second write path for the same transition is exactly the kind of drift the
-query's own doc comment (`internal/db/queries/user_jobs.sql`) already warns
+query's own doc comment (`internal/platform/db/queries/user_jobs.sql`) already warns
 against ("two records of one transition, decided separately, would
 eventually disagree").
 
 ### 4. `EnsureOnBoard` sets `preparing`, and its event source becomes `SourceSystem`
 
-**Choice:** In `internal/handler/cv.go`, `trackingBoarder.EnsureOnBoard`:
+**Choice:** In `internal/api/handler/cv.go`, `trackingBoarder.EnsureOnBoard`:
 
 ```go
 func (s trackingBoarder) EnsureOnBoard(ctx context.Context, userID, jobID int64) error {
@@ -155,7 +155,7 @@ existing stage" guard is untouched.
 
 **Why (source):** `appevent.go` documents `SourceSystem` as "a stage change
 the platform made on the candidate's behalf, not one anybody typed" — opening
-a tailoring workspace is exactly that, and `internal/nudge` already uses
+a tailoring workspace is exactly that, and `internal/engage/nudge` already uses
 `SourceSystem` for its own automatic stage change (auto-expiring a closed
 listing). `SourceUser` is documented as "the two ways a candidate records
 something themselves," which this is not.
@@ -210,7 +210,7 @@ sufficient on its own.
 
 ## Migration Plan
 
-1. Ship the `internal/userjob` vocabulary changes, the `MarkJobApplied` SQL
+1. Ship the `internal/application/userjob` vocabulary changes, the `MarkJobApplied` SQL
    change (regenerate sqlc), and the `EnsureOnBoard` change together — they
    are only consistent as one deploy (a "preparing" row written before
    `MarkJobApplied` knows to promote it would strand undated, though it
@@ -234,16 +234,16 @@ sufficient on its own.
 
 ## Testing
 
-- `internal/userjob`: existing `TestEveryStageBelongsToExactlyOneGroup` and
+- `internal/application/userjob`: existing `TestEveryStageBelongsToExactlyOneGroup` and
   `TestEveryStageIsRankedOrTerminal` must keep passing with `preparing`
   added — they are the guardrails this design relies on, not new tests.
-- `internal/handler` integration (extends `cv_tailor_integration_test.go`):
+- `internal/api/handler` integration (extends `cv_tailor_integration_test.go`):
   first tailor bootstrap leaves `stage = "preparing"`, `saved_at` set,
   `applied_at` unset; a subsequent `MarkApplied`-equivalent call (or direct
   repository call in the test) promotes it to `applied` without a second
   tailor call being involved; an existing `interview` stage survives a
   tailor reopen unchanged (already covered, re-verify it still holds).
-- `internal/jobtracking` or `internal/db` integration: `MarkJobApplied`
+- `internal/application/jobtracking` or `internal/platform/db` integration: `MarkJobApplied`
   promotes `preparing → applied` and leaves any stage ranked at or above
   `applied` untouched.
 - New assertion on the ledger: the `stage_set` event written by

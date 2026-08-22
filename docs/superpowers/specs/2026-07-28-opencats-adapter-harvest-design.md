@@ -71,7 +71,7 @@ An OpenCATS job `ID` is unique only within one install: `ID=24` exists on both
 with a shared `source = "opencats"` these would collide and overwrite each other.
 
 No special handling is required in the adapter. `pipeline.jobIdentity`
-(`internal/pipeline/pipeline.go:539`) routes every id through
+(`internal/ingest/pipeline/pipeline.go:539`) routes every id through
 `sources.NamespaceExternalID(e.Board, j.ExternalID)`, producing `<board>:<id>`. The adapter
 emits the raw numeric id and the pipeline namespaces it — the same single door used by
 link-source resolution, so a job reached by either path dedups against the other.
@@ -92,7 +92,7 @@ row columns are positional and differ per install, while detail-page fields are 
 
 ### Components
 
-**`internal/sources/opencats.go`** — the adapter, modelled on `catsone.go`. `Fetch` reads the
+**`internal/ingest/sources/opencats.go`** — the adapter, modelled on `catsone.go`. `Fetch` reads the
 listing, collects `(id, title, detail URL)` per anchor, then fans out over detail pages via
 the existing `fetchDetails` helper at `defaultDetailWorkers`. Registered as one line in
 `sources.All`. Description passes through `sanitizeHTML`.

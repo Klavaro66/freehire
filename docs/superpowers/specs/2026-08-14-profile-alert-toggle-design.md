@@ -14,7 +14,7 @@ A single toggle — "Notify me about jobs matching my profile" — on
 and subscribes it (default channel); every subsequent profile save keeps that
 search's filters current; turning it off removes both. No new matching
 engine — the toggle is a convenience wrapper over the saved-search +
-subscription primitives `internal/notify` (and everything just shipped —
+subscription primitives `internal/engage/notify` (and everything just shipped —
 frequency, quiet hours, channels) already deliver.
 
 ## Storage
@@ -59,7 +59,7 @@ frequency, quiet hours, channels) already deliver.
   fine-tune per-channel from the normal `AlertChannels` control once the
   search exists (it is an ordinary saved search from every other API's point
   of view).
-- **Everything downstream is free.** Once the row exists, `internal/notify`'s
+- **Everything downstream is free.** Once the row exists, `internal/engage/notify`'s
   existing MATCH/DELIVER, the digest-frequency/quiet-hours gating just
   shipped, and the `/my/notifications/searches` list all treat it like any
   other saved search — no engine changes.

@@ -1,10 +1,10 @@
 //go:build integration
 
 // End-to-end test for the similar-jobs precompute worker: real Postgres
-// (testcontainers, migrations applied via internal/testdb) driving the actual
+// (testcontainers, migrations applied via internal/platform/testdb) driving the actual
 // dbStore + similarjobs.Runner over seeded jobs with job_semantic_chunks rows. This
 // exercises the already-built, already-unit-tested NearestJobsToJob query (see
-// internal/db/semantic_chunks_integration_test.go) THROUGH the new worker, so it
+// internal/platform/db/semantic_chunks_integration_test.go) THROUGH the new worker, so it
 // mostly proves the wiring: PendingJobIDs finds the right jobs, NearestJobs/
 // SetSimilarJobIDs round-trip correctly, and a second run is a no-op. Run with:
 //
@@ -18,9 +18,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/similarjobs"
-	"github.com/strelov1/freehire/internal/testdb"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/testdb"
+	"github.com/strelov1/freehire/internal/search/similarjobs"
 )
 
 func startPostgres(t *testing.T) *pgxpool.Pool {
@@ -29,7 +29,7 @@ func startPostgres(t *testing.T) *pgxpool.Pool {
 }
 
 // unitVector768 builds a 768-dim vector literal that is 1.0 in exactly one dimension
-// and 0 elsewhere, mirroring internal/db's own test helper of the same name (not
+// and 0 elsewhere, mirroring internal/platform/db's own test helper of the same name (not
 // reusable across packages) — gives exact, deterministic control over pgvector's <=>
 // distances without needing real embedding data.
 func unitVector768(dim int) string {

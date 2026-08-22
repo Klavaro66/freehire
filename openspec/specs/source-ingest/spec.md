@@ -1434,7 +1434,7 @@ vacancy's distinct `locations[].title` values joined, and `posted_at` parsed fro
 ### Requirement: habr_career deduplicates with the Habr linksource adapter
 
 The `habr_career` board adapter SHALL emit the same identity as the existing Habr Career
-link-following adapter (`internal/linksource`) for the same vacancy, so a vacancy crawled from
+link-following adapter (`internal/ingest/linksource`) for the same vacancy, so a vacancy crawled from
 the board and the same vacancy followed from a Telegram link resolve to one catalogue row.
 Both SHALL use `source = "habr_career"`, `external_id` set to the numeric vacancy id, and `url`
 set to the canonical `https://career.habr.com/vacancies/<id>`. The shared logic that parses a

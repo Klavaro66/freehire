@@ -27,13 +27,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/enrich"
-	"github.com/strelov1/freehire/internal/pipeline"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ai/enrich"
+	"github.com/strelov1/freehire/internal/ingest/pipeline"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 // staleAfter is the DEFAULT grace window before an unseen job is closed. An adapter that

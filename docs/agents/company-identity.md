@@ -6,8 +6,8 @@ How the catalogue decides that two postings name the same employer.
 
 The company slug (`jobs.company_slug`, `companies.slug`) and the registry that keeps two
 spellings of one employer from becoming two companies. Not company *data* — see
-[company-facets](company-facets.md), [internal/companyname](../../internal/companyname/AGENTS.md)
-for display names, and [internal/collections](../../internal/collections/AGENTS.md) for tags.
+[company-facets](company-facets.md), [internal/dict/companyname](../../internal/dict/companyname/AGENTS.md)
+for display names, and [internal/job/collections](../../internal/job/collections/AGENTS.md) for tags.
 
 ## Always true
 
@@ -15,9 +15,9 @@ for display names, and [internal/collections](../../internal/collections/AGENTS.
   to the name it is given, which is what a URL path segment and a job's `public_slug` need.
   CompanySlug answers "which employer is this", where "RingCentral" and "RingCentral, Inc."
   must not be two answers. Reach for CompanySlug whenever the value keys a COMPANY.
-- **There is exactly one legal-form vocabulary** (`internal/normalize/company.go`), and a test
+- **There is exactly one legal-form vocabulary** (`internal/dict/normalize/company.go`), and a test
   walks the module to keep it that way. There used to be four —
-  `normalize`, `collections/register.go`, `cmd/harvest-ats` and `internal/mailmatch` — and they
+  `normalize`, `collections/register.go`, `cmd/harvest-ats` and `internal/application/mailmatch` — and they
   disagreed on substance in both directions: one stripped `gmbh` and `co` repeatedly, another
   stripped one form from fifteen tokens and refused `co` outright. Every resulting failure was
   silent, because a slug that matches nothing looks exactly like a company nobody has.

@@ -15,10 +15,10 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/adzunadesc"
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/adzunadesc"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {

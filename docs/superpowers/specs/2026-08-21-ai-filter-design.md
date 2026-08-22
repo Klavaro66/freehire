@@ -26,7 +26,7 @@ In:
 Out:
 
 - Multi-turn chat with tool calls. The in-app assistant
-  (`internal/assistant`) already does that, at a different cost and latency.
+  (`internal/ai/assistant`) already does that, at a different cost and latency.
   This is one model call that returns a filter, plus an optional second call
   to refine it.
 - Any new persistence. Saving the result is the existing `SaveSearchAlert`
@@ -50,7 +50,7 @@ Two vocabularies, handled differently:
 `work_mode`, `seniority`, `category`, `employment_type`, `role_type`,
 `english_level`, `education_level`, `relocation`, `regions`,
 `company_type`, `company_size`, `salary_currency`, `salary_period`. All read
-from `internal/vocab`, which is already the single definition these values
+from `internal/dict/vocab`, which is already the single definition these values
 have. A value outside the list is dropped.
 
 **Open facets** — too large to enumerate, so the model writes ordinary words
@@ -79,7 +79,7 @@ that duplicates a facet narrows the results twice.
 
 ## Backend
 
-New package `internal/searchintent`. It owns the prompt, the structured
+New package `internal/search/searchintent`. It owns the prompt, the structured
 output schema, and the resolution described above. It depends on `vocab`,
 `skilltag`, `location`, `industrytag`, `normalize` and an `llm.Client`; it
 does not import `handler`, so it is testable with a fake model and no HTTP.
@@ -111,7 +111,7 @@ in the shape of `matchAnalysisLimiter`. Body: `{"text": "...",
 The handler is transport only: read the caller, build the `Request`, call the
 service on a client bound with `userLLM(ctx, keys, client, userID,
 tagSearchIntent)`. `tagSearchIntent = "feature:search-intent"` joins the
-constants in `internal/handler/user_llm.go` — every model call made for a
+constants in `internal/api/handler/user_llm.go` — every model call made for a
 signed-in user spends on that user's own gateway credential, and this one is
 no exception.
 
@@ -174,7 +174,7 @@ no new code.
 
 ## Testing
 
-- `internal/searchintent`, unit, fake model: a hallucinated facet name is
+- `internal/search/searchintent`, unit, fake model: a hallucinated facet name is
   refused; an unresolvable skill is dropped and reported; a country written
   as a name resolves to its code; a value outside a closed vocabulary is
   dropped; `q` survives only when no facet covers it; scalars out of range

@@ -8,7 +8,7 @@ aggregate over them.
 ## Requirements
 ### Requirement: Pipeline aggregate endpoint
 
-The system SHALL expose `GET /api/v1/me/tracking/pipeline`, authenticated with `RequireAuthOrKey` (session cookie or API key), returning the signed-in user's application counts aggregated server-side over **all** of their tracked applications. The response envelope SHALL be `{"data": {"applications": <int>, "stages": {"applied","screening","responded","interview","offer","accepted","rejected","withdrawn"}}}` where every stage key from the `internal/userjob` vocabulary is always present (zero when empty). The response SHALL NOT carry a `buckets` object: grouping is static and belongs to the vocabulary owner, so returning it would place the mapping in two places.
+The system SHALL expose `GET /api/v1/me/tracking/pipeline`, authenticated with `RequireAuthOrKey` (session cookie or API key), returning the signed-in user's application counts aggregated server-side over **all** of their tracked applications. The response envelope SHALL be `{"data": {"applications": <int>, "stages": {"applied","screening","responded","interview","offer","accepted","rejected","withdrawn"}}}` where every stage key from the `internal/application/userjob` vocabulary is always present (zero when empty). The response SHALL NOT carry a `buckets` object: grouping is static and belongs to the vocabulary owner, so returning it would place the mapping in two places.
 
 #### Scenario: Authenticated user with applications
 
@@ -28,11 +28,11 @@ The system SHALL expose `GET /api/v1/me/tracking/pipeline`, authenticated with `
 #### Scenario: Every stage key is present
 
 - **WHEN** the response is serialized for any caller
-- **THEN** it carries one key per value in the `internal/userjob` stage vocabulary, including those with a count of zero
+- **THEN** it carries one key per value in the `internal/application/userjob` stage vocabulary, including those with a count of zero
 
 ### Requirement: Application counting and stage membership
 
-The system SHALL count as an application every `applications` row where `applied_at IS NOT NULL OR stage IS NOT NULL`, and SHALL exclude saved-only rows (saved but never applied and with no stage). An application row whose `applied_at` is set but whose `stage` is null SHALL be counted under `applied`. Each counted application SHALL belong to exactly one group, and the stage→group membership SHALL be owned by a single table in `internal/userjob`, read by every surface rather than restated by any of them: `applied`, `screening` and `responded` → `applied`; `interview` → `interview`; `offer` → `offer`; `accepted`, `rejected` and `withdrawn` → `closed`.
+The system SHALL count as an application every `applications` row where `applied_at IS NOT NULL OR stage IS NOT NULL`, and SHALL exclude saved-only rows (saved but never applied and with no stage). An application row whose `applied_at` is set but whose `stage` is null SHALL be counted under `applied`. Each counted application SHALL belong to exactly one group, and the stage→group membership SHALL be owned by a single table in `internal/application/userjob`, read by every surface rather than restated by any of them: `applied`, `screening` and `responded` → `applied`; `interview` → `interview`; `offer` → `offer`; `accepted`, `rejected` and `withdrawn` → `closed`.
 
 #### Scenario: Each application is counted once
 

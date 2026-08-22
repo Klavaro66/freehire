@@ -29,10 +29,10 @@ import (
 	"log"
 	"sort"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/ghost"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/job/ghost"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 const (
@@ -42,7 +42,7 @@ const (
 	// would not corrupt anything, but they would double the read load for no gain
 	// and interleave their reports into nonsense. A run that cannot take the lock
 	// exits cleanly. Arbitrary constant unique to this worker.
-	lockKey = 0x66686763 // "fhgc" — freehire ghost crosscheck; the key list lives in internal/migrate
+	lockKey = 0x66686763 // "fhgc" — freehire ghost crosscheck; the key list lives in internal/platform/migrate
 	// sampleSize is how many stamped titles a dry run prints. A report is read by a
 	// person deciding whether to open the gate, and they need examples, not a count.
 	sampleSize = 25

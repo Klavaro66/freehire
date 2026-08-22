@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobhash"
+	"github.com/strelov1/freehire/internal/job/jobhash"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // fakeStore serves keyset pages of jobs (across all sources) and records every description

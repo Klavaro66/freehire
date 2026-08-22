@@ -1,17 +1,17 @@
 ## Context
 
-`internal/companyfeedback` already lets a signed-in user post a 1-5 star rating
+`internal/engage/companyfeedback` already lets a signed-in user post a 1-5 star rating
 + closed category + free text about a company, shown under their site-wide
 pseudonymous persona. `interview` is already one of the seven categories
 (`vocab.CompanyFeedbackTypeValues`). What it doesn't do: capture the shape of
 an interview process (how many rounds, what each covered), or reduce the
 friction of writing one from scratch.
 
-Separately, `internal/assistant`'s `debrief` preset already exists for a
+Separately, `internal/ai/assistant`'s `debrief` preset already exists for a
 candidate to reflect on a completed interview with the in-app assistant,
 bound to one `(user, job)` via `assistant_sessions.job_id` — the same binding
 the `interview`/rehearsal preset uses. It writes structured achievements into
-`internal/experience` (the CV-facing "experience bank"), but nothing in that
+`internal/candidate/experience` (the CV-facing "experience bank"), but nothing in that
 bank is publishable outside the candidate's own CV — every atom stays private
 to its owner.
 
@@ -43,21 +43,21 @@ adjacent ideas that came up during design and were deliberately deferred.
 
 **Non-Goals:**
 
-- No change to `internal/userjob`'s stage model (still one flat `interview`
+- No change to `internal/application/userjob`'s stage model (still one flat `interview`
   stage, not round-aware). Raised during design as a plausibly-related
   follow-up; tracked as an open question on
   [#1625](https://github.com/strelov1/freehire/issues/1625), not designed or
   scoped here.
 - No aggregate application-funnel statistics (applicant counts, stage
   timing) on the job page — that is #1625's scope, sourced from
-  `internal/userjob` tracking data, no free text involved. This spec's job-page
+  `internal/application/userjob` tracking data, no free text involved. This spec's job-page
   section and that one are visually distinct per #1625's tracking comment,
   revisited once both exist.
 - No "share as review" entry point outside a live debrief session (e.g. from
   session history after the fact). If a candidate closes the session without
   sharing, they can only redo it from a new debrief session for now.
 - No human moderation queue for this content beyond what `companyfeedback`
-  already has (`Report`/`Hide`, `internal/handler/company_feedback.go`) — the
+  already has (`Report`/`Hide`, `internal/api/handler/company_feedback.go`) — the
   new LLM pre-publish check (Decision 4) is additive to that, not a
   replacement.
 - No new `assistant` tool, no change to the debrief preset's tool registry or
@@ -79,7 +79,7 @@ ALTER TABLE public.company_feedback
     ADD COLUMN interview_difficulty smallint,
     ADD COLUMN interview_honesty smallint,
     ADD COLUMN interview_outcome text,
-    -- role_category/role_seniority: internal/classify's dict-only projection of
+    -- role_category/role_seniority: internal/dict/classify's dict-only projection of
     -- role_title, populated only when it resolves (see Decision 2) — the job
     -- page's aggregate (Decision 5) filters on these, never on role_title text.
     ADD COLUMN role_category text,
@@ -113,7 +113,7 @@ ALTER TABLE public.company_feedback
 
 `interview_rounds` is a plain JSON array of strings (each a short label like
 `"Take-home — API design exercise"`), order = array order. No round count/date
-columns — that granularity was explicitly ruled out as `internal/userjob`
+columns — that granularity was explicitly ruled out as `internal/application/userjob`
 territory (Non-Goals).
 
 **Why:** One row per `(user, company)` is already `company_feedback`'s shape
@@ -150,7 +150,7 @@ review shows a role title, never a link to a specific vacancy.
 **Job-page matching:** rather than exact/substring text matching between a
 review's `role_title` and the currently-viewed job's title (fragile — "Sr.
 Backend Engineer" vs "Senior Backend Engineer" wouldn't match), run
-`role_title` through the existing `internal/classify` dict-only
+`role_title` through the existing `internal/dict/classify` dict-only
 title→(category, seniority) classifier at write time and store the resulting
 facets alongside (two more nullable columns:
 `role_category text`, `role_seniority text`, populated only when the
@@ -178,10 +178,10 @@ just doesn't surface in any job page's aggregate.
   used to render the chat) and its bound job's title/company (`Session.JobID`
   → existing job/company lookup, the same one the debrief preset's opening
   brief already uses), then calls a new `companyfeedback.DraftInterviewReview`
-  helper: one `internal/llm` `GenerateJSON` call with a schema-constrained
+  helper: one `internal/platform/llm` `GenerateJSON` call with a schema-constrained
   response shaped like the new columns
   (`role_title`, `rounds []string`, `body`, `difficulty`, `honesty`,
-  `outcome`), on the caller's own gateway credential (`internal/llmkey`,
+  `outcome`), on the caller's own gateway credential (`internal/ai/llmkey`,
   `.As(ctx, userID)`) tagged `feature:company_review_draft` — the same
   per-user attribution every other in-app-assistant-adjacent LLM call
   follows.
@@ -206,7 +206,7 @@ convenience, not a gate. Contrast with Decision 4, which is a hard gate.
 ### 4. Publish-time moderation is a second LLM call, fail-closed
 
 **Choice:** `companyfeedback.Service.Upsert` (extended to accept the new
-optional interview fields) runs one additional `internal/llm` call before
+optional interview fields) runs one additional `internal/platform/llm` call before
 the existing DB write, when `feedback_type == "interview"`:
 `ModerateInterviewReview(ctx, userID, draft) (cleaned Feedback, ok bool,
 reason string, err error)`, tagged `feature:company_review_moderate` on the
@@ -218,7 +218,7 @@ resubmit.
 
 If the call itself fails (not "rejected" — errors out, e.g. LLM
 unreachable), `Upsert` returns an error and **does not publish** — the same
-fail-closed posture `internal/pii` already takes for CV→LLM redaction. An
+fail-closed posture `internal/candidate/pii` already takes for CV→LLM redaction. An
 unmoderated review is worse than a delayed one; nothing about this content is
 time-sensitive enough to justify publishing without the check.
 
@@ -229,7 +229,7 @@ their edits — a candidate could rewrite the draft into something the first
 pass never saw. Two calls at two different trust boundaries, not one call
 serving both purposes.
 
-**Alternatives considered:** reuse `internal/pii`'s `Redactor`. Rejected per
+**Alternatives considered:** reuse `internal/candidate/pii`'s `Redactor`. Rejected per
 the codebase's own prior finding on this: it round-trips CV text through an
 LLM call and restores placeholders — built for masking-then-restoring inbound
 CV content, not for a one-way accept/reject/clean judgment on outbound
@@ -269,7 +269,7 @@ interview difficulty.
   mandatory and fail-closed. Total added LLM cost is one draft + one
   moderate per *published* review (edits/retries only re-run moderation, not
   drafting, since the draft step is a one-time prefill).
-- **[`internal/classify` can't place every role_title]** → accepted
+- **[`internal/dict/classify` can't place every role_title]** → accepted
   (Decision 2): those reviews still show on the company page, just don't
   contribute to any job page's aggregate. No manual override in this
   increment.
@@ -287,7 +287,7 @@ interview difficulty.
 1. Ship the migration (Decision 1: new nullable columns + `NOT VALID`
    constraints, validated in a follow-up statement) manually before deploy,
    same convention as 0088/0089.
-2. Ship `internal/vocab.CompanyFeedbackOutcomeValues` and the
+2. Ship `internal/dict/vocab.CompanyFeedbackOutcomeValues` and the
    `companyfeedback` service/query changes (extended `Upsert`, new
    `DraftInterviewReview`/`ModerateInterviewReview`/`InterviewSummary`)
    together with the two new handler endpoints.
@@ -301,21 +301,21 @@ interview difficulty.
 
 ## Testing
 
-- `internal/companyfeedback`: `Upsert` validation for the new fields (rating
+- `internal/engage/companyfeedback`: `Upsert` validation for the new fields (rating
   bounds already covered; add difficulty/honesty bounds, outcome vocab
   membership, round-count/round-length bounds, and the
   interview-fields-null-for-non-interview invariant matching the DB CHECK).
-- `internal/vocab`: extend the existing vocab membership test pattern to
+- `internal/dict/vocab`: extend the existing vocab membership test pattern to
   `CompanyFeedbackOutcomeValues`.
-- `internal/classify`: no new tests needed — reused as-is; a
+- `internal/dict/classify`: no new tests needed — reused as-is; a
   `companyfeedback`-side test confirms `role_category`/`role_seniority` are
   populated only when the classifier resolves and left `NULL` otherwise.
-- `internal/handler` integration: the new draft endpoint 403s outside a
+- `internal/api/handler` integration: the new draft endpoint 403s outside a
   `debrief`-preset session; a full-loop test drafts → edits → publishes →
   reads back via `List`; moderation rejection surfaces its reason and does
   not write a row; a simulated moderation-call error leaves no row (the
   fail-closed path).
-- `internal/handler` integration: `InterviewSummary` returns zero-value
+- `internal/api/handler` integration: `InterviewSummary` returns zero-value
   (no section) for a `(category, seniority)` with no reviews, and correct
   averages once some exist; hidden (`status = 'hidden'`) rows are excluded
   from it, matching `List`/`Count`.

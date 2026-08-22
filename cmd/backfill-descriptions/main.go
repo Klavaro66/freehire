@@ -3,19 +3,19 @@
 // url.PathUnescape, which rejects the whole string on a single stray "%" — common in
 // Word-pasted postings (CSS "line-height:115%") — and the old fallback stored the raw,
 // fully percent-encoded blob (rendered as literal "%3Cp class=%22..."). The adapter now
-// decodes leniently (internal/sources.LenientPercentUnescape); this one-off worker fixes the
+// decodes leniently (internal/ingest/sources.LenientPercentUnescape); this one-off worker fixes the
 // rows already in the catalogue.
 //
 // It also repairs the other way a source can store markup as text: HTML entity-encoding
 // ("&lt;p&gt;"), which arbeitnow serves for part of its feed. sanitizeHTML cannot recover that on
 // its own — bluemonday reads "&lt;p&gt;" as a text node and re-encodes it — so the adapter now
-// decodes it (internal/sources.UnescapeEncodedHTML). Because the arbeitnow job-board API is a
+// decodes it (internal/ingest/sources.UnescapeEncodedHTML). Because the arbeitnow job-board API is a
 // rolling window of recent postings, rows that aged out of it can never be reached by a
 // re-ingest; in-place repair is the only route.
 //
 // A third kind of damage is not an encoding at all: Himalayas brands the bodies it mirrors,
 // ending every posting with an "Originally posted on Himalayas" trailer. The adapter now strips
-// it (internal/sources.StripHimalayasSelfPromo); because the feed is a recency-ordered window the
+// it (internal/ingest/sources.StripHimalayasSelfPromo); because the feed is a recency-ordered window the
 // crawl only ever revisits its freshest slice, so the rows already in the catalogue can only be
 // repaired in place. Scope this one to its provider (`backfill-descriptions himalayas`).
 //
@@ -56,10 +56,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobhash"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/job/jobhash"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/htmltext"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // backfillBatchSize bounds how many rows are read per keyset page.
@@ -204,13 +205,13 @@ func backfillPause() time.Duration {
 // merely writes "&lt;" as a less-than sign alone.
 //
 // A stored literal "\n" sends the body through the sanitizer for the same reason as an anchor:
-// the repair lives there (see internal/sources.repairLiteralNewlines), not in a decoder here,
+// the repair lives there (see internal/ingest/sources.repairLiteralNewlines), not in a decoder here,
 // because deciding what an escape meant needs the markup around it. The marker is narrow enough
 // to select almost nothing — 15 rows in a 20k-row sample of the live catalogue — so it does not
 // widen the universal sweep in any meaningful way.
 //
 // A stored anchor also sends the body through the sanitizer, whatever its source: descriptions
-// carry no links any more (see internal/sources.sanitizeHTML), and the rows stored before that
+// carry no links any more (see internal/ingest/sources.sanitizeHTML), and the rows stored before that
 // rule can only be brought in line by re-running it. Unlike the decodes this path does lean on
 // the sanitizer being idempotent, which its own test pins. The marker is a plain prefix, so it
 // also matches "<abbr" and friends — those elements are not on the allowlist either, so the
@@ -230,7 +231,7 @@ func repairDescription(source, stored string) string {
 	}
 	repaired := stored
 	if decoded != stored || strings.Contains(decoded, anchorMarker) || strings.Contains(decoded, literalNewlineMarker) {
-		repaired = sources.SanitizeHTML(decoded)
+		repaired = htmltext.Sanitize(decoded)
 	}
 	if source == himalayasSource {
 		repaired = sources.StripHimalayasSelfPromo(repaired)

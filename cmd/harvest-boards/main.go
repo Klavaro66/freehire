@@ -29,7 +29,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 )
 
 // defaultProbeWorkers bounds the concurrent probe fan-out. It bounds the BURST only; a

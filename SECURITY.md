@@ -36,7 +36,7 @@ particular:
 - **Authorization** — bypass of the `moderator` role gate on the job
   create/edit endpoints, or any per-user data leaking across users.
 - **Server-side request forgery (SSRF)** in the crawl/link-following workers
-  (`cmd/ingest`, `cmd/tg-ingest`, `internal/linksource`), where worker-fetched
+  (`cmd/ingest`, `cmd/tg-ingest`, `internal/ingest/linksource`), where worker-fetched
   URLs could be steered at internal addresses or used to exfiltrate metadata.
 - **Injection** reachable through the API or the ingest pipeline.
 - **Secret exposure** — credentials owned by the project or granting access to

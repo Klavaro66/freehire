@@ -3,9 +3,9 @@ package main
 import (
 	"slices"
 
-	"github.com/strelov1/freehire/internal/classify"
-	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/vocab"
+	"github.com/strelov1/freehire/internal/dict/classify"
+	"github.com/strelov1/freehire/internal/dict/vocab"
+	"github.com/strelov1/freehire/internal/job/jobderive"
 )
 
 // The three rules that make a job a deletion target. The name is recorded on every

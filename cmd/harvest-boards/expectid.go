@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/strelov1/freehire/internal/normalize"
+	"github.com/strelov1/freehire/internal/dict/normalize"
 )
 
 // expectation is what a seed claims about a candidate board: the employer it should belong to,

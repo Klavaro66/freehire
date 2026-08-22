@@ -15,7 +15,7 @@ sum to more than the distinct figure above. Every source is one of three kinds:
   company's own careers page (Amazon, Apple, Google, Yandex, Sber…).
 
 A source's kind is not configuration: it falls out of the adapter's own Go type
-in `internal/sources`, so the split below is derived, not maintained by hand.
+in `internal/ingest/sources`, so the split below is derived, not maintained by hand.
 
 ## ATS platforms
 

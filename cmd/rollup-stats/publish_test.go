@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strelov1/freehire/internal/cache"
-	"github.com/strelov1/freehire/internal/catalogstats"
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/ingest/catalogstats"
+	"github.com/strelov1/freehire/internal/platform/cache"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 type stubCounter struct {

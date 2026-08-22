@@ -32,10 +32,10 @@ Do not rebuild any of this.
 
 | Component | Location |
 |---|---|
-| Single worker entrypoint | `internal/worker/main.go` — `Main(run func() int)` wraps every one of the ~40 `cmd/` binaries |
-| Shared setup | `internal/worker/bootstrap.go` — `Bootstrap` does Sentry init, `config.Load()`, signal context, pgx pool |
-| Redis client and URL | `github.com/redis/go-redis/v9`; `config.Settings.RedisURL`, defaulting to `redis://localhost:6379/0` (`internal/config/config.go:325`) |
-| Per-run metrics | `internal/worker/metrics.go` — `writeRunMetrics` publishes `freehire_worker_last_run_{timestamp_seconds,duration_seconds,success}` into `PROM_TEXTFILE_DIR` |
+| Single worker entrypoint | `internal/platform/worker/main.go` — `Main(run func() int)` wraps every one of the ~40 `cmd/` binaries |
+| Shared setup | `internal/platform/worker/bootstrap.go` — `Bootstrap` does Sentry init, `config.Load()`, signal context, pgx pool |
+| Redis client and URL | `github.com/redis/go-redis/v9`; `config.Settings.RedisURL`, defaulting to `redis://localhost:6379/0` (`internal/platform/config/config.go:325`) |
+| Per-run metrics | `internal/platform/worker/metrics.go` — `writeRunMetrics` publishes `freehire_worker_last_run_{timestamp_seconds,duration_seconds,success}` into `PROM_TEXTFILE_DIR` |
 | Worker identity | `filepath.Base(os.Args[0])` for the job label; `runInstance(os.Args[1:])` for the per-board instance label |
 | Atomic textfile publish | `worker.WriteTextfile` — write-then-rename |
 | Ingest concurrency cap | `/opt/freehire/bin/ingest-slot.sh`, a counting `flock` semaphore, `INGEST_SLOTS=10` |
@@ -142,7 +142,7 @@ amount rather than by its dial default.
 ### Metric
 
 One file per worker, as today. `RunMetricsFilename()` is unchanged, so no second textfile is
-introduced and the "one worker, one filename" rule in `internal/worker/AGENTS.md` still
+introduced and the "one worker, one filename" rule in `internal/platform/worker/AGENTS.md` still
 holds.
 
 | Run | File contents |
@@ -179,9 +179,9 @@ Treat this as part of shipping the feature, not as a follow-up.
 
 | Unit | Responsibility | Depends on |
 |---|---|---|
-| `internal/worker/pause.go` | Decide whether this process may run: read the two keys, honour the override, fail open | `config.Settings.RedisURL`, `go-redis` |
-| `internal/worker/metrics.go` | Publish `freehire_worker_paused` alongside the existing triple | `WriteTextfile` |
-| `internal/worker/main.go` | Wire the decision in before `run()` | the two above |
+| `internal/platform/worker/pause.go` | Decide whether this process may run: read the two keys, honour the override, fail open | `config.Settings.RedisURL`, `go-redis` |
+| `internal/platform/worker/metrics.go` | Publish `freehire_worker_paused` alongside the existing triple | `WriteTextfile` |
+| `internal/platform/worker/main.go` | Wire the decision in before `run()` | the two above |
 
 The pause decision is a pure function of (job name, override env, Redis contents), so it can
 be tested against `miniredis` — already a dependency — without a live Redis or a worker.
@@ -216,6 +216,6 @@ free the disk in the next minute.
 
 ## Related
 
-- `internal/worker/AGENTS.md` — the metrics filename rule and the `exported_job` trap
+- `internal/platform/worker/AGENTS.md` — the metrics filename rule and the `exported_job` trap
 - `docs/superpowers/specs/2026-08-15-ingest-observability-design.md` — the queue-depth
   metrics this gauge sits beside

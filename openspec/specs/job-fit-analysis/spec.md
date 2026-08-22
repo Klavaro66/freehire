@@ -65,7 +65,7 @@ stamp of its own.
 ### Requirement: Deterministic match as grounding anchor
 
 The LLM prompt SHALL include the deterministic skills match (exact/adjacent/missing slugs from
-`internal/jobmatch`) so the model explains and augments it rather than recomputing skills from
+`internal/candidate/jobmatch`) so the model explains and augments it rather than recomputing skills from
 scratch. The Skills coverage dimension MUST be consistent with the deterministic coverage.
 
 #### Scenario: Anchor passed into the prompt

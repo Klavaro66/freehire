@@ -126,10 +126,10 @@ for a full pass over the live company count.
 
 **The rate limiter is the trap here.** `agent/jobs/search` is capped at 300/min
 (5 r/s) per caller and the cheap reads at 600/min, keyed by user-or-IP
-(`internal/handler/public_read_limit.go`). A single-machine run therefore
+(`internal/api/handler/public_read_limit.go`). A single-machine run therefore
 measures the limiter, not the host, unless you say otherwise. `cmd/server` trusts
 `X-Real-IP` from a peer inside `ratelimit.TrustedCIDRs`, and
-`internal/ratelimit.trusted` then counts the **claimed** address — so
+`internal/api/ratelimit.trusted` then counts the **claimed** address — so
 `SCRAPER_SPOOF_IP=1` (the default) gives each VU its own budget from
 documentation-only address space (RFC 5737) and the run reports what the box can
 serve. Set `SCRAPER_SPOOF_IP=0` to measure the throttled path instead — a real

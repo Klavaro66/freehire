@@ -9,7 +9,7 @@ import (
 
 // waiter gates a request until the limiter admits it. *rate.Limiter satisfies it; tests
 // inject a fake so the gate can be asserted without timing flake. Mirrors the ingest-side
-// pacer in internal/sources.
+// pacer in internal/ingest/sources.
 type waiter interface {
 	Wait(ctx context.Context) error
 }

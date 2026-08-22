@@ -4,7 +4,7 @@
 
 Workday's CXS jobs-listing API caps the `total` it reports at 2,000 for some tenants.
 Past `offset=2000` those tenants return page 1 again rather than an empty page or an
-error. `listPostings` (`internal/sources/workday.go:142-177`) latches the first
+error. `listPostings` (`internal/ingest/sources/workday.go:142-177`) latches the first
 non-zero `total` and pages until it reaches that number, so on a capped board one
 crawl reads at most 2,000 postings and exits cleanly — nothing distinguishes "read the
 whole board" from "hit the ceiling."
@@ -16,9 +16,9 @@ A random sample of 120 boards from `sources/workday.yml` (seed 11) found the cei
 on 2/119 reachable boards (~1.7%), extrapolating to roughly 110 of the file's 6,462
 boards — skewed toward the largest employers.
 
-Second, smaller gap: `internal/sources/http.go:493-519` treats HTTP 403 as fatal
+Second, smaller gap: `internal/ingest/sources/http.go:493-519` treats HTTP 403 as fatal
 (`default` branch, immediate return), failing the whole board on one rate-limit
-response. `internal/sources/eightfold.go:133-164` already treats 403 as a retryable
+response. `internal/ingest/sources/eightfold.go:133-164` already treats 403 as a retryable
 rate-limit signal for that provider (Eightfold returns 403 for throttling, not auth);
 Workday needs the same per-provider judgment call.
 
@@ -128,7 +128,7 @@ rate-limiting mechanism is being introduced.
 
 ## Testing
 
-Extend `internal/sources/workday_test.go` using the existing `routedHTTP` /
+Extend `internal/ingest/sources/workday_test.go` using the existing `routedHTTP` /
 `pagedWorkday` mock patterns:
 
 - Capped total (`total: 2000` on page 1, with a `facets` array) triggers a

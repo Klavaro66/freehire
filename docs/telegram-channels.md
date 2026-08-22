@@ -1,7 +1,7 @@
 # Telegram channels
 
 Human-readable index of the public Telegram channels crawled by `cmd/tg-ingest`
-(see `internal/telegram`). **The source of truth is [`sources/telegram.yml`](../sources/telegram.yml)** —
+(see `internal/ingest/telegram`). **The source of truth is [`sources/telegram.yml`](../sources/telegram.yml)** —
 this document mirrors it for browsing; when the YAML changes, regenerate this list.
 
 **95 channels** (17 `authored`, 78 `board`) as of the last update.
@@ -214,7 +214,7 @@ executive / top-management / marketing roles rather than pure IT.
 Mined from [nikit0ns/Ukrainian_IT_Communities](https://github.com/nikit0ns/Ukrainian_IT_Communities)
 (192 entries). Verified 2026-08-01: public `t.me/s` preview enabled and a post within the
 last 30 days. This is the first Ukrainian-language cohort, and it only yields vacancies
-because `internal/telegram/prefilter.go` gained UA markers in the same change — the RU
+because `internal/ingest/telegram/prefilter.go` gained UA markers in the same change — the RU
 marker `ваканси` cannot match `вакансія`, since Cyrillic `і` and `и` are distinct runes.
 Do not add a channel in a language the prefilter does not yet cover.
 
