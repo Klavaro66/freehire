@@ -14,13 +14,13 @@ import (
 // mints a CV and debits credits, and the work is an assistant turn under the `tailor`
 // preset — already tagged as such. A second tag would double-count the same spend.
 const (
-	tagAssistant     = "feature:assistant"
-	tagMatchAnalysis = "feature:match-analysis"
-	tagCVExtract     = "feature:cv-extract"
-	tagATSReview     = "feature:ats-review"
-	tagAutofill      = "feature:autofill"
-	tagMailRecall    = "feature:mail-recall"
-	tagSearchIntent  = "feature:search-intent"
+	tagAssistant     = "assistant"
+	tagMatchAnalysis = "match-analysis"
+	tagCVExtract     = "cv-extract"
+	tagATSReview     = "ats-review"
+	tagAutofill      = "autofill"
+	tagMailRecall    = "mail-recall"
+	tagSearchIntent  = "search-intent"
 )
 
 // llmBinding is what a per-user surface needs to spend as its caller: the client the
@@ -36,8 +36,8 @@ type llmBinding struct {
 }
 
 // bind returns the client one call should travel on. See userLLM: it cannot fail.
-func (b llmBinding) bind(ctx context.Context, userID int64, tags ...string) *llm.Client {
-	return userLLM(ctx, b.keys, b.client, userID, tags...)
+func (b llmBinding) bind(ctx context.Context, userID int64, dims ...llm.Dimension) *llm.Client {
+	return userLLM(ctx, b.keys, b.client, userID, dims...)
 }
 
 // userLLM binds a model client to the caller's own gateway credential and labels the call
@@ -52,13 +52,13 @@ func (b llmBinding) bind(ctx context.Context, userID int64, tags ...string) *llm
 // admin API all return a client that spends on the service credential — still tagged,
 // because knowing which feature spent is useful even when the person could not be worked
 // out. A nil model stays nil, so a deployment with no LLM keeps reporting the feature off.
-func userLLM(ctx context.Context, keys *llmkey.Resolver, client *llm.Client, userID int64, tags ...string) *llm.Client {
+func userLLM(ctx context.Context, keys *llmkey.Resolver, client *llm.Client, userID int64, dims ...llm.Dimension) *llm.Client {
 	if client == nil {
 		return nil
 	}
 	secret := keys.For(ctx, userID)
 	if secret == "" {
-		return client.As("", nil, tags...)
+		return client.As("", nil, dims...)
 	}
 	// Forgetting runs on a context detached from the caller's. A refusal is most likely
 	// to arrive exactly when someone has closed the tab, and a credential the gateway has
@@ -66,5 +66,5 @@ func userLLM(ctx context.Context, keys *llmkey.Resolver, client *llm.Client, use
 	// pays for one abandoned request.
 	forget := func() { keys.Forget(context.WithoutCancel(ctx), userID, secret) }
 
-	return client.As(secret, forget, tags...)
+	return client.As(secret, forget, dims...)
 }

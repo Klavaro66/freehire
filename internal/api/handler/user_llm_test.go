@@ -23,9 +23,10 @@ import (
 type spendProxy struct {
 	srv *httptest.Server
 
-	mu    sync.Mutex
-	authz []string
-	tags  []string
+	mu     sync.Mutex
+	authz  []string
+	tags   []string
+	preset []string
 }
 
 func newSpendProxy(t *testing.T) *spendProxy {
@@ -34,7 +35,8 @@ func newSpendProxy(t *testing.T) *spendProxy {
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
 		p.authz = append(p.authz, r.Header.Get("Authorization"))
-		p.tags = append(p.tags, r.Header.Get("X-Litellm-Tags"))
+		p.tags = append(p.tags, r.Header.Get("X-Bf-Dim-Feature"))
+		p.preset = append(p.preset, r.Header.Get("X-Bf-Dim-Preset"))
 		p.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -46,12 +48,19 @@ func newSpendProxy(t *testing.T) *spendProxy {
 }
 
 // keyGateway is the admin API, minting a fixed secret.
+// newKeyGateway answers the two calls a mint makes: the policy read, then the create.
+// The policy has to be there — a virtual key created without one is refused every
+// provider, so a fake that skipped it would let a mint "succeed" into a dead credential.
 func newKeyGateway(t *testing.T, mint string) *httptest.Server {
 	t.Helper()
+	const keys = "/api/governance/virtual-keys"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/key/generate":
-			_, _ = io.WriteString(w, `{"key":"`+mint+`","token_id":"h"}`)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == keys+"/"+testTemplateKey:
+			_, _ = io.WriteString(w, `{"virtual_key":{"id":"`+testTemplateKey+`","provider_configs":[`+
+				`{"provider":"zai","weight":1,"allowed_models":["flagship"],"key_ids":["*"]}]}}`)
+		case r.Method == http.MethodPost && r.URL.Path == keys:
+			_, _ = io.WriteString(w, `{"virtual_key":{"id":"vk-`+mint+`","value":"`+mint+`"}}`)
 		default:
 			_, _ = io.WriteString(w, `{}`)
 		}
@@ -60,33 +69,47 @@ func newKeyGateway(t *testing.T, mint string) *httptest.Server {
 	return srv
 }
 
+// testTemplateKey names the virtual key these fakes serve a provider policy from.
+const testTemplateKey = "vk-freehire-service"
+
+// testGatewayConfig is the admin configuration every handler test uses. Spelling it once
+// keeps a new required field from having to be added at each call site.
+func testGatewayConfig(url string) llmkey.Config {
+	return llmkey.Config{
+		BaseURL: url, AdminUsername: "admin", AdminPassword: "secret", TemplateKey: testTemplateKey,
+	}
+}
+
 // stubKeyQueries is the smallest store the resolver needs.
 type stubKeyQueries struct {
-	mu     sync.Mutex
-	stored map[int64]string
+	mu        sync.Mutex
+	stored    map[int64]string
+	storedIDs map[int64]string
 }
 
 func newStubKeyQueries() *stubKeyQueries {
-	return &stubKeyQueries{stored: map[int64]string{}}
+	return &stubKeyQueries{stored: map[int64]string{}, storedIDs: map[int64]string{}}
 }
 
-func (s *stubKeyQueries) GetUserLLMKey(_ context.Context, id int64) (string, error) {
+func (s *stubKeyQueries) GetUserLLMKey(_ context.Context, id int64) (db.GetUserLLMKeyRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.stored[id], nil
+	return db.GetUserLLMKeyRow{LlmKey: s.stored[id], LlmKeyID: s.storedIDs[id]}, nil
 }
 
-func (s *stubKeyQueries) ClaimUserLLMKey(_ context.Context, arg db.ClaimUserLLMKeyParams) (string, error) {
+func (s *stubKeyQueries) ClaimUserLLMKey(_ context.Context, arg db.ClaimUserLLMKeyParams) (db.ClaimUserLLMKeyRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stored[arg.ID] = arg.LlmKey.String
-	return arg.LlmKey.String, nil
+	s.storedIDs[arg.ID] = arg.LlmKeyID.String
+	return db.ClaimUserLLMKeyRow{LlmKey: arg.LlmKey.String, LlmKeyID: arg.LlmKeyID.String}, nil
 }
 
 func (s *stubKeyQueries) ClearUserLLMKey(_ context.Context, arg db.ClearUserLLMKeyParams) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.stored, arg.ID)
+	delete(s.storedIDs, arg.ID)
 	return nil
 }
 
@@ -102,9 +125,9 @@ func (p *spendProxy) llmClient(t *testing.T) *llm.Client {
 func TestUserLLMSpendsUnderTheCallersOwnCredential(t *testing.T) {
 	proxy := newSpendProxy(t)
 	keys := llmkey.NewResolver(newStubKeyQueries(),
-		llmkey.New(llmkey.Config{BaseURL: newKeyGateway(t, "sk-user-7").URL, AdminKey: "sk-admin"}))
+		llmkey.New(testGatewayConfig(newKeyGateway(t, "sk-user-7").URL)))
 
-	client := userLLM(context.Background(), keys, proxy.llmClient(t), 7, "feature:assistant", "preset:chat")
+	client := userLLM(context.Background(), keys, proxy.llmClient(t), 7, llm.Feature("assistant"), llm.Dimension{Name: "preset", Value: "chat"})
 	if _, err := client.GenerateJSON(context.Background(), "sys", "usr"); err != nil {
 		t.Fatalf("GenerateJSON: %v", err)
 	}
@@ -114,8 +137,14 @@ func TestUserLLMSpendsUnderTheCallersOwnCredential(t *testing.T) {
 	if proxy.authz[0] != "Bearer sk-user-7" {
 		t.Errorf("call carried %q, want the caller's own credential", proxy.authz[0])
 	}
-	if proxy.tags[0] != "feature:assistant,preset:chat" {
-		t.Errorf("tags = %q, want the feature and the preset", proxy.tags[0])
+	// One header per dimension, and the feature one carries the feature alone. A value
+	// of "assistant,preset:chat" would be neither, and would split the assistant across
+	// as many labels as it has presets.
+	if proxy.tags[0] != "assistant" {
+		t.Errorf("feature = %q, want the feature alone", proxy.tags[0])
+	}
+	if proxy.preset[0] != "chat" {
+		t.Errorf("preset = %q, want the preset under its own dimension", proxy.preset[0])
 	}
 }
 
@@ -125,7 +154,7 @@ func TestUserLLMFallsBackToTheServiceCredential(t *testing.T) {
 	proxy := newSpendProxy(t)
 	keys := llmkey.NewResolver(newStubKeyQueries(), nil) // unconfigured deployment
 
-	client := userLLM(context.Background(), keys, proxy.llmClient(t), 7, "feature:match")
+	client := userLLM(context.Background(), keys, proxy.llmClient(t), 7, llm.Feature("match"))
 	if _, err := client.GenerateJSON(context.Background(), "sys", "usr"); err != nil {
 		t.Fatalf("GenerateJSON: %v", err)
 	}
@@ -135,7 +164,7 @@ func TestUserLLMFallsBackToTheServiceCredential(t *testing.T) {
 	if proxy.authz[0] != "Bearer sk-service" {
 		t.Errorf("call carried %q, want the service credential", proxy.authz[0])
 	}
-	if proxy.tags[0] != "feature:match" {
+	if proxy.tags[0] != "match" {
 		t.Errorf("tags = %q, want the feature named even unattributed", proxy.tags[0])
 	}
 }
@@ -167,7 +196,7 @@ func (nilSafeModel) Chat(context.Context, []llms.MessageContent, []llms.Tool, ll
 
 func TestUserLLMOnAnUnconfiguredModelStaysNil(t *testing.T) {
 	keys := llmkey.NewResolver(newStubKeyQueries(), nil)
-	if got := userLLM(context.Background(), keys, nil, 7, "feature:chat"); got != nil {
+	if got := userLLM(context.Background(), keys, nil, 7, llm.Feature("chat")); got != nil {
 		t.Errorf("userLLM with no model = %v, want nil so callers keep reporting the feature off", got)
 	}
 }
@@ -190,14 +219,14 @@ func TestUserLLMForgetsARejectedCredentialAfterCancellation(t *testing.T) {
 	store := newStubKeyQueries()
 	store.stored[7] = "sk-stale"
 	keys := llmkey.NewResolver(store,
-		llmkey.New(llmkey.Config{BaseURL: newKeyGateway(t, "sk-fresh").URL, AdminKey: "sk-admin"}))
+		llmkey.New(testGatewayConfig(newKeyGateway(t, "sk-fresh").URL)))
 
 	client, err := llm.New(refusing.URL, "sk-service", "test-model")
 	if err != nil {
 		t.Fatalf("llm.New: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	bound := userLLM(ctx, keys, client, 7, "feature:chat")
+	bound := userLLM(ctx, keys, client, 7, llm.Feature("chat"))
 	cancel() // the caller walks away as the refusal comes back
 
 	if _, err := bound.GenerateJSON(context.Background(), "sys", "usr"); err != nil {
