@@ -72,12 +72,12 @@ stored vector.
 - **THEN** weight loading succeeds and produces weights that build no vectors,
   rather than failing indexing or producing an unweighted ranking
 
-#### Scenario: Unloadable weights leave stored vectors alone
+#### Scenario: Unloadable weights still produce an indexable document
 
 - **WHEN** a document is built while no weights could be loaded
-- **THEN** it omits the vector field entirely rather than clearing it, so an index
-  already carrying vectors keeps them — an absence of knowledge is not knowledge of
-  an absence
+- **THEN** it carries the clearing value rather than omitting the field, so the engine
+  accepts it and the posting stays searchable — losing its match ordering until a
+  rebuild with weights restores it
 
 ### Requirement: Vector ordering rewards overlap and coverage together
 
@@ -95,14 +95,15 @@ scarce skill the candidate happens to hold CAN outrank a broader match on common
 ones, and SHOULD: that is what weighting by rarity means. The system SHALL NOT cap
 or flatten the weights to force a count-based order.
 
-A vector SHALL be absent — not zero-valued — when it would be meaningless: no
-weights available, no skills given, or no skill recognised. An absent vector is an
-omission the caller propagates, never a vector that ranks against everything.
+Vector CONSTRUCTION SHALL report no vector — not a zero-valued one — when the result
+would be meaningless: no weights available, no skills given, or no skill recognised. A
+zero vector is not "no opinion"; it ranks against everything.
 
-The two absences SHALL be distinguished where they reach the index. A job whose
-skills are gone SHALL have any stored vector CLEARED, since the index merges rather
-than replaces documents and an omission would leave it ranking by skills it no longer
-has. A job built without loaded weights SHALL leave the stored vector untouched.
+Document SERIALISATION is a separate question and answers it uniformly: the document
+always carries the vector field, with the clearing value standing in for every one of
+those cases. The two layers deliberately differ — construction distinguishes why there
+is no vector, the wire shape cannot, because a declared embedder rejects a document
+that omits the field.
 
 #### Scenario: A well-targeted vacancy outranks both extremes
 
@@ -143,10 +144,18 @@ Every code path that builds an index document SHALL supply the weights. The
 weights SHALL be a parameter of document construction rather than a field a caller
 may attach afterwards, so that a path which omits them fails to compile.
 
-A document whose weights are loaded but whose skills yield no vector SHALL carry an
-explicit CLEARING value, not an omission: the index merges document fields rather than
-replacing them, so an omitted field leaves a previously stored vector in place. Only a
-document built without loaded weights SHALL omit the field.
+Every document SHALL carry the vector field, with either a vector or an explicit
+clearing value. It SHALL NEVER be omitted, for two independent reasons: the index
+merges document fields rather than replacing them, so an omission leaves a previously
+stored vector in place; and an index with a declared embedder REJECTS a document that
+omits the field, which would drop the posting out of the index entirely rather than
+merely out of the match ordering.
+
+The second reason overrides a distinction that would otherwise be worth drawing. A
+document built while the rarity weights are unavailable therefore also carries the
+clearing value and loses its vector, even though nothing is known about its skills.
+That is a deliberate trade: a lost vector costs an ordering the next rebuild restores,
+while a rejected document costs a searchable job.
 
 #### Scenario: An indexed job carries its vector
 
