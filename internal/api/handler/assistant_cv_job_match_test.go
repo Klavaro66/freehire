@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/strelov1/freehire/internal/candidate/cv"
+	"github.com/strelov1/freehire/internal/candidate/fitanalysis"
+	"github.com/strelov1/freehire/internal/candidate/matchanalysis"
 	"github.com/strelov1/freehire/internal/platform/db"
 )
 
@@ -18,13 +20,13 @@ func jobMatchToolAPI(t *testing.T, doc string, job db.Job, analysis string) (*as
 	t.Helper()
 	repo := &cvRepo{id: testCVID, userID: 3, jobID: 9, data: []byte(doc)}
 	h := &cvHandlers{
-		cvStore:            cv.NewStore(repo),
-		cvRenderer:         &fakeCVRenderer{pdf: []byte(scorableCV)},
-		extractPDFText:     textFromPDF,
-		jobReader:          jobStub{job: job},
-		matchAnalysisCache: analysisCache{analysis: analysis},
+		cvStore:        cv.NewStore(repo),
+		cvRenderer:     &fakeCVRenderer{pdf: []byte(scorableCV)},
+		extractPDFText: textFromPDF,
+		jobReader:      jobStub{job: job},
+		fit:            fitanalysis.New(analysisCache{analysis: analysis}, nil, matchanalysis.NewAnalyzer(nil)),
 	}
-	return &assistantHandlers{cv: h}, repo
+	return &assistantHandlers{cv: h, fit: h.fit, jobs: jobStub{job: job}}, repo
 }
 
 func TestJobMatchToolScoresTheCurrentCV(t *testing.T) {
@@ -88,5 +90,19 @@ func TestJobMatchToolReflectsAnEditedDocument(t *testing.T) {
 	afterPayload, _ := json.Marshal(after)
 	if string(beforePayload) == string(afterPayload) {
 		t.Errorf("score did not change after the rendered text changed: %s", beforePayload)
+	}
+}
+
+// TestJobMatchReportsAnUnwiredDeployment is the companion to cv_context's own guard: a tool
+// that dereferences a collaborator nobody wired must report it, because the call runs inside
+// the SSE writer's goroutine where Registry.Call's error path cannot reach a panic and Fiber's
+// recover is not listening — so it takes the process down, not one request.
+func TestJobMatchReportsAnUnwiredDeployment(t *testing.T) {
+	bare := &assistantHandlers{}
+
+	_, err := toolByName(t, bare.assistantCVTools(testCVID, 9, uuid.New()), "job_match").
+		Run(context.Background(), 3, json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("job_match answered from a handler wired to nothing")
 	}
 }
