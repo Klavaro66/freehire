@@ -1,7 +1,7 @@
 {
   "Alert": 1,
   "Avatar": 0,
-  "Badge": 18,
+  "Badge": 19,
   "BrandMark": 1,
   "Button": 69,
   "Card": 3,
@@ -24,5 +24,5 @@
   "Table": 8,
   "Tabs": 0,
   "TabStrip": 4,
-  "Tooltip": 1
+  "Tooltip": 2
 }
