@@ -1,8 +1,5 @@
-# job-cluster-copies Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change job-cluster-copies. Update Purpose after archive.
-## Requirements
 ### Requirement: Role-cluster copies are listable from a job
 
 The system SHALL expose `GET /jobs/:slug/copies` returning the OPEN postings the addressed
