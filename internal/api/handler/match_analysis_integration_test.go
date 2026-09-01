@@ -21,7 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/strelov1/freehire/internal/ai/credits"
+	"github.com/strelov1/freehire/internal/ai/plan"
 	"github.com/strelov1/freehire/internal/candidate/experience"
 	"github.com/strelov1/freehire/internal/candidate/fitanalysis"
 	"github.com/strelov1/freehire/internal/candidate/matchanalysis"
@@ -106,7 +106,7 @@ func fitAPI(pool *pgxpool.Pool, queries *db.Queries, iss *auth.Issuer, store *re
 		userProfile: userprofile.New(ownedProfile()),
 		resume:      store, matchAnalysis: an,
 		fit: fitanalysis.New(queries,
-			credits.NewStore(queries, pool, credits.Config{MonthlyGrant: 20, CostMatch: 1, CostTailor: 3}), an),
+			plan.NewStore(queries, pool, plan.DefaultConfig().Enforcing()), an),
 	}
 }
 
@@ -245,10 +245,11 @@ func TestMatchAnalysisEndpoints(t *testing.T) {
 	})
 }
 
-// TestMatchAnalysisCredits covers the points gate on the match feature: a new job with no points
-// is a 402 (no LLM call, nothing persisted), a recompute of an already-analyzed job is
-// always free, a fresh analysis debits one point, and GET reports the balance.
-func TestMatchAnalysisCredits(t *testing.T) {
+// TestMatchAnalysisAllowance covers the plan gate on the match feature: a new job with the
+// day's allowance spent is a 402 (no LLM call, nothing persisted), a recompute of an
+// already-analyzed job is always free, a fresh analysis consumes one, and GET reports where
+// the caller stands.
+func TestMatchAnalysisAllowance(t *testing.T) {
 	pool := startPostgres(t)
 	ctx := context.Background()
 	queries := db.New(pool)
@@ -306,7 +307,7 @@ func TestMatchAnalysisCredits(t *testing.T) {
 			userProfile: userprofile.New(ownedProfile()),
 			resume:      store, matchAnalysis: an,
 			fit: fitanalysis.New(queries,
-				credits.NewStore(queries, pool, credits.Config{MonthlyGrant: grant, CostMatch: 1, CostTailor: 3}), an),
+				plan.NewStore(queries, pool, plan.DefaultConfig().Enforcing().WithFreeDaily(plan.FeatureFit, grant)), an),
 		}
 		app := fiber.New(fiber.Config{ErrorHandler: RenderError})
 		g := auth.RequireAuth(iss, testVersions)
@@ -328,7 +329,7 @@ func TestMatchAnalysisCredits(t *testing.T) {
 	}
 	newModel := func() *fitModel { return &fitModel{resp: []string{fitStage1, fitStage2, fitStage3}} }
 
-	t.Run("new job with no points is 402 and never calls the LLM", func(t *testing.T) {
+	t.Run("new job with the day's allowance spent is 402 and never calls the LLM", func(t *testing.T) {
 		userID, token := seedUser(t, "broke@example.test")
 		seedJob(t, "broke-new", "broke-new")
 		model := newModel()
@@ -339,7 +340,7 @@ func TestMatchAnalysisCredits(t *testing.T) {
 			t.Errorf("status = %d, want 402", status)
 		}
 		if model.n != 0 {
-			t.Errorf("LLM was called %d times, want 0 when out of credits", model.n)
+			t.Errorf("LLM was called %d times, want 0 when the allowance is spent", model.n)
 		}
 		var n int
 		_ = pool.QueryRow(ctx, `SELECT count(*) FROM user_job_analysis WHERE user_id=$1`, userID).Scan(&n)
@@ -348,7 +349,7 @@ func TestMatchAnalysisCredits(t *testing.T) {
 		}
 	})
 
-	t.Run("recompute of an analyzed job is free even with no points", func(t *testing.T) {
+	t.Run("recompute of an analyzed job is free even with the allowance spent", func(t *testing.T) {
 		userID, token := seedUser(t, "recompute@example.test")
 		jid := seedJob(t, "rc", "rc-job")
 		seedAnalysis(t, userID, jid, time.Hour) // prior cache row → recompute, not a new job
@@ -362,42 +363,50 @@ func TestMatchAnalysisCredits(t *testing.T) {
 		if model.n == 0 {
 			t.Error("recompute must run the LLM")
 		}
-		var debits int
-		_ = pool.QueryRow(ctx, `SELECT count(*) FROM credit_ledger WHERE user_id=$1 AND kind='debit'`, userID).Scan(&debits)
-		if debits != 0 {
-			t.Errorf("recompute debited %d points, want 0", debits)
+		// Against usage_ledger, and with the error checked. Pointed at the retired
+		// credit_ledger this counted a table nothing writes to any more: it returned zero
+		// whatever the code did, so the rule it exists to hold — a recompute is free —
+		// went unwatched behind a green assertion.
+		var charges int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM usage_ledger WHERE user_id=$1 AND feature='match' AND kind='consume'`,
+			userID).Scan(&charges); err != nil {
+			t.Fatalf("count consumptions: %v", err)
+		}
+		if charges != 0 {
+			t.Errorf("recompute consumed %d allowances, want 0", charges)
 		}
 	})
 
-	t.Run("a fresh analysis debits one point and GET reports the balance", func(t *testing.T) {
+	t.Run("a fresh analysis consumes one and GET reports the standing", func(t *testing.T) {
 		userID, token := seedUser(t, "spend@example.test")
 		seedJob(t, "spend-1", "spend-1")
 		app := appFor(storeWithCVFor(t, userID), matchanalysis.NewAnalyzer(llm.NewWithModel(newModel())), 2)
 
-		// GET before compute: full grant remaining, nothing consumed.
+		// GET before compute: the whole day's allowance untouched.
 		greq := httptest.NewRequest(fiber.MethodGet, "/api/v1/jobs/spend-1/fit", nil)
 		greq.AddCookie(&http.Cookie{Name: auth.CookieName, Value: token})
 		gresp, _ := app.Test(greq)
 		var gbody struct {
 			Data struct {
-				Credits *credits.Balance `json:"credits"`
+				Allowance *allowanceView `json:"allowance"`
 			} `json:"data"`
 		}
 		decodeJSON(t, gresp, &gbody)
-		if gbody.Data.Credits == nil || gbody.Data.Credits.Remaining != 2 {
-			t.Fatalf("GET credits = %+v, want remaining=2", gbody.Data.Credits)
+		if gbody.Data.Allowance == nil || gbody.Data.Allowance.Used != 0 || gbody.Data.Allowance.Limit != 2 {
+			t.Fatalf("GET allowance = %+v, want 0 used of 2", gbody.Data.Allowance)
 		}
 
-		// First new job debits to 1.
+		// First new job consumes one.
 		if status, body := postFit(t, app, "spend-1", token); status != fiber.StatusOK || body.Data.Analysis == nil {
 			t.Fatalf("first analysis status=%d analysis=%v, want 200 + analysis", status, body.Data.Analysis)
 		}
-		var remaining int
-		_ = pool.QueryRow(ctx, `SELECT remaining FROM credit_balances WHERE user_id=$1`, userID).Scan(&remaining)
-		if remaining != 1 {
-			t.Errorf("remaining after one match = %d, want 1", remaining)
+		var used int
+		_ = pool.QueryRow(ctx, `SELECT used FROM usage_daily WHERE user_id=$1 AND feature='match'`, userID).Scan(&used)
+		if used != 1 {
+			t.Errorf("used after one analysis = %d, want 1", used)
 		}
-		// Second new job debits to 0; a third is then out of credits (402).
+		// The second consumes the last one; a third has nothing left (402).
 		seedJob(t, "spend-2", "spend-2")
 		if status, _ := postFit(t, app, "spend-2", token); status != fiber.StatusOK {
 			t.Fatalf("second analysis status=%d, want 200", status)
@@ -408,7 +417,7 @@ func TestMatchAnalysisCredits(t *testing.T) {
 		}
 	})
 
-	t.Run("stream out of credits is 402 before opening the stream", func(t *testing.T) {
+	t.Run("a stream past the allowance is 402 before opening the stream", func(t *testing.T) {
 		userID, token := seedUser(t, "stream-broke@example.test")
 		seedJob(t, "sb-new", "sb-new")
 		model := newModel()
@@ -425,7 +434,7 @@ func TestMatchAnalysisCredits(t *testing.T) {
 			t.Errorf("stream status = %d, want 402", resp.StatusCode)
 		}
 		if model.n != 0 {
-			t.Errorf("LLM called %d times, want 0 for an out-of-credits stream", model.n)
+			t.Errorf("LLM called %d times, want 0 for a refused stream", model.n)
 		}
 	})
 }

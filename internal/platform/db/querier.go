@@ -569,6 +569,16 @@ type Querier interface {
 	// Promote a suggested link to a confirmed one: the suggestion becomes job_id with
 	// link_source 'manual'. No-op (0 rows) when there is no pending suggestion.
 	ConfirmEmailLink(ctx context.Context, arg ConfirmEmailLinkParams) (int64, error)
+	// Whether this (feature, ref) was already charged. True means the caller is retrying,
+	// reconnecting, or recomputing work already paid for, and must not be charged again.
+	ConsumptionExists(ctx context.Context, arg ConsumptionExistsParams) (bool, error)
+	// How many turns a session has run, counted as the candidate's own messages.
+	//
+	// This is what both metered questions about a session are asked against: whether a
+	// tailoring session has reached its turn ceiling, and which turn a charge belongs to. It
+	// counts user rows only — an answer, a tool call and its result are all one turn's work,
+	// and counting them would make a turn's price depend on how the model chose to do it.
+	CountAssistantUserTurns(ctx context.Context, sessionID uuid.UUID) (int64, error)
 	// Read-only companion to BackfillBoardCompany, for --dry-run: how many rows a board's backfill
 	// would touch without writing anything.
 	CountBlankCompanyByBoard(ctx context.Context, arg CountBlankCompanyByBoardParams) (int64, error)
@@ -1007,6 +1017,12 @@ type Querier interface {
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) (int64, error)
 	// Unlink Telegram. Returns the affected row count: 0 means there was no link.
 	DeleteTelegramLink(ctx context.Context, userID int64) (int64, error)
+	// Erase one user's daily counters. See DeleteUsageForUser.
+	DeleteUsageDailyForUser(ctx context.Context, userID int64) error
+	// Erase one user's consumption ledger. Account deletion calls this alongside the counter
+	// delete; the foreign keys cascade, but deletion states what it erases explicitly rather
+	// than relying on a constraint to mean it.
+	DeleteUsageForUser(ctx context.Context, userID int64) error
 	// Erase the account. Every user-owned table declares ON DELETE CASCADE, so this one
 	// statement is the whole database side of account deletion; the trails that outlive
 	// the member (jobs.created_by, *.reviewed_by, referral decisions, thread authorship)
@@ -1139,6 +1155,10 @@ type Querier interface {
 	// For an existing user the row is left untouched; a stale period is reset later
 	// under the lock. remaining is seeded with the monthly grant for a fresh row.
 	EnsureBalance(ctx context.Context, arg EnsureBalanceParams) error
+	// Seed today's counter for (user, feature) so the SELECT ... FOR UPDATE below always has
+	// a row to lock. That lock is what serialises two simultaneous first-ever consumptions,
+	// so an allowance can never be oversold by a race. An existing row is left untouched.
+	EnsureUsageDay(ctx context.Context, arg EnsureUsageDayParams) error
 	// Fast approximate hiring-company total (job_count > 0) for the UNFILTERED /companies
 	// list's meta.total. An exact count(*) over the ~227k hiring rows is a cold-cache heap
 	// scan (~17s on prod, see migration 0034); the planner's estimate is O(1). Only the
@@ -1312,6 +1332,17 @@ type Querier interface {
 	GetCompanySlugAlias(ctx context.Context, aliasSlug string) (string, error)
 	// The caller's current vote for a company (0 when none). Always returns one row.
 	GetCompanyVote(ctx context.Context, arg GetCompanyVoteParams) (int16, error)
+	// Which day a consumption was recorded against, read WITHOUT a lock.
+	//
+	// A release must decrement the counter of the day the charge landed on, not of the day
+	// the release happens — otherwise a reservation taken at 23:59 and released at 00:01
+	// gives back an allowance the user never spent today, and the day it really spent stays
+	// spent. Reading it first is also what keeps the lock order the same in both directions:
+	// every path takes usage_daily before usage_ledger, so a consumption and a release for
+	// the same user cannot deadlock each other.
+	//
+	// No rows means nothing was charged under this reference, and the release is a no-op.
+	GetConsumptionDay(ctx context.Context, arg GetConsumptionDayParams) (pgtype.Date, error)
 	// The caller's linked Discord account (link-status endpoint + delivery resolution).
 	GetDiscordLink(ctx context.Context, userID int64) (DiscordLink, error)
 	GetEmail(ctx context.Context, arg GetEmailParams) (GetEmailRow, error)
@@ -1451,6 +1482,11 @@ type Querier interface {
 	// cases, which would otherwise be judged as the active `applied` stage by
 	// silence.ThresholdDays.
 	GetNudgeForDelivery(ctx context.Context, id int64) (GetNudgeForDeliveryRow, error)
+	// The whole of a user's plan. A timestamp in the future means pro; NULL or a past one
+	// means free. Read on the request path of every metered action, which is why it is a
+	// column read and never a call to a billing provider: a provider that is slow must not
+	// be able to slow down a user's next question.
+	GetProUntil(ctx context.Context, id int64) (pgtype.Timestamptz, error)
 	// Public read of a shared board by its slug — no auth, no owner-scoping. Exposes only
 	// the board's display fields; owner columns (user_id) are never selected. A NULL slug
 	// never equals the param, so private sets are unreachable. No row → 404.
@@ -1533,6 +1569,13 @@ type Querier interface {
 	GetTalentNetworkVisibility(ctx context.Context, id int64) (GetTalentNetworkVisibilityRow, error)
 	// The caller's linked Telegram chat (link-status endpoint + delivery resolution).
 	GetTelegramLink(ctx context.Context, userID int64) (TelegramLink, error)
+	// Today's counter for one feature, read without a lock, for a surface that wants to say
+	// where the caller stands before offering an action. No rows means the feature has not
+	// been touched today, which the caller reports as untouched rather than as absent.
+	GetUsageDay(ctx context.Context, arg GetUsageDayParams) (int64, error)
+	// Lock today's counter for the consumption transaction. EnsureUsageDay guarantees the row
+	// exists, so this never returns no-rows on that path.
+	GetUsageDayForUpdate(ctx context.Context, arg GetUsageDayForUpdateParams) (int64, error)
 	// The user's cached CV ATS qualitative review (content-quality + findings), or NULL
 	// when none has been computed. Derived only — never the raw CV text.
 	GetUserATSAnalysis(ctx context.Context, id int64) ([]byte, error)
@@ -1654,6 +1697,10 @@ type Querier interface {
 	// run that re-elects a different winner for the same folded group must not silently move a
 	// URL that has already been 301-ing and indexed.
 	InsertCompanySlugAlias(ctx context.Context, arg InsertCompanySlugAliasParams) (int64, error)
+	// Append the consumption for a metered action; delta is positive and counts units taken.
+	// The partial unique index on (user_id, feature, ref) WHERE kind='consume' guards against
+	// a double charge for the same ref even under a race.
+	InsertConsumption(ctx context.Context, arg InsertConsumptionParams) error
 	// Append the debit for a metered action. delta is negative (the action cost). The partial
 	// unique index on (user_id, feature, ref) WHERE kind='debit' guards against a double charge
 	// for the same ref even under a race.
@@ -2034,6 +2081,23 @@ type Querier interface {
 	// the scopes column has an empty list and would be excluded by a scope test, and the
 	// scope string then has to be spelled in SQL as well as in Go.
 	ListConnectedGmailUsers(ctx context.Context) ([]ListConnectedGmailUsersRow, error)
+	// The live consumption references a user holds beginning with a prefix. This is what makes
+	// the tailoring turn ceiling need no column of its own: a session's charges are written as
+	// '<session_id>#1', '#2', and so on, so the SLOT NUMBERS say how many ceilings the session
+	// holds and the ceiling in force is the highest of them times the per-session turn allowance.
+	//
+	// It returns the references rather than counting them, because a count and a slot number
+	// are not the same answer. A session that predates this metering holds no row at all and is
+	// given slot 1 implicitly, so its first extension buys slot 2 — under a count that extension
+	// would have read back as one ceiling and bought the session nothing. The same gap opens
+	// whenever a row is released: the count drops while the slots already sold do not.
+	//
+	// The suffix is parsed by the caller, in the file that writes it, so one place owns the
+	// format. A session holds a handful of rows, so there is nothing to aggregate away.
+	//
+	// The prefix is passed already terminated by the caller (the session id plus '#'), so a
+	// session id that is a prefix of another cannot borrow its charges.
+	ListConsumptionRefsByPrefix(ctx context.Context, arg ListConsumptionRefsByPrefixParams) ([]pgtype.Text, error)
 	// The "my contributions" list: one user's contributions, newest first.
 	ListContributionsByUser(ctx context.Context, submittedBy int64) ([]LinkContribution, error)
 	// Up to $2 (board, region) pairs currently in an active cooldown for a provider,
@@ -2381,6 +2445,13 @@ type Querier interface {
 	// (tailor debits). Only tailored CVs (job_id set) whose job still exists resolve; the handler
 	// falls back to a generic label otherwise.
 	ListTailoredCVLabelsByIDs(ctx context.Context, ids []pgtype.UUID) ([]ListTailoredCVLabelsByIDsRow, error)
+	// Resolve tailoring-session ids to their vacancy's display labels for the usage history.
+	//
+	// A tailoring charge names the SESSION, not the CV — that is what the turn ceiling is
+	// counted from — so the label has to come back through the binding on the CV row. Only a
+	// tailored copy whose vacancy still exists resolves; anything else simply does not come
+	// back, and the caller falls back to a generic label rather than inventing one.
+	ListTailoredCVLabelsBySessions(ctx context.Context, arg ListTailoredCVLabelsBySessionsParams) ([]ListTailoredCVLabelsBySessionsRow, error)
 	// A user's TAILORED CVs (bound to a vacancy), newest edit first — the re-open list. Carries the
 	// vacancy's public slug and the bound agent session so each row links back to its workspace.
 	// Base CVs (job_id NULL) are excluded; the JOIN also drops tailored CVs whose job was deleted.
@@ -2408,6 +2479,13 @@ type Querier interface {
 	// boards are broken without a second round trip and without naming them all. Ask this table
 	// directly for the rest.
 	ListUnhealthyBoards(ctx context.Context, maxBoards int32) ([]ListUnhealthyBoardsRow, error)
+	// Every feature's consumption for one user on one day, for the usage surface. A feature
+	// the user has not touched today simply does not come back, and the caller reports it as
+	// untouched rather than as absent.
+	ListUsageForDay(ctx context.Context, arg ListUsageForDayParams) ([]ListUsageForDayRow, error)
+	// The caller's ledger entries, newest first, bounded by a caller-supplied limit and served
+	// by the (user_id, created_at DESC) index.
+	ListUsageLedger(ctx context.Context, arg ListUsageLedgerParams) ([]ListUsageLedgerRow, error)
 	// The caller's open applications offered to the matcher (applied, saved, or staged),
 	// as (job_id, company). Closed postings are excluded.
 	ListUserApplicationsForMatch(ctx context.Context, userID int64) ([]ListUserApplicationsForMatchRow, error)
@@ -3227,6 +3305,24 @@ type Querier interface {
 	// carrying the OLD slug, so an updated row leaves the set. A re-run updates zero, and
 	// stopping mid-way costs nothing — the next run resumes with what is left.
 	RekeyCompanySlugChunk(ctx context.Context, arg RekeyCompanySlugChunkParams) (int64, error)
+	// Void a consumption taken as a RESERVATION for work that then produced nothing.
+	//
+	// It RESTAMPS the row rather than deleting it or adding a compensating entry, and the
+	// shape of the index is what makes that the right move. `usage_ledger_consume_ref_uniq` is
+	// scoped to kind='consume', so:
+	//
+	//   * appending a compensating row would leave the original standing, the ref permanently
+	//     spent, and the user's retry charged nothing — free work, forever;
+	//   * deleting the row frees the ref but erases the fact that a reservation was ever
+	//     taken, which is exactly the kind of hole an append-only ledger exists to prevent;
+	//   * restamping frees the ref AND keeps the row, so the history reads "charged, then
+	//     returned" and the day's counter — which sums only kind='consume' — is correct.
+	//
+	// Returns the number of rows restamped, so the caller gives the allowance back exactly
+	// when it really took one: a double release, or a release of something already voided,
+	// matches nothing and returns 0. That is what lets every failure path call this without
+	// first working out whether it owes one.
+	ReleaseConsumption(ctx context.Context, arg ReleaseConsumptionParams) (int64, error)
 	// Release the lease on a subscription's claimed jobs without counting an attempt,
 	// so a soft-skipped delivery (e.g. Telegram not yet linked) is retried promptly on
 	// a later pass instead of waiting out the lease.
@@ -3545,6 +3641,10 @@ type Querier interface {
 	// the guard answers that per row, which is cheaper and more honest than a cursor that
 	// would go stale the moment ingest writes a new posting behind it.
 	SetJobRequiresClearance(ctx context.Context, arg SetJobRequiresClearanceParams) (int64, error)
+	// Move a user's plan expiry. The only writer today is a hand-run statement; the billing
+	// webhook and its reconciler become the writers in the change that adds them, and they
+	// write this and nothing else.
+	SetProUntil(ctx context.Context, arg SetProUntilParams) error
 	// Publish a saved search as a board: set its public slug and (optional) author label,
 	// owner-scoped, bumping updated_at. The service decides the slug (keeping an existing
 	// one on re-share, minting a fresh one otherwise), so this sets it verbatim; a
@@ -3579,6 +3679,11 @@ type Querier interface {
 	// (including a round trip through 'off'), so a candidate who already shared it once
 	// never has to reshare a new one.
 	SetTalentNetworkVisibility(ctx context.Context, arg SetTalentNetworkVisibilityParams) error
+	// Persist the post-transaction counter. The row is guaranteed to exist (EnsureUsageDay
+	// ran first). Yesterday's rows are simply left behind rather than reset: a day that has
+	// rolled over is answered by a different key, so nothing has to expire anything and no
+	// scheduled job exists to forget to run.
+	SetUsageDay(ctx context.Context, arg SetUsageDayParams) error
 	// Cache the derived CV ATS review for the user (keyed to their stored CV).
 	SetUserATSAnalysis(ctx context.Context, arg SetUserATSAnalysisParams) error
 	SetUserCandidateContacts(ctx context.Context, arg SetUserCandidateContactsParams) error

@@ -20,6 +20,7 @@ import (
 	"github.com/strelov1/freehire/internal/ai/assistant"
 	"github.com/strelov1/freehire/internal/ai/browsertools"
 	"github.com/strelov1/freehire/internal/ai/llmkey"
+	"github.com/strelov1/freehire/internal/ai/plan"
 	"github.com/strelov1/freehire/internal/candidate/cv"
 	"github.com/strelov1/freehire/internal/candidate/fitanalysis"
 	"github.com/strelov1/freehire/internal/identity/auth"
@@ -88,6 +89,11 @@ type assistantHandlers struct {
 	stages     applicationReader
 	invitation invitationReader
 
+	// plans meters a turn against the caller's plan. Nil leaves every turn unmetered,
+	// which is what a fixture exercising an adjacent surface gets — production always
+	// wires one.
+	plans *plan.Store
+
 	// realtime mints voice-mode's short-lived OpenAI Realtime API credentials. Nil in
 	// a deployment with no Realtime gateway configured, following internal/ai/speech's
 	// convention: the mint endpoint answers 501 and the interview session view offers
@@ -113,7 +119,7 @@ type assistantModels struct {
 func newAssistantHandlers(queries *db.Queries, models assistantModels, store *assistant.Store,
 	search *searchHandlers, resumeH *resumeHandlers, tracking *trackingHandlers, cvH *cvHandlers,
 	profileH *profileHandlers, browserTools *browsertools.Hub, mail *inboxHandlers,
-	bank experienceBankTools, screeningAnswers *screeninganswers.Store) *assistantHandlers {
+	bank experienceBankTools, screeningAnswers *screeninganswers.Store, plans *plan.Store) *assistantHandlers {
 	h := &assistantHandlers{
 		experience:       bank,
 		screeningAnswers: screeningAnswers,
@@ -128,6 +134,7 @@ func newAssistantHandlers(queries *db.Queries, models assistantModels, store *as
 		browserTools:     browserTools,
 		mail:             mail,
 		stages:           queries,
+		plans:            plans,
 	}
 	// The fit reads come from the service, not from whichever handler happens to hold it:
 	// a tool that grounds on the cached analysis must not break because the CV surface was
@@ -159,10 +166,11 @@ func newAssistantHandlers(queries *db.Queries, models assistantModels, store *as
 // the session JWT the connect flow minted, or a full-scope API key to one user.
 // Authentication is the whole gate: every signed-in user reaches the assistant. The
 // beta-tester restriction that used to sit here was written when the agent ran on the
-// candidate's own machine, and did not survive the move in-process. A turn is now
+// candidate's own machine, and did not survive the move in-process. A turn is both
 // attributed — it spends on the caller's own gateway credential, tagged with its preset —
-// but it is still not BOUNDED: nothing refuses one, so being signed in remains all that
-// caps our inference spend.
+// and now BOUNDED: it draws on the caller's plan before the stream opens, and a spent
+// allowance is a 402. Measured over three August weeks, the assistant was 99.4% of model
+// spend and the only surface charging nothing for it.
 func (h *assistantHandlers) register(api fiber.Router, mw middleware) {
 	api.Post("/assistant/sessions", mw.key, h.CreateAssistantSession)
 	api.Get("/assistant/sessions", mw.key, h.ListAssistantSessions)
@@ -170,6 +178,10 @@ func (h *assistantHandlers) register(api fiber.Router, mw middleware) {
 	api.Delete("/assistant/sessions/:id", mw.key, h.DeleteAssistantSession)
 	api.Post("/assistant/sessions/:id/messages", mw.key, h.PostAssistantMessage)
 	api.Post("/assistant/sessions/:id/cancel", mw.key, h.CancelAssistantTurn)
+	// Buy this tailoring session another ceiling's worth of turns. Separate from starting
+	// a session because it is a distinct decision the candidate makes with what they know
+	// now — they have seen the work so far and are choosing to spend more of the day on it.
+	api.Post("/assistant/sessions/:id/extend", mw.key, h.PostAssistantExtend)
 	api.Post("/assistant/sessions/:id/opening", mw.key, h.PostAssistantOpening)
 	// Resume after a transport/model failure without appending another user message —
 	// re-sending the prompt would duplicate it in the model's context.
@@ -540,14 +552,14 @@ func lastUserText(transcript []assistant.Message) string {
 // body: an unattended run's brief and its raised ceiling are ours to choose, and a ceiling
 // a client can set is not a bound.
 func (h *assistantHandlers) streamTurn(c *fiber.Ctx, sess assistant.Session, prompt string, turn assistant.TurnConfig) error {
-	return h.streamSSE(c, sess, func(ctx context.Context, runner *assistant.Runner, reg *assistant.Registry, system string, emit func(assistant.Event)) error {
+	return h.streamSSE(c, sess, h.meterTurn, func(ctx context.Context, runner *assistant.Runner, reg *assistant.Registry, system string, emit func(assistant.Event)) error {
 		return runner.Run(ctx, sess, reg, system, prompt, turn, emit)
 	})
 }
 
 // streamContinue is streamTurn for a retry: same SSE machinery, no new prompt.
 func (h *assistantHandlers) streamContinue(c *fiber.Ctx, sess assistant.Session, turn assistant.TurnConfig) error {
-	return h.streamSSE(c, sess, func(ctx context.Context, runner *assistant.Runner, reg *assistant.Registry, system string, emit func(assistant.Event)) error {
+	return h.streamSSE(c, sess, h.meterRetry, func(ctx context.Context, runner *assistant.Runner, reg *assistant.Registry, system string, emit func(assistant.Event)) error {
 		return runner.Continue(ctx, sess, reg, system, turn, emit)
 	})
 }
@@ -585,10 +597,12 @@ func effectivePreset(preset string, asExtension bool) string {
 }
 
 // streamSSE owns the SSE headers, turn claim/queue, keepalive and writer. start is the
-// one difference between a fresh message and a retry.
+// one difference between a fresh message and a retry, and meter is the difference between
+// paying for a new turn and resuming one already paid for.
 func (h *assistantHandlers) streamSSE(
 	c *fiber.Ctx,
 	sess assistant.Session,
+	meter func(*fiber.Ctx, assistant.Session) (turnCharge, bool, error),
 	start func(context.Context, *assistant.Runner, *assistant.Registry, string, func(assistant.Event)) error,
 ) error {
 	asExtension := auth.IsExtensionBearer(c)
@@ -607,6 +621,18 @@ func (h *assistantHandlers) streamSSE(
 	// tool, defeating the reason the tag exists (AGENTS.md: "the preset is what makes them
 	// comparable").
 	turnRunner := h.boundRunner(c.Context(), turnSess)
+
+	// Metered BEFORE the headers go out. A refusal has to be a real status: an error frame
+	// inside a stream that already answered 200 is invisible to anything checking status
+	// codes, and the SPA would render an empty answer where an upgrade prompt belongs.
+	//
+	// Charged against turnSess, not sess, for the same reason the spend tag is: a browse
+	// turn demoted to chat IS a chat turn, and it must draw on the allowance it actually
+	// spends against.
+	charge, refused, err := meter(c, turnSess)
+	if refused {
+		return err
+	}
 
 	sseHeaders(c)
 
@@ -631,6 +657,11 @@ func (h *assistantHandlers) streamSSE(
 	slot, waiter, err := h.turns.claim(sess.ID, cancel)
 	if err != nil {
 		cancel()
+		// The charge was taken before the headers, which is the only place a refusal can
+		// still be a status — but this turn never reaches the runner, so it owes the
+		// allowance back. A 409 that also costs a message is the accounting refusing work
+		// it declined to do.
+		h.releaseTurn(turnSess, charge)
 		return fiber.NewError(fiber.StatusConflict, err.Error())
 	}
 
@@ -676,9 +707,13 @@ func (h *assistantHandlers) streamSSE(
 			slot, err = waiter.enter(waitCtx, cancel)
 			giveUp()
 			if err != nil {
-				// The wait is over and this turn never started. Every stream owes its client
-				// one terminal event; without it the client waits for a turn that is not
-				// coming.
+				// The wait is over and this turn never started, so it gives back what it
+				// took — a queued message that timed out behind another turn has produced
+				// nothing, and that is exactly what the reservation exists to undo.
+				h.releaseTurn(turnSess, charge)
+
+				// Every stream owes its client one terminal event; without it the client
+				// waits for a turn that is not coming.
 				stream.event(string(assistant.EventResult),
 					assistant.Event{Kind: assistant.EventResult, StopReason: assistant.StopCancelled})
 				return
@@ -699,6 +734,11 @@ func (h *assistantHandlers) streamSSE(
 			stream.event(string(e.Kind), e)
 		})
 		if err != nil {
+			// The turn produced nothing the candidate can use, so it gives back what it
+			// took. A model or transport failure is ours, not theirs, and charging for an
+			// answer that never arrived is the one outcome the reservation exists to avoid.
+			h.releaseTurn(turnSess, charge)
+
 			// Nothing to continue is a client mistake (empty session), not a turn fault —
 			// surface it as a conflict on the still-open stream rather than Sentry noise.
 			if errors.Is(err, assistant.ErrNothingToContinue) {
@@ -868,7 +908,7 @@ func (h *assistantHandlers) PostAssistantAutopilot(c *fiber.Ctx) error {
 	} else {
 		analysis, jobDescription = h.prepareAutopilotAnalysis(c, sess, job), job.Description
 	}
-	return h.streamSSE(c, sess, func(ctx context.Context, runner *assistant.Runner, reg *assistant.Registry, system string, emit func(assistant.Event)) error {
+	return h.streamSSE(c, sess, h.meterTurn, func(ctx context.Context, runner *assistant.Runner, reg *assistant.Registry, system string, emit func(assistant.Event)) error {
 		// The pre-run happens HERE rather than in the handler above, because a handler that
 		// has not returned has written no byte and a cold-start chain takes minutes — see
 		// autopilotAnalysis for what that cost. Order is the order it had: the analysis
