@@ -78,6 +78,15 @@ type cvHandlers struct {
 	// jobs puts a vacancy on the Tracking Kanban when the caller starts (or reopens)
 	// tailoring for it. Nil-safe for fixtures that never assert board membership.
 	jobs jobBoarder
+	// letters, letterChain and bank serve the cover-letter surface. Wired after construction
+	// rather than through newCVHandlers, whose signature 78 integration tests already call —
+	// widening it for three optional dependencies would edit every one of them to say nil.
+	// All three are nil-safe: a fixture that never asks for a letter needs none of them.
+	// letter holds the cover-letter surface's dependencies as one value: the store, the chain,
+	// and the experience bank under the two narrow interfaces a letter needs of it.
+	letter coverLetterDeps
+	// llm binds a model call to the caller's own gateway credential, tagged by feature.
+	llm llmBinding
 }
 
 // jobReader is the one vacancy read the tailoring context needs.
@@ -120,8 +129,9 @@ func (s trackingBoarder) EnsureOnBoard(ctx context.Context, userID, jobID int64)
 
 // refuseListCap is normally true (Commit refuses over-cap edits). Pass false only when
 // an operator has turned on CV_EDIT_ALLOW_BULLET_TRUNCATION.
-func newCVHandlers(pool *pgxpool.Pool, queries *db.Queries, cvStore *cv.Store, assistantSessions *assistant.Store, cvRenderer cv.Renderer, tracerSalt, baseURL string, servedHosts []string, resumeStore *resume.Store, photoStore *headshot.Store, plans *plan.Store, match *matchHandlers, gate cvedit.EvidenceGate, jobs jobBoarder, refuseListCap bool) *cvHandlers {
+func newCVHandlers(pool *pgxpool.Pool, queries *db.Queries, cvStore *cv.Store, assistantSessions *assistant.Store, cvRenderer cv.Renderer, tracerSalt, baseURL string, servedHosts []string, resumeStore *resume.Store, photoStore *headshot.Store, plans *plan.Store, match *matchHandlers, gate cvedit.EvidenceGate, jobs jobBoarder, letter coverLetterDeps, refuseListCap bool) *cvHandlers {
 	h := &cvHandlers{
+		letter:            letter,
 		cvStore:           cvStore,
 		assistantSessions: assistantSessions,
 		cvRenderer:        cvRenderer,
@@ -205,6 +215,14 @@ func (h *cvHandlers) register(api fiber.Router, mw middleware) {
 	api.Patch("/me/cvs/:id", mw.key, h.PatchCV)
 	api.Put("/me/cvs/:id/session", mw.key, h.SetCVSession)
 	api.Get("/me/cvs/:id/tailor-context", mw.key, h.TailorContext)
+	// Reading a letter takes a key like every other tailoring read: it calls no model and
+	// spends nothing, so a scripted client may have it. Writing one is cookie-only because it
+	// spends a daily allowance, and an allowance a key could drain is one the account holder
+	// never agreed to spend. The assistant tool reaches the same write over a key-bearing
+	// session, which is not a hole: a session is the account holder's own, and its turn is
+	// metered before this one is.
+	api.Get("/me/cvs/:id/cover-letter", mw.key, h.GetCVCoverLetter)
+	api.Post("/me/cvs/:id/cover-letter", mw.cookie, h.DraftCVCoverLetter)
 	// The history of what changed the CV, and the two ways to undo an entry: on its own, or
 	// as the run it belonged to. Cookie-only for the same reason as every other mutation —
 	// the browser is where the candidate is watching this happen, and the tailoring agent

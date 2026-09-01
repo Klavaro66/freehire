@@ -5,6 +5,7 @@
 
 import type {
   Delta as AtsDeltaWire,
+  Letter,
   Score as JobMatchScore,
   Document,
   Margins,
@@ -28,6 +29,19 @@ export interface CvMeta {
   template_id: string;
   created_at: string;
   updated_at: string;
+}
+
+/** The cover-letter surface's read shape. `present: false` is a pair never drafted — an empty
+ *  state, not an error. `stale` reports that the model or the vacancy's language moved since;
+ *  the letter stays readable, because it may already have been sent. */
+export interface CoverLetterView {
+  present: boolean;
+  stale?: boolean;
+  letter?: Letter;
+  /** The letter's evidence with claims already resolved server-side, in the letter's order.
+   *  `claim` is empty when the owner has since deleted that achievement. */
+  cited?: { id: string; claim?: string }[];
+  model?: string;
 }
 
 /** A CV with its full editable document. `agent_session_id` is the roy session bound to a
