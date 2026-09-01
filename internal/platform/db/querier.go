@@ -502,6 +502,14 @@ type Querier interface {
 	// fall into 20 126 same-title buckets spanning up to four different employers.
 	// The pass then processes these ONE COMPANY AT A TIME, like the other duplicate passes, so it
 	// never holds a lock wide enough to stall a concurrent ingest crawl.
+	//
+	// The predicate names the OWNED columns of the exact passes, not the derived duplicate_of. Those
+	// are not the same set: duplicate_of also carries this pass's OWN marker, so filtering it made
+	// the pass blind to its own output and every marker permanent. And the worklist is a UNION,
+	// because a company can need a RELEASE without needing a collapse — its second candidate may
+	// have closed since. A collapse-only worklist never visits it again, which is how 42 633 open
+	// duplicates (prod, 2026-09-01) came to sit behind a closed owner with no pass that would ever
+	// let them go. This mirrors CompaniesWithRoleClusters, which unions the same two reasons.
 	CompaniesWithFuzzyDedupCandidates(ctx context.Context) ([]string, error)
 	// Company slugs whose role-duplicate markers may need recomputing: a company with an
 	// open role cluster (>1 posting sharing a fingerprint) to collapse, OR one still
@@ -1036,6 +1044,62 @@ type Querier interface {
 	// independent of a prior view: it inserts the row (viewed_at defaults) or
 	// refreshes dismissed_at in place.
 	DismissJob(ctx context.Context, arg DismissJobParams) (DismissJobRow, error)
+	// The whole-catalogue geography union in one pass, keyed by the id of the row that OWNS each
+	// union — the searchable canonical row, widened with the geography of every OPEN row it
+	// represents. What a row represents is its DUPLICATE CLOSURE: the rows whose duplicate_of
+	// chain terminates at it, at any depth.
+	//
+	// The closure, not a shared role_fingerprint, is the membership rule, because a fingerprint
+	// cannot express what two of the three dedup passes do. The exact role pass clusters BY
+	// fingerprint, so its members are inside their canon's closure and its behaviour is unchanged;
+	// but the fuzzy-description and aggregator passes only ever act on rows the exact pass left
+	// unclustered, whose fingerprints therefore DIFFER from their canon's by construction. Keyed
+	// by fingerprint, their members' cities left the index with them — issue #2225, where a
+	// posting open in Chestermere was readable by slug and absent from every search.
+	//
+	// A chain of OPEN rows (a role canon that a later pass suppressed) resolves to its ultimate
+	// owner, so no member's geography is stranded on an open intermediate row.
+	//
+	// A CLOSED intermediate cuts the walk, and that is deliberate: the traversal follows open rows
+	// only, so an open row behind a closed parent contributes to nobody. Such a row is invisible
+	// either way — it carries a marker, so it is out of the index, and so is the closed row it
+	// points at. Re-pointing it is the marker refresh's job, not this read's: the role recompute
+	// picks min(id) among a cluster's OPEN rows and the fuzzy pass releases a marker whose canon
+	// closed. Measured on prod 2026-09-01, 42 633 open duplicates sat behind a closed owner —
+	// which is the never-released fuzzy marker this change also fixes, not a gap here.
+	//
+	// Cycle safety is structural, not a guard. Each row has at most ONE duplicate_of, so the
+	// "points at" graph has out-degree <= 1; a cycle in such a graph consists entirely of rows
+	// with duplicate_of set, and every edge INTO a cycle member comes from another cycle member.
+	// Seeding only from rows that are nobody's duplicate (duplicate_of IS NULL) therefore makes a
+	// cycle unreachable rather than merely survivable — which is why BOTH closure queries seed
+	// that way. The depth bound is a backstop for a future caller that seeds differently; today's
+	// chains are at most role -> fuzzy on top of aggregator, three hops.
+	//
+	// Only owners that represent at least one other open row are returned: a row representing
+	// nobody unions to its own geography, which MergeClusterGeography already treats as a no-op,
+	// and leaving it out is what keeps the rebuild's lookup map to the rows that need it. The
+	// LATERAL tags each member's countries/regions/cities into one unnested stream (no cartesian
+	// across the three arrays, no repeat self-join), and blanks are dropped by the FILTER.
+	DuplicateClosureGeoAll(ctx context.Context) ([]DuplicateClosureGeoAllRow, error)
+	// The duplicate-closure geography union for a SPECIFIC set of owner ids, so an incremental
+	// index push can widen a whole wave's rows in one query instead of one call per job.
+	//
+	// The recursive body below is a COPY of DuplicateClosureGeoAll's, not a shared one — sqlc
+	// names whole statements, so there is nowhere to put it once. The walk, the open-rows-only
+	// scope, the closed-intermediate behaviour and the depth bound are argued there. What must
+	// stay identical is the recursive term and the seed's `closed_at IS NULL AND duplicate_of IS
+	// NULL`: change either here alone and the wave's answer stops matching the rebuild's, which
+	// surfaces as a canon that silently narrows every time the drain touches it.
+	//
+	// One deliberate difference: the seed carries no EXISTS test. The caller named these rows, and
+	// a row representing nobody answers with its own geography — a self-union, and a documented
+	// no-op merge. That keeps the caller to one error branch instead of making it tell "this row
+	// owns nothing" apart from a failure.
+	//
+	// An id matching no open canonical row simply yields no row for that id, which the caller
+	// reads as "no widening".
+	DuplicateClosureGeoFor(ctx context.Context, ownerIds []int64) ([]DuplicateClosureGeoForRow, error)
 	// The id range the owned-marker backfill walks, plus how many rows still need it. Exact count on
 	// purpose, like the folded-slug bounds beside it: the pass is run by hand and rarely, and a wrong
 	// "0 remaining" would end it early.
@@ -1255,6 +1319,11 @@ type Querier interface {
 	// survive the size filter via GetJobDescriptionsByIDs. Normalizing here in SQL instead would
 	// duplicate that logic in a second language and let the two drift apart; titles are cheap to
 	// ship, descriptions are not.
+	//
+	// "Canonical" here means NOT CLAIMED BY AN EXACT PASS, which is why the predicate names their
+	// two owned columns rather than the derived duplicate_of. A row carrying this pass's OWN marker
+	// is offered again on purpose: it is the only way the pass can ever re-decide it, and without
+	// that a marker survives its canon closing, the descriptions diverging, and every later run.
 	FuzzyDedupCandidateTitlesForCompany(ctx context.Context, company string) ([]FuzzyDedupCandidateTitlesForCompanyRow, error)
 	// Authentication accepts only active identities. A pending Apple revocation
 	// must not sign the user back in and silently cancel an unlink request.
@@ -2272,6 +2341,38 @@ type Querier interface {
 	// Bounded to a recency window on closed_at for the same first-deploy reason as
 	// the other two candidate scans.
 	ListJobClosedCandidates(ctx context.Context, windowDays int32) ([]ListJobClosedCandidatesRow, error)
+	// The open postings the anchor's OWNER represents — the "N openings across cities" list for a
+	// collapsed role. Each copy keeps its own location and apply URL, so a seeker picks their city;
+	// the owner itself is included (it is one of the openings). Ordered by location.
+	//
+	// Membership is the DUPLICATE CLOSURE, not a shared role_fingerprint, and it is deliberately
+	// the same closure DuplicateClosureGeoAll unions geography over. The two must not disagree: a
+	// posting whose city the canon claims in search but whose row this list omits is a location a
+	// candidate can filter to and then not reach. Grouping by fingerprint could only ever see the
+	// exact role pass's clusters, so a fuzzy-suppressed per-city variant — the very thing issue
+	// #2225 reported — was never listed.
+	//
+	// The anchor MAY itself be suppressed: a hidden posting stays readable by slug, which is how
+	// #2225 was reported, so the walk resolves the anchor UP to its ultimate owner first and lists
+	// that owner's closure. Answering with the anchor's own subtree would hand back the fragment
+	// its marker happens to point at.
+	//
+	// Cycle safety is NOT structural here, unlike the closure geography queries: those seed from
+	// rows that are nobody's duplicate, which makes a cycle unreachable, but this one is handed an
+	// arbitrary id. The depth bound on the upward walk is therefore load-bearing — an anchor inside
+	// a marker cycle simply resolves to no owner and lists nothing.
+	//
+	// The upward walk does not test closed_at. An anchor pointing at a closed parent still resolves
+	// through it to the open owner, so the closed row costs the group nothing; the final filter is
+	// what keeps closed rows out of the OUTPUT. That makes this list broader than search in one
+	// direction only — it can show an open posting search does not — which is the safe direction:
+	// listing a posting a candidate can apply to is never a leak, and hiding one is the complaint.
+	//
+	// AND NOT j.is_private excludes the jd-tailor-intake private-job path: without it, a private
+	// job inside the same closure would surface (slug, location, url) to anyone browsing that
+	// PUBLIC job's copies — a listing leak, not merely "you'd need the direct link", which is what
+	// never indexing/listing it is for.
+	ListJobCopies(ctx context.Context, arg ListJobCopiesParams) ([]ListJobCopiesRow, error)
 	// The emails linked to one of the caller's applications, newest first, for the
 	// application detail page.
 	ListJobEmails(ctx context.Context, arg ListJobEmailsParams) ([]ListJobEmailsRow, error)
@@ -2407,17 +2508,6 @@ type Querier interface {
 	// first, with the report count and the distinct reasons given so a moderator
 	// can triage without opening each report individually.
 	ListReportedCompanyFeedback(ctx context.Context) ([]ListReportedCompanyFeedbackRow, error)
-	// The open postings sharing a role cluster (company_slug + role_fingerprint) with the
-	// anchor job — the "N openings across cities" list for a collapsed role. Each copy keeps
-	// its own location and apply URL, so a seeker picks their city; the anchor itself is
-	// included (it is one of the openings). Ordered by location. An empty-fingerprint anchor
-	// clusters with no one and returns nothing.
-	//
-	// AND NOT j.is_private excludes the jd-tailor-intake private-job path: without it, a
-	// private job that coincidentally shares its cluster key with a public one would surface
-	// (slug, location, url) to anyone browsing that PUBLIC job's copies — a listing leak, not
-	// merely "you'd need the direct link", which is what never indexing/listing it is for.
-	ListRoleClusterCopies(ctx context.Context, arg ListRoleClusterCopiesParams) ([]ListRoleClusterCopiesRow, error)
 	// Every public_slug the user has saved (bookmarked). Used by the SPA to render
 	// the save toggle as filled on already-saved cards in the browse list and search
 	// results, without authenticating the public job-read path — the saved set is
@@ -2625,11 +2715,26 @@ type Querier interface {
 	MarkDigestSent(ctx context.Context, id int64) error
 	// Stamp read on first open; a no-op once already read.
 	MarkEmailRead(ctx context.Context, arg MarkEmailReadParams) error
-	// Point each fuzzy-clustered posting at its canon. Takes two parallel arrays (ids, canons) so
-	// one company's whole assignment lands in a single statement rather than a round trip per row.
-	// Scoped to the company and to still-canonical open rows, so a row the exact pass claimed in the
-	// meantime is left alone. The IS DISTINCT FROM guard makes a re-run free, and the standard
-	// recompute reverses everything here by recomputing duplicate_of from scratch.
+	// Write one company's whole fuzzy verdict in a single statement rather than a round trip per
+	// row: `candidates` is every row the pass CONSIDERED, and (ids, canons) are the ones it
+	// clustered. A candidate with no assignment gets NULL — that is the release, and it is the only
+	// mechanism there is.
+	//
+	// It has to be, and the comment this replaces said otherwise for a year. Migrations 0114/0115
+	// moved the marker into duplicate_of_fuzzy and left duplicate_of to a trigger deriving it from
+	// the three owned columns, so the role recompute — which writes duplicate_of_role — can no
+	// longer reach this one, and the COALESCE keeps surfacing it. Nothing else releases a fuzzy
+	// marker. Measured on prod 2026-09-01: 42 633 open duplicates behind a closed owner, invisible
+	// in search, with no pass that would ever let them go.
+	//
+	// `candidates` is deliberately NOT "every open row of the company". It is what the pass looked
+	// at, which excludes the buckets it refuses to judge (over the size cap). A cap is a cost
+	// heuristic, not a verdict, so releasing what it skipped would silently un-collapse the largest
+	// groups in the catalogue. A row in a bucket too SMALL to cluster is a different thing — the
+	// pass did judge it, and the answer was "no cluster".
+	//
+	// Scoped to the company and to open rows, so a row the exact pass claimed in the meantime is
+	// left alone. The IS DISTINCT FROM guard makes a re-run free.
 	MarkFuzzyDuplicatesForCompany(ctx context.Context, arg MarkFuzzyDuplicatesForCompanyParams) (int64, error)
 	// Mark a job as applied for a user. Idempotent and independent of a prior view:
 	// it inserts the row (viewed_at defaults) or updates applied_at in place, and
@@ -3484,47 +3589,6 @@ type Querier interface {
 	// cannot type, and the surplus is bounded: a page holds few distinct companies, and a
 	// fingerprint belonging to another of them simply has no rows.
 	RoleClusterCountsFor(ctx context.Context, arg RoleClusterCountsForParams) ([]RoleClusterCountsForRow, error)
-	// The geography union across ONE role cluster's open rows — the per-row counterpart of
-	// the whole-catalogue RoleClusterGeoAll, as RoleClusterCount is to RoleClusterCountsAll.
-	// The incremental index writers (ingest, link import, embed) ask it so their push widens
-	// a collapsed canon instead of narrowing it: the push is a field-level document update
-	// and the three geography facets are always present in the payload, so a writer that
-	// omits the union replaces the reindex's widened values with the canon's own.
-	// Same shape as RoleClusterGeoAll: only OPEN rows count, a LATERAL tags each row's
-	// countries/regions/cities into one unnested stream, and blanks are dropped by the FILTER.
-	// Unlike the whole-catalogue query it carries no HAVING, so it ALWAYS answers with exactly
-	// one row: aggregating over no matching rows yields empty arrays, which
-	// MergeClusterGeography already treats as "leave this facet alone". That keeps the three
-	// callers to one error branch instead of making them tell pgx.ErrNoRows (a singleton) apart
-	// from a real failure. A singleton therefore returns its own geography — a self-union, and
-	// a no-op — but callers skip the query entirely when the cluster has at most one open row,
-	// which RoleClusterCount's mass_count already told them. A NULL/empty fingerprint never
-	// clusters.
-	RoleClusterGeo(ctx context.Context, arg RoleClusterGeoParams) (RoleClusterGeoRow, error)
-	// The whole-catalogue role-cluster geography union in one pass, so the reindex can widen
-	// each collapsed canon's countries/regions/cities with the union across its cluster's
-	// OPEN rows (a canon in one country must still be findable by the countries of the reposts
-	// it hides). Only OPEN multi-row clusters are returned — a singleton canon already carries
-	// its own geography from search.FromJob, so it needs no widening (a lookup miss is the
-	// no-op default). One scan of the open catalogue: a LATERAL tags each row's countries/
-	// regions/cities into a single unnested stream (no cartesian across the three arrays, and
-	// no repeat self-join of jobs), and the outer GROUP BY DISTINCT-aggregates per facet. LEFT
-	// JOIN so a geo-less row still counts toward HAVING count(DISTINCT id) > 1 (the true cluster
-	// size); blanks/NULLs are dropped by the FILTER. Mirrors RoleClusterCountsAll's single pass.
-	RoleClusterGeoAll(ctx context.Context) ([]RoleClusterGeoAllRow, error)
-	// Role-cluster geography unions for a SPECIFIC set of (company_slug, role_fingerprint)
-	// pairs, so an incremental index push can widen a whole wave's canons in one query
-	// instead of one RoleClusterGeo call per job — the geography counterpart of
-	// RoleClusterCountsFor, mirrored the same way RoleClusterGeo mirrors RoleClusterCount.
-	//
-	// Same cross-product-narrowed-by-caller shape as RoleClusterCountsFor, for the same
-	// reason (a pair-wise join needs a two-argument unnest the analyzer cannot type). Only
-	// OPEN rows count, matching RoleClusterGeo/RoleClusterGeoAll; the caller is expected to
-	// ask only for clusters it already knows (via RoleClusterCountsFor's mass_count) have
-	// more than one open row, since a singleton's self-union is a documented no-op there —
-	// but this query carries no HAVING of its own, so a caller-supplied singleton pair
-	// still resolves (to its own geography, the same no-op RoleClusterGeo returns for one).
-	RoleClusterGeoFor(ctx context.Context, arg RoleClusterGeoForParams) ([]RoleClusterGeoForRow, error)
 	// Save (bookmark) a job for a user. Idempotent and independent of a prior view:
 	// it inserts the row (viewed_at defaults) or refreshes saved_at in place.
 	SaveJob(ctx context.Context, arg SaveJobParams) (SaveJobRow, error)

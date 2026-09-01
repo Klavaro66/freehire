@@ -474,9 +474,14 @@ func (q *Queries) CompaniesWithAggregatorPostings(ctx context.Context, aggregato
 const companiesWithFuzzyDedupCandidates = `-- name: CompaniesWithFuzzyDedupCandidates :many
 SELECT company_slug
 FROM jobs
-WHERE closed_at IS NULL AND duplicate_of IS NULL AND company_slug <> ''
+WHERE closed_at IS NULL AND company_slug <> ''
+  AND duplicate_of_aggregator IS NULL AND duplicate_of_role IS NULL
 GROUP BY company_slug
 HAVING COUNT(*) > 1
+UNION
+SELECT DISTINCT company_slug
+FROM jobs
+WHERE closed_at IS NULL AND company_slug <> '' AND duplicate_of_fuzzy IS NOT NULL
 `
 
 // Company slugs worth running the fuzzy-description pass over: a company that still has more
@@ -487,6 +492,14 @@ HAVING COUNT(*) > 1
 // fall into 20 126 same-title buckets spanning up to four different employers.
 // The pass then processes these ONE COMPANY AT A TIME, like the other duplicate passes, so it
 // never holds a lock wide enough to stall a concurrent ingest crawl.
+//
+// The predicate names the OWNED columns of the exact passes, not the derived duplicate_of. Those
+// are not the same set: duplicate_of also carries this pass's OWN marker, so filtering it made
+// the pass blind to its own output and every marker permanent. And the worklist is a UNION,
+// because a company can need a RELEASE without needing a collapse — its second candidate may
+// have closed since. A collapse-only worklist never visits it again, which is how 42 633 open
+// duplicates (prod, 2026-09-01) came to sit behind a closed owner with no pass that would ever
+// let them go. This mirrors CompaniesWithRoleClusters, which unions the same two reasons.
 func (q *Queries) CompaniesWithFuzzyDedupCandidates(ctx context.Context) ([]string, error) {
 	rows, err := q.db.Query(ctx, companiesWithFuzzyDedupCandidates)
 	if err != nil {
@@ -642,6 +655,184 @@ func (q *Queries) CountCatalogueScale(ctx context.Context) (CountCatalogueScaleR
 	var i CountCatalogueScaleRow
 	err := row.Scan(&i.OpenJobs, &i.Companies)
 	return i, err
+}
+
+const duplicateClosureGeoAll = `-- name: DuplicateClosureGeoAll :many
+WITH RECURSIVE member AS (
+    SELECT o.id AS owner_id, o.id AS member_id, 0 AS depth
+    FROM jobs o
+    WHERE o.closed_at IS NULL
+      AND o.duplicate_of IS NULL
+      AND EXISTS (SELECT 1 FROM jobs c WHERE c.duplicate_of = o.id AND c.closed_at IS NULL)
+    UNION ALL
+    SELECT m.owner_id, c.id, m.depth + 1
+    FROM member m
+    JOIN jobs c ON c.duplicate_of = m.member_id
+    WHERE c.closed_at IS NULL AND m.depth < 8
+)
+SELECT
+    m.owner_id,
+    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'c' AND t.val <> '')::text[] AS countries,
+    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'r' AND t.val <> '')::text[] AS regions,
+    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'y' AND t.val <> '')::text[] AS cities
+FROM member m
+JOIN jobs o ON o.id = m.member_id
+LEFT JOIN LATERAL (
+    SELECT 'c'::text AS kind, e AS val FROM unnest(o.countries) AS e
+    UNION ALL
+    SELECT 'r', e FROM unnest(o.regions) AS e
+    UNION ALL
+    SELECT 'y', e FROM unnest(o.cities) AS e
+) t ON true
+GROUP BY m.owner_id
+`
+
+type DuplicateClosureGeoAllRow struct {
+	OwnerID   int64    `json:"owner_id"`
+	Countries []string `json:"countries"`
+	Regions   []string `json:"regions"`
+	Cities    []string `json:"cities"`
+}
+
+// The whole-catalogue geography union in one pass, keyed by the id of the row that OWNS each
+// union — the searchable canonical row, widened with the geography of every OPEN row it
+// represents. What a row represents is its DUPLICATE CLOSURE: the rows whose duplicate_of
+// chain terminates at it, at any depth.
+//
+// The closure, not a shared role_fingerprint, is the membership rule, because a fingerprint
+// cannot express what two of the three dedup passes do. The exact role pass clusters BY
+// fingerprint, so its members are inside their canon's closure and its behaviour is unchanged;
+// but the fuzzy-description and aggregator passes only ever act on rows the exact pass left
+// unclustered, whose fingerprints therefore DIFFER from their canon's by construction. Keyed
+// by fingerprint, their members' cities left the index with them — issue #2225, where a
+// posting open in Chestermere was readable by slug and absent from every search.
+//
+// A chain of OPEN rows (a role canon that a later pass suppressed) resolves to its ultimate
+// owner, so no member's geography is stranded on an open intermediate row.
+//
+// A CLOSED intermediate cuts the walk, and that is deliberate: the traversal follows open rows
+// only, so an open row behind a closed parent contributes to nobody. Such a row is invisible
+// either way — it carries a marker, so it is out of the index, and so is the closed row it
+// points at. Re-pointing it is the marker refresh's job, not this read's: the role recompute
+// picks min(id) among a cluster's OPEN rows and the fuzzy pass releases a marker whose canon
+// closed. Measured on prod 2026-09-01, 42 633 open duplicates sat behind a closed owner —
+// which is the never-released fuzzy marker this change also fixes, not a gap here.
+//
+// Cycle safety is structural, not a guard. Each row has at most ONE duplicate_of, so the
+// "points at" graph has out-degree <= 1; a cycle in such a graph consists entirely of rows
+// with duplicate_of set, and every edge INTO a cycle member comes from another cycle member.
+// Seeding only from rows that are nobody's duplicate (duplicate_of IS NULL) therefore makes a
+// cycle unreachable rather than merely survivable — which is why BOTH closure queries seed
+// that way. The depth bound is a backstop for a future caller that seeds differently; today's
+// chains are at most role -> fuzzy on top of aggregator, three hops.
+//
+// Only owners that represent at least one other open row are returned: a row representing
+// nobody unions to its own geography, which MergeClusterGeography already treats as a no-op,
+// and leaving it out is what keeps the rebuild's lookup map to the rows that need it. The
+// LATERAL tags each member's countries/regions/cities into one unnested stream (no cartesian
+// across the three arrays, no repeat self-join), and blanks are dropped by the FILTER.
+func (q *Queries) DuplicateClosureGeoAll(ctx context.Context) ([]DuplicateClosureGeoAllRow, error) {
+	rows, err := q.db.Query(ctx, duplicateClosureGeoAll)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DuplicateClosureGeoAllRow{}
+	for rows.Next() {
+		var i DuplicateClosureGeoAllRow
+		if err := rows.Scan(
+			&i.OwnerID,
+			&i.Countries,
+			&i.Regions,
+			&i.Cities,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const duplicateClosureGeoFor = `-- name: DuplicateClosureGeoFor :many
+WITH RECURSIVE member AS (
+    SELECT o.id AS owner_id, o.id AS member_id, 0 AS depth
+    FROM jobs o
+    WHERE o.id = ANY($1::bigint[])
+      AND o.closed_at IS NULL
+      AND o.duplicate_of IS NULL
+    UNION ALL
+    SELECT m.owner_id, c.id, m.depth + 1
+    FROM member m
+    JOIN jobs c ON c.duplicate_of = m.member_id
+    WHERE c.closed_at IS NULL AND m.depth < 8
+)
+SELECT
+    m.owner_id,
+    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'c' AND t.val <> '')::text[] AS countries,
+    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'r' AND t.val <> '')::text[] AS regions,
+    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'y' AND t.val <> '')::text[] AS cities
+FROM member m
+JOIN jobs o ON o.id = m.member_id
+LEFT JOIN LATERAL (
+    SELECT 'c'::text AS kind, e AS val FROM unnest(o.countries) AS e
+    UNION ALL
+    SELECT 'r', e FROM unnest(o.regions) AS e
+    UNION ALL
+    SELECT 'y', e FROM unnest(o.cities) AS e
+) t ON true
+GROUP BY m.owner_id
+`
+
+type DuplicateClosureGeoForRow struct {
+	OwnerID   int64    `json:"owner_id"`
+	Countries []string `json:"countries"`
+	Regions   []string `json:"regions"`
+	Cities    []string `json:"cities"`
+}
+
+// The duplicate-closure geography union for a SPECIFIC set of owner ids, so an incremental
+// index push can widen a whole wave's rows in one query instead of one call per job.
+//
+// The recursive body below is a COPY of DuplicateClosureGeoAll's, not a shared one — sqlc
+// names whole statements, so there is nowhere to put it once. The walk, the open-rows-only
+// scope, the closed-intermediate behaviour and the depth bound are argued there. What must
+// stay identical is the recursive term and the seed's `closed_at IS NULL AND duplicate_of IS
+// NULL`: change either here alone and the wave's answer stops matching the rebuild's, which
+// surfaces as a canon that silently narrows every time the drain touches it.
+//
+// One deliberate difference: the seed carries no EXISTS test. The caller named these rows, and
+// a row representing nobody answers with its own geography — a self-union, and a documented
+// no-op merge. That keeps the caller to one error branch instead of making it tell "this row
+// owns nothing" apart from a failure.
+//
+// An id matching no open canonical row simply yields no row for that id, which the caller
+// reads as "no widening".
+func (q *Queries) DuplicateClosureGeoFor(ctx context.Context, ownerIds []int64) ([]DuplicateClosureGeoForRow, error) {
+	rows, err := q.db.Query(ctx, duplicateClosureGeoFor, ownerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DuplicateClosureGeoForRow{}
+	for rows.Next() {
+		var i DuplicateClosureGeoForRow
+		if err := rows.Scan(
+			&i.OwnerID,
+			&i.Countries,
+			&i.Regions,
+			&i.Cities,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const duplicateMarkerOwnerBackfillBounds = `-- name: DuplicateMarkerOwnerBackfillBounds :one
@@ -876,7 +1067,8 @@ func (q *Queries) FindOpenJobByURL(ctx context.Context, url string) (string, err
 const fuzzyDedupCandidateTitlesForCompany = `-- name: FuzzyDedupCandidateTitlesForCompany :many
 SELECT id, title
 FROM jobs
-WHERE company_slug = $1 AND closed_at IS NULL AND duplicate_of IS NULL
+WHERE company_slug = $1 AND closed_at IS NULL
+  AND duplicate_of_aggregator IS NULL AND duplicate_of_role IS NULL
 ORDER BY id
 `
 
@@ -891,6 +1083,11 @@ type FuzzyDedupCandidateTitlesForCompanyRow struct {
 // survive the size filter via GetJobDescriptionsByIDs. Normalizing here in SQL instead would
 // duplicate that logic in a second language and let the two drift apart; titles are cheap to
 // ship, descriptions are not.
+//
+// "Canonical" here means NOT CLAIMED BY AN EXACT PASS, which is why the predicate names their
+// two owned columns rather than the derived duplicate_of. A row carrying this pass's OWN marker
+// is offered again on purpose: it is the only way the pass can ever re-decide it, and without
+// that a marker survives its canon closing, the descriptions diverging, and every later run.
 func (q *Queries) FuzzyDedupCandidateTitlesForCompany(ctx context.Context, company string) ([]FuzzyDedupCandidateTitlesForCompanyRow, error) {
 	rows, err := q.db.Query(ctx, fuzzyDedupCandidateTitlesForCompany, company)
 	if err != nil {
@@ -1460,6 +1657,109 @@ func (q *Queries) LatestOpenJobAddedAt(ctx context.Context) (pgtype.Timestamptz,
 	var last_job_added_at pgtype.Timestamptz
 	err := row.Scan(&last_job_added_at)
 	return last_job_added_at, err
+}
+
+const listJobCopies = `-- name: ListJobCopies :many
+WITH RECURSIVE up AS (
+    SELECT a.id, a.duplicate_of, 0 AS depth
+    FROM jobs a
+    WHERE a.id = $3
+    UNION ALL
+    SELECT p.id, p.duplicate_of, u.depth + 1
+    FROM up u
+    JOIN jobs p ON p.id = u.duplicate_of
+    WHERE u.depth < 8
+),
+owner AS (
+    SELECT id FROM up WHERE duplicate_of IS NULL LIMIT 1
+),
+member AS (
+    SELECT o.id AS member_id, 0 AS depth FROM owner o
+    UNION ALL
+    SELECT c.id, m.depth + 1
+    FROM member m
+    JOIN jobs c ON c.duplicate_of = m.member_id
+    WHERE c.closed_at IS NULL AND m.depth < 8
+)
+SELECT j.public_slug, j.location, j.url, j.posted_at,
+    COUNT(*) OVER()::bigint AS total
+FROM member m
+JOIN jobs j ON j.id = m.member_id
+WHERE j.closed_at IS NULL
+  AND NOT j.is_private
+ORDER BY j.location, j.id
+LIMIT $2 OFFSET $1
+`
+
+type ListJobCopiesParams struct {
+	RowOffset int32 `json:"row_offset"`
+	RowLimit  int32 `json:"row_limit"`
+	JobID     int64 `json:"job_id"`
+}
+
+type ListJobCopiesRow struct {
+	PublicSlug string             `json:"public_slug"`
+	Location   string             `json:"location"`
+	URL        string             `json:"url"`
+	PostedAt   pgtype.Timestamptz `json:"posted_at"`
+	Total      int64              `json:"total"`
+}
+
+// The open postings the anchor's OWNER represents — the "N openings across cities" list for a
+// collapsed role. Each copy keeps its own location and apply URL, so a seeker picks their city;
+// the owner itself is included (it is one of the openings). Ordered by location.
+//
+// Membership is the DUPLICATE CLOSURE, not a shared role_fingerprint, and it is deliberately
+// the same closure DuplicateClosureGeoAll unions geography over. The two must not disagree: a
+// posting whose city the canon claims in search but whose row this list omits is a location a
+// candidate can filter to and then not reach. Grouping by fingerprint could only ever see the
+// exact role pass's clusters, so a fuzzy-suppressed per-city variant — the very thing issue
+// #2225 reported — was never listed.
+//
+// The anchor MAY itself be suppressed: a hidden posting stays readable by slug, which is how
+// #2225 was reported, so the walk resolves the anchor UP to its ultimate owner first and lists
+// that owner's closure. Answering with the anchor's own subtree would hand back the fragment
+// its marker happens to point at.
+//
+// Cycle safety is NOT structural here, unlike the closure geography queries: those seed from
+// rows that are nobody's duplicate, which makes a cycle unreachable, but this one is handed an
+// arbitrary id. The depth bound on the upward walk is therefore load-bearing — an anchor inside
+// a marker cycle simply resolves to no owner and lists nothing.
+//
+// The upward walk does not test closed_at. An anchor pointing at a closed parent still resolves
+// through it to the open owner, so the closed row costs the group nothing; the final filter is
+// what keeps closed rows out of the OUTPUT. That makes this list broader than search in one
+// direction only — it can show an open posting search does not — which is the safe direction:
+// listing a posting a candidate can apply to is never a leak, and hiding one is the complaint.
+//
+// AND NOT j.is_private excludes the jd-tailor-intake private-job path: without it, a private
+// job inside the same closure would surface (slug, location, url) to anyone browsing that
+// PUBLIC job's copies — a listing leak, not merely "you'd need the direct link", which is what
+// never indexing/listing it is for.
+func (q *Queries) ListJobCopies(ctx context.Context, arg ListJobCopiesParams) ([]ListJobCopiesRow, error) {
+	rows, err := q.db.Query(ctx, listJobCopies, arg.RowOffset, arg.RowLimit, arg.JobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListJobCopiesRow{}
+	for rows.Next() {
+		var i ListJobCopiesRow
+		if err := rows.Scan(
+			&i.PublicSlug,
+			&i.Location,
+			&i.URL,
+			&i.PostedAt,
+			&i.Total,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listJobIDsAfter = `-- name: ListJobIDsAfter :many
@@ -2055,91 +2355,37 @@ func (q *Queries) ListJobsUpdatedAfter(ctx context.Context, arg ListJobsUpdatedA
 	return items, nil
 }
 
-const listRoleClusterCopies = `-- name: ListRoleClusterCopies :many
-SELECT j.public_slug, j.location, j.url, j.posted_at,
-    COUNT(*) OVER()::bigint AS total
-FROM jobs j
-JOIN jobs anchor ON anchor.id = $1
-WHERE j.company_slug = anchor.company_slug
-  AND j.role_fingerprint = anchor.role_fingerprint
-  AND anchor.role_fingerprint <> ''
-  AND j.closed_at IS NULL
-  AND NOT j.is_private
-ORDER BY j.location, j.id
-LIMIT $3 OFFSET $2
-`
-
-type ListRoleClusterCopiesParams struct {
-	JobID     int64 `json:"job_id"`
-	RowOffset int32 `json:"row_offset"`
-	RowLimit  int32 `json:"row_limit"`
-}
-
-type ListRoleClusterCopiesRow struct {
-	PublicSlug string             `json:"public_slug"`
-	Location   string             `json:"location"`
-	URL        string             `json:"url"`
-	PostedAt   pgtype.Timestamptz `json:"posted_at"`
-	Total      int64              `json:"total"`
-}
-
-// The open postings sharing a role cluster (company_slug + role_fingerprint) with the
-// anchor job — the "N openings across cities" list for a collapsed role. Each copy keeps
-// its own location and apply URL, so a seeker picks their city; the anchor itself is
-// included (it is one of the openings). Ordered by location. An empty-fingerprint anchor
-// clusters with no one and returns nothing.
-//
-// AND NOT j.is_private excludes the jd-tailor-intake private-job path: without it, a
-// private job that coincidentally shares its cluster key with a public one would surface
-// (slug, location, url) to anyone browsing that PUBLIC job's copies — a listing leak, not
-// merely "you'd need the direct link", which is what never indexing/listing it is for.
-func (q *Queries) ListRoleClusterCopies(ctx context.Context, arg ListRoleClusterCopiesParams) ([]ListRoleClusterCopiesRow, error) {
-	rows, err := q.db.Query(ctx, listRoleClusterCopies, arg.JobID, arg.RowOffset, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListRoleClusterCopiesRow{}
-	for rows.Next() {
-		var i ListRoleClusterCopiesRow
-		if err := rows.Scan(
-			&i.PublicSlug,
-			&i.Location,
-			&i.URL,
-			&i.PostedAt,
-			&i.Total,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const markFuzzyDuplicatesForCompany = `-- name: MarkFuzzyDuplicatesForCompany :one
-WITH assign AS (
-    SELECT unnest($1::bigint[]) AS id,
-           unnest($2::bigint[]) AS canon_id
+WITH candidate AS (
+    SELECT unnest($1::bigint[]) AS id
+),
+assign AS (
+    SELECT unnest($2::bigint[]) AS id,
+           unnest($3::bigint[]) AS canon_id
+),
+target AS (
+    -- LEFT JOIN is what turns "considered but not clustered" into NULL. Mirrors the CASE in
+    -- RecomputeRoleDuplicatesForCompanies, which is how the role pass releases its own.
+    SELECT c.id, a.canon_id AS new_dup
+    FROM candidate c
+    LEFT JOIN assign a ON a.id = c.id
 ),
 before AS (
     -- Every CTE of one statement reads the same snapshot, so this is the derived marker as it
     -- stood BEFORE the update below — which is what makes the status transition readable
     -- without a second statement and the race between them.
     SELECT j.id, j.duplicate_of AS was_duplicate_of
-    FROM jobs j JOIN assign a ON a.id = j.id
+    FROM jobs j JOIN target t ON t.id = j.id
 ),
 updated AS (
     UPDATE jobs j
-    SET duplicate_of_fuzzy = m.canon_id,
+    SET duplicate_of_fuzzy = m.new_dup,
         updated_at         = now()
-    FROM assign m
+    FROM target m
     WHERE j.id = m.id
-      AND j.company_slug = $3
+      AND j.company_slug = $4
       AND j.closed_at IS NULL
-      AND j.duplicate_of_fuzzy IS DISTINCT FROM m.canon_id
+      AND j.duplicate_of_fuzzy IS DISTINCT FROM m.new_dup
     RETURNING j.id,
               j.duplicate_of AS now_duplicate_of,
               COALESCE(j.posted_at, j.created_at) AS eff_posted_at
@@ -2162,18 +2408,39 @@ SELECT count(*)::bigint FROM flipped
 `
 
 type MarkFuzzyDuplicatesForCompanyParams struct {
-	Ids     []int64 `json:"ids"`
-	Canons  []int64 `json:"canons"`
-	Company string  `json:"company"`
+	Candidates []int64 `json:"candidates"`
+	Ids        []int64 `json:"ids"`
+	Canons     []int64 `json:"canons"`
+	Company    string  `json:"company"`
 }
 
-// Point each fuzzy-clustered posting at its canon. Takes two parallel arrays (ids, canons) so
-// one company's whole assignment lands in a single statement rather than a round trip per row.
-// Scoped to the company and to still-canonical open rows, so a row the exact pass claimed in the
-// meantime is left alone. The IS DISTINCT FROM guard makes a re-run free, and the standard
-// recompute reverses everything here by recomputing duplicate_of from scratch.
+// Write one company's whole fuzzy verdict in a single statement rather than a round trip per
+// row: `candidates` is every row the pass CONSIDERED, and (ids, canons) are the ones it
+// clustered. A candidate with no assignment gets NULL — that is the release, and it is the only
+// mechanism there is.
+//
+// It has to be, and the comment this replaces said otherwise for a year. Migrations 0114/0115
+// moved the marker into duplicate_of_fuzzy and left duplicate_of to a trigger deriving it from
+// the three owned columns, so the role recompute — which writes duplicate_of_role — can no
+// longer reach this one, and the COALESCE keeps surfacing it. Nothing else releases a fuzzy
+// marker. Measured on prod 2026-09-01: 42 633 open duplicates behind a closed owner, invisible
+// in search, with no pass that would ever let them go.
+//
+// `candidates` is deliberately NOT "every open row of the company". It is what the pass looked
+// at, which excludes the buckets it refuses to judge (over the size cap). A cap is a cost
+// heuristic, not a verdict, so releasing what it skipped would silently un-collapse the largest
+// groups in the catalogue. A row in a bucket too SMALL to cluster is a different thing — the
+// pass did judge it, and the answer was "no cluster".
+//
+// Scoped to the company and to open rows, so a row the exact pass claimed in the meantime is
+// left alone. The IS DISTINCT FROM guard makes a re-run free.
 func (q *Queries) MarkFuzzyDuplicatesForCompany(ctx context.Context, arg MarkFuzzyDuplicatesForCompanyParams) (int64, error) {
-	row := q.db.QueryRow(ctx, markFuzzyDuplicatesForCompany, arg.Ids, arg.Canons, arg.Company)
+	row := q.db.QueryRow(ctx, markFuzzyDuplicatesForCompany,
+		arg.Candidates,
+		arg.Ids,
+		arg.Canons,
+		arg.Company,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -2669,195 +2936,6 @@ func (q *Queries) RoleClusterCountsFor(ctx context.Context, arg RoleClusterCount
 			&i.RoleFingerprint,
 			&i.RepostCount,
 			&i.MassCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const roleClusterGeo = `-- name: RoleClusterGeo :one
-SELECT
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'c' AND t.val <> '')::text[] AS countries,
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'r' AND t.val <> '')::text[] AS regions,
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'y' AND t.val <> '')::text[] AS cities
-FROM jobs o
-LEFT JOIN LATERAL (
-    SELECT 'c'::text AS kind, e AS val FROM unnest(o.countries) AS e
-    UNION ALL
-    SELECT 'r', e FROM unnest(o.regions) AS e
-    UNION ALL
-    SELECT 'y', e FROM unnest(o.cities) AS e
-) t ON true
-WHERE o.closed_at IS NULL
-  AND o.company_slug = $1
-  AND o.role_fingerprint = $2
-  AND o.role_fingerprint <> ''
-`
-
-type RoleClusterGeoParams struct {
-	CompanySlug     string      `json:"company_slug"`
-	RoleFingerprint pgtype.Text `json:"role_fingerprint"`
-}
-
-type RoleClusterGeoRow struct {
-	Countries []string `json:"countries"`
-	Regions   []string `json:"regions"`
-	Cities    []string `json:"cities"`
-}
-
-// The geography union across ONE role cluster's open rows — the per-row counterpart of
-// the whole-catalogue RoleClusterGeoAll, as RoleClusterCount is to RoleClusterCountsAll.
-// The incremental index writers (ingest, link import, embed) ask it so their push widens
-// a collapsed canon instead of narrowing it: the push is a field-level document update
-// and the three geography facets are always present in the payload, so a writer that
-// omits the union replaces the reindex's widened values with the canon's own.
-// Same shape as RoleClusterGeoAll: only OPEN rows count, a LATERAL tags each row's
-// countries/regions/cities into one unnested stream, and blanks are dropped by the FILTER.
-// Unlike the whole-catalogue query it carries no HAVING, so it ALWAYS answers with exactly
-// one row: aggregating over no matching rows yields empty arrays, which
-// MergeClusterGeography already treats as "leave this facet alone". That keeps the three
-// callers to one error branch instead of making them tell pgx.ErrNoRows (a singleton) apart
-// from a real failure. A singleton therefore returns its own geography — a self-union, and
-// a no-op — but callers skip the query entirely when the cluster has at most one open row,
-// which RoleClusterCount's mass_count already told them. A NULL/empty fingerprint never
-// clusters.
-func (q *Queries) RoleClusterGeo(ctx context.Context, arg RoleClusterGeoParams) (RoleClusterGeoRow, error) {
-	row := q.db.QueryRow(ctx, roleClusterGeo, arg.CompanySlug, arg.RoleFingerprint)
-	var i RoleClusterGeoRow
-	err := row.Scan(&i.Countries, &i.Regions, &i.Cities)
-	return i, err
-}
-
-const roleClusterGeoAll = `-- name: RoleClusterGeoAll :many
-SELECT
-    o.company_slug,
-    o.role_fingerprint,
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'c' AND t.val <> '')::text[] AS countries,
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'r' AND t.val <> '')::text[] AS regions,
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'y' AND t.val <> '')::text[] AS cities
-FROM jobs o
-LEFT JOIN LATERAL (
-    SELECT 'c'::text AS kind, e AS val FROM unnest(o.countries) AS e
-    UNION ALL
-    SELECT 'r', e FROM unnest(o.regions) AS e
-    UNION ALL
-    SELECT 'y', e FROM unnest(o.cities) AS e
-) t ON true
-WHERE o.closed_at IS NULL AND o.role_fingerprint IS NOT NULL AND o.role_fingerprint <> ''
-GROUP BY o.company_slug, o.role_fingerprint
-HAVING count(DISTINCT o.id) > 1
-`
-
-type RoleClusterGeoAllRow struct {
-	CompanySlug     string      `json:"company_slug"`
-	RoleFingerprint pgtype.Text `json:"role_fingerprint"`
-	Countries       []string    `json:"countries"`
-	Regions         []string    `json:"regions"`
-	Cities          []string    `json:"cities"`
-}
-
-// The whole-catalogue role-cluster geography union in one pass, so the reindex can widen
-// each collapsed canon's countries/regions/cities with the union across its cluster's
-// OPEN rows (a canon in one country must still be findable by the countries of the reposts
-// it hides). Only OPEN multi-row clusters are returned — a singleton canon already carries
-// its own geography from search.FromJob, so it needs no widening (a lookup miss is the
-// no-op default). One scan of the open catalogue: a LATERAL tags each row's countries/
-// regions/cities into a single unnested stream (no cartesian across the three arrays, and
-// no repeat self-join of jobs), and the outer GROUP BY DISTINCT-aggregates per facet. LEFT
-// JOIN so a geo-less row still counts toward HAVING count(DISTINCT id) > 1 (the true cluster
-// size); blanks/NULLs are dropped by the FILTER. Mirrors RoleClusterCountsAll's single pass.
-func (q *Queries) RoleClusterGeoAll(ctx context.Context) ([]RoleClusterGeoAllRow, error) {
-	rows, err := q.db.Query(ctx, roleClusterGeoAll)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []RoleClusterGeoAllRow{}
-	for rows.Next() {
-		var i RoleClusterGeoAllRow
-		if err := rows.Scan(
-			&i.CompanySlug,
-			&i.RoleFingerprint,
-			&i.Countries,
-			&i.Regions,
-			&i.Cities,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const roleClusterGeoFor = `-- name: RoleClusterGeoFor :many
-SELECT
-    o.company_slug,
-    o.role_fingerprint,
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'c' AND t.val <> '')::text[] AS countries,
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'r' AND t.val <> '')::text[] AS regions,
-    array_agg(DISTINCT t.val) FILTER (WHERE t.kind = 'y' AND t.val <> '')::text[] AS cities
-FROM jobs o
-LEFT JOIN LATERAL (
-    SELECT 'c'::text AS kind, e AS val FROM unnest(o.countries) AS e
-    UNION ALL
-    SELECT 'r', e FROM unnest(o.regions) AS e
-    UNION ALL
-    SELECT 'y', e FROM unnest(o.cities) AS e
-) t ON true
-WHERE o.closed_at IS NULL
-  AND o.company_slug = ANY($1::text[])
-  AND o.role_fingerprint = ANY($2::text[])
-GROUP BY o.company_slug, o.role_fingerprint
-`
-
-type RoleClusterGeoForParams struct {
-	CompanySlugs     []string `json:"company_slugs"`
-	RoleFingerprints []string `json:"role_fingerprints"`
-}
-
-type RoleClusterGeoForRow struct {
-	CompanySlug     string      `json:"company_slug"`
-	RoleFingerprint pgtype.Text `json:"role_fingerprint"`
-	Countries       []string    `json:"countries"`
-	Regions         []string    `json:"regions"`
-	Cities          []string    `json:"cities"`
-}
-
-// Role-cluster geography unions for a SPECIFIC set of (company_slug, role_fingerprint)
-// pairs, so an incremental index push can widen a whole wave's canons in one query
-// instead of one RoleClusterGeo call per job — the geography counterpart of
-// RoleClusterCountsFor, mirrored the same way RoleClusterGeo mirrors RoleClusterCount.
-//
-// Same cross-product-narrowed-by-caller shape as RoleClusterCountsFor, for the same
-// reason (a pair-wise join needs a two-argument unnest the analyzer cannot type). Only
-// OPEN rows count, matching RoleClusterGeo/RoleClusterGeoAll; the caller is expected to
-// ask only for clusters it already knows (via RoleClusterCountsFor's mass_count) have
-// more than one open row, since a singleton's self-union is a documented no-op there —
-// but this query carries no HAVING of its own, so a caller-supplied singleton pair
-// still resolves (to its own geography, the same no-op RoleClusterGeo returns for one).
-func (q *Queries) RoleClusterGeoFor(ctx context.Context, arg RoleClusterGeoForParams) ([]RoleClusterGeoForRow, error) {
-	rows, err := q.db.Query(ctx, roleClusterGeoFor, arg.CompanySlugs, arg.RoleFingerprints)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []RoleClusterGeoForRow{}
-	for rows.Next() {
-		var i RoleClusterGeoForRow
-		if err := rows.Scan(
-			&i.CompanySlug,
-			&i.RoleFingerprint,
-			&i.Countries,
-			&i.Regions,
-			&i.Cities,
 		); err != nil {
 			return nil, err
 		}
