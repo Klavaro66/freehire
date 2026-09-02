@@ -79,7 +79,7 @@ type fakeSidecar struct {
 	calls  int
 }
 
-func (f *fakeSidecar) Submit(ctx context.Context, jobURL, provider string, answers map[string]string) (SidecarResult, error) {
+func (f *fakeSidecar) Submit(ctx context.Context, c Claimed, answers map[string]string) (SidecarResult, error) {
 	f.calls++
 	if f.err != nil {
 		return SidecarResult{}, f.err

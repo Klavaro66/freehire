@@ -1,0 +1,160 @@
+package atsapply
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/chromedp/chromedp"
+
+	"github.com/strelov1/freehire/internal/applyform"
+	"github.com/strelov1/freehire/internal/autoapply"
+)
+
+// requiresCaptcha marks providers whose form always renders a captcha, so a blind fill
+// attempt would either fail or (worse) look like it might work and then silently not
+// submit. Lever renders one on every posting — see design.md's Risks. Every attempt for
+// one of these parks before a browser is even launched.
+var requiresCaptcha = map[string]bool{
+	"lever": true,
+}
+
+// Client drives a headless browser to resolve and, where possible, submit one application
+// attempt. It implements autoapply.SidecarClient — the in-process replacement for the
+// Python/Patchright sidecar the design originally proposed (see design.md's "chromedp, not
+// a Python/Patchright sidecar" decision).
+type Client struct {
+	fetchers      map[string]applyform.Fetcher
+	allocatorOpts []chromedp.ExecAllocatorOption
+}
+
+// NewClient builds a Client. transport is the same one internal/applyform's own capture
+// worker uses (internal/sources.Client) — the Greenhouse/Ashby schema fetch this package
+// reuses needs nothing different from it.
+func NewClient(transport applyform.Transport) *Client {
+	return &Client{
+		fetchers:      applyform.Fetchers(transport),
+		allocatorOpts: stealthAllocatorOptions(),
+	}
+}
+
+var _ autoapply.SidecarClient = (*Client)(nil)
+
+// Submit resolves one attempt and submits it only when every required question is
+// answered. Nothing here guesses: a field with no usable answer, or an ATS the browser
+// cannot safely drive at all (a captcha board), always parks rather than risking a bad or
+// duplicate submission.
+func (c *Client) Submit(ctx context.Context, claimed autoapply.Claimed, answers map[string]string) (autoapply.SidecarResult, error) {
+	if requiresCaptcha[claimed.Provider] {
+		return autoapply.SidecarResult{Status: autoapply.StatusParked, Reason: "requires_captcha"}, nil
+	}
+
+	apiForm, err := c.fetchSchema(ctx, claimed)
+	if err != nil {
+		return autoapply.SidecarResult{}, fmt.Errorf("fetch %s schema: %w", claimed.Provider, err)
+	}
+
+	var merged []MergedField
+	var browserCtx context.Context
+	var cancelBrowser context.CancelFunc
+
+	if claimed.Provider == "greenhouse" {
+		// The one provider with a live DOM-scan built so far (design.md's scope note —
+		// the 2026-09-02 spike measured a real gap here; Ashby's API schema is an
+		// unverified-but-accepted assumption of completeness for now).
+		browserCtx, cancelBrowser, err = c.newBrowser(ctx)
+		if err != nil {
+			return autoapply.SidecarResult{}, fmt.Errorf("launch browser: %w", err)
+		}
+		defer cancelBrowser()
+
+		pageHTML, err := renderedHTML(browserCtx, claimed.JobURL, greenhouseFormReadySelector)
+		if err != nil {
+			return autoapply.SidecarResult{}, fmt.Errorf("render application page: %w", err)
+		}
+		dom, err := ScanGreenhouseForm(pageHTML)
+		if err != nil {
+			return autoapply.SidecarResult{}, fmt.Errorf("scan application form: %w", err)
+		}
+		merged = Reconcile(dom, apiForm)
+	} else {
+		merged = mergedFromAPIOnly(apiForm)
+	}
+
+	plan := Resolve(merged, answers)
+	if !plan.FullyResolved() {
+		return autoapply.SidecarResult{Status: autoapply.StatusParked, Unmapped: plan.Unmapped}, nil
+	}
+
+	if claimed.Provider != "greenhouse" {
+		// Fill/submit is only wired for Greenhouse so far — see fill.go. A form for
+		// another provider that DID fully resolve still parks rather than being
+		// submitted through a path never built or verified.
+		return autoapply.SidecarResult{Status: autoapply.StatusParked, Reason: "submission not yet implemented for this provider"}, nil
+	}
+	if browserCtx == nil {
+		return autoapply.SidecarResult{}, fmt.Errorf("internal error: no browser session for a Greenhouse submission")
+	}
+
+	confirmed, err := fillAndSubmit(browserCtx, claimed.JobURL, plan)
+	if err != nil {
+		return autoapply.SidecarResult{}, fmt.Errorf("fill and submit: %w", err)
+	}
+	if !confirmed {
+		return autoapply.SidecarResult{}, fmt.Errorf("submission not confirmed — see CONFIRMATION_MARKERS/SUBMIT_REFUSED_MARKERS in fill.go")
+	}
+	return autoapply.SidecarResult{Status: autoapply.StatusApplied}, nil
+}
+
+// fetchSchema reuses internal/applyform's own per-provider fetcher rather than
+// re-implementing Greenhouse/Ashby's API calls or Lever's page parse.
+func (c *Client) fetchSchema(ctx context.Context, claimed autoapply.Claimed) (applyform.Form, error) {
+	fetcher, ok := c.fetchers[claimed.Provider]
+	if !ok {
+		return applyform.Form{}, fmt.Errorf("no schema fetcher for provider %q", claimed.Provider)
+	}
+	return fetcher.Fetch(ctx, applyform.Claimed{
+		JobID:      claimed.JobID,
+		Provider:   claimed.Provider,
+		ExternalID: claimed.ExternalID,
+		URL:        claimed.JobURL,
+	})
+}
+
+// mergedFromAPIOnly builds a merged-field list straight from the platform's declared
+// schema, for a provider this package has no live DOM-scan for yet. The API is trusted as
+// the whole picture here — the risk Reconcile.go exists to close (a DOM-rendered field the
+// API never declares) is unverified for these providers until 7.1's live smoke test.
+func mergedFromAPIOnly(api applyform.Form) []MergedField {
+	out := make([]MergedField, 0, len(api.Fields))
+	for _, f := range api.Fields {
+		if f.Type == applyform.TypeHidden || f.Type == applyform.TypeInfo {
+			continue
+		}
+		out = append(out, MergedField{
+			ID:       f.ID,
+			Label:    f.Label,
+			Kind:     domKindFor(f.Type),
+			Required: f.Required,
+			Multi:    f.Type == applyform.TypeMultiSelect,
+			Options:  f.Options,
+		})
+	}
+	return out
+}
+
+// domKindFor maps internal/applyform's platform-shaped FieldType onto this package's
+// DOM-widget-shaped Kind vocabulary, for the API-only path.
+func domKindFor(t applyform.FieldType) string {
+	switch t {
+	case applyform.TypeTextarea:
+		return "textarea"
+	case applyform.TypeSelect, applyform.TypeMultiSelect:
+		return "select"
+	case applyform.TypeFile:
+		return "file"
+	case applyform.TypeBoolean:
+		return "checkbox_group"
+	default:
+		return "text"
+	}
+}

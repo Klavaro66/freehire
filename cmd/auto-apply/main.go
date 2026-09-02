@@ -1,7 +1,7 @@
 // Command auto-apply drains auto_apply_queue: for each queued (candidate, job) attempt it
 // resolves the candidate's known profile answers against the job's live application form,
-// through the services/auto-apply sidecar, and submits only when every required question
-// is answered. What populates the queue is out of scope for this worker — see
+// through internal/atsapply's headless browser, and submits only when every required
+// question is answered. What populates the queue is out of scope for this worker — see
 // openspec/changes/auto-apply-worker/design.md — it only ever drains what is already there.
 //
 // It exits non-zero when the run had any failures or dead letters, so cron can alert.
@@ -10,8 +10,8 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 
+	"github.com/strelov1/freehire/internal/atsapply"
 	"github.com/strelov1/freehire/internal/autoapply"
 	"github.com/strelov1/freehire/internal/blobstore"
 	"github.com/strelov1/freehire/internal/candidateprofile"
@@ -20,6 +20,7 @@ import (
 	"github.com/strelov1/freehire/internal/db"
 	"github.com/strelov1/freehire/internal/resume"
 	"github.com/strelov1/freehire/internal/screeninganswers"
+	"github.com/strelov1/freehire/internal/sources"
 	"github.com/strelov1/freehire/internal/worker"
 )
 
@@ -36,10 +37,6 @@ func run() int {
 	defer cleanup()
 
 	acfg := config.LoadAutoApply()
-	if acfg.SidecarURL == "" {
-		log.Print("auto-apply: AUTO_APPLY_SIDECAR_URL is not configured")
-		return 1
-	}
 
 	blobStore, err := blobstore.New(blobstore.Config{
 		Endpoint:  cfg.S3Endpoint,
@@ -67,7 +64,11 @@ func run() int {
 		assembler: candidateprofile.NewAssembler(cvStore, resumeStore, queries, screeningAnswersSvc),
 	}
 
-	sidecar := newHTTPSidecarClient(acfg.SidecarURL, &http.Client{Timeout: acfg.CallTimeout})
+	// The same HTTP client the crawl and internal/applyform's own capture worker use: the
+	// Greenhouse/Ashby endpoints internal/atsapply reuses via applyform.Fetchers are the
+	// platforms' own public job-board APIs, so its user agent, timeouts and size caps are
+	// exactly right here too.
+	sidecar := atsapply.NewClient(sources.NewClient())
 
 	stats, err := autoapply.Run(ctx, newDBStore(pool), answers, sidecar, autoapply.RunOptions{
 		BatchSize:    acfg.BatchSize,

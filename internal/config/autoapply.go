@@ -1,32 +1,29 @@
 package config
 
-import (
-	"os"
-	"time"
-)
+import "time"
 
 // AutoApply holds the tuning knobs for the unattended application-submission worker
 // (cmd/auto-apply). Unlike ApplyForm's fetch (one HTTP call to a public JSON API), one
 // attempt here is a full headless-browser session — scan, reconcile, resolve, and maybe
 // fill and submit — so its call timeout is an order of magnitude more generous, and the
 // lease has to cover the same session, not a single request.
+//
+// No sidecar address here: internal/atsapply drives the browser in-process (see design.md's
+// "chromedp, not a Python/Patchright sidecar" decision) — there is no second process to
+// address.
 type AutoApply struct {
 	BatchSize    int           // claim wave size
 	LeaseSeconds int           // how long a claim is held before it can be reclaimed
 	MaxAttempts  int           // transient failures before an attempt is dead-lettered
 	Concurrency  int           // how many attempts run at once
 	MaxPerRun    int           // how much of the queue one run takes; 0 is unbounded
-	CallTimeout  time.Duration // bounds a single attempt's sidecar call
-	// SidecarURL is the base address of services/auto-apply, the Playwright/Patchright
-	// process that does the actual browser work. No default: an unset sidecar is a
-	// deploy that has not wired the new service yet, not a value to guess at.
-	SidecarURL string
+	CallTimeout  time.Duration // bounds a single attempt's browser session
 }
 
 // LoadAutoApply reads the worker's tuning from the environment, all optional with
-// defaults except SidecarURL. The defaults are deliberately conservative — this is the
-// first worker in the fleet that drives a real browser per item, and a submission is a
-// real side effect against a third party, unlike a capture's read-only fetch.
+// defaults. The defaults are deliberately conservative — this is the first worker in the
+// fleet that drives a real browser per item, and a submission is a real side effect against
+// a third party, unlike a capture's read-only fetch.
 func LoadAutoApply() AutoApply {
 	a := AutoApply{
 		BatchSize:    envInt("AUTO_APPLY_BATCH_SIZE", 20),
@@ -35,7 +32,6 @@ func LoadAutoApply() AutoApply {
 		Concurrency:  envInt("AUTO_APPLY_CONCURRENCY", 2),
 		MaxPerRun:    envInt("AUTO_APPLY_MAX_PER_RUN", 200),
 		CallTimeout:  time.Duration(envInt("AUTO_APPLY_CALL_TIMEOUT_SECONDS", 120)) * time.Second,
-		SidecarURL:   os.Getenv("AUTO_APPLY_SIDECAR_URL"),
 	}
 	if a.BatchSize < 1 {
 		a.BatchSize = 1

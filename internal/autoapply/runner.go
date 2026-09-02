@@ -67,12 +67,20 @@ type SidecarResult struct {
 }
 
 // SidecarClient submits one application attempt through the browser-automation sidecar.
-// The real implementation calls services/auto-apply over HTTP; tests use a fake. Every
-// ATS-specific decision — what the DOM actually requires, whether an answer resolves a
-// field, whether the submission was confirmed — is made on the other side of this call;
-// this package only interprets the verdict.
+// The real implementation is internal/atsapply, driving a headless browser in-process
+// (see design.md's "chromedp, not a Python/Patchright sidecar" decision — this interface
+// predates and is unaffected by that choice); tests use a fake. Every ATS-specific decision
+// — what the DOM actually requires, whether an answer resolves a field, whether the
+// submission was confirmed — is made on the other side of this call; this package only
+// interprets the verdict.
+//
+// Submit takes the whole Claimed rather than its individual fields, mirroring
+// internal/applyform.Fetcher.Fetch: what a submission needs is not the same for every
+// provider (Greenhouse and Ashby's schema fetch is keyed by ExternalID's board:posting-id,
+// not by JobURL alone), so the seam should not have to grow a parameter every time a new
+// provider needs one more piece of the claim.
 type SidecarClient interface {
-	Submit(ctx context.Context, jobURL, provider string, answers map[string]string) (SidecarResult, error)
+	Submit(ctx context.Context, c Claimed, answers map[string]string) (SidecarResult, error)
 }
 
 // AnswerSource supplies the candidate's known answers for one attempt — identity and
@@ -194,7 +202,7 @@ func (rn *run) process(ctx context.Context, c Claimed) outbox.Outcome {
 		defer cancel()
 	}
 
-	result, err := rn.sidecar.Submit(callCtx, c.JobURL, c.Provider, answers)
+	result, err := rn.sidecar.Submit(callCtx, c, answers)
 	if err != nil {
 		return rn.fail(ctx, c, err)
 	}
