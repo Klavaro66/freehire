@@ -4,11 +4,19 @@ import "strings"
 
 // sensitiveTerms is a direct port of freehire-apply/internal/drafting's isSensitive list
 // (a sibling, more mature paid repo — already measured against real Ashby postings there,
-// not invented fresh here). A question matching any of these is never drafted, regardless
-// of how confident a draft would be — see Drafter's doc comment for why the check runs
-// before the model is ever called.
+// not invented fresh here), with one fix a live smoke check (task 5.1) found: the ported
+// "work authoriz" is a FIXED-ORDER phrase and never matches "authorization to work" — a
+// real Greenhouse posting's exact wording, the more common of the two orderings in
+// practice. Replaced with the standalone "authoriz", which catches "authorization"/
+// "authorized" in either order and is, if anything, the more defensible term: in an
+// application form's context there is no ordinary (non-sensitive) reason a question would
+// use that word at all.
+//
+// A question matching any of these is never drafted, regardless of how confident a draft
+// would be — see Drafter's doc comment for why the check runs before the model is ever
+// called.
 var sensitiveTerms = []string{
-	"salary", "compensation", "sponsor", "visa", "work authoriz", "right to work",
+	"salary", "compensation", "sponsor", "visa", "authoriz", "right to work",
 	"gender", "race", "ethnic", "veteran", "disab", "demographic", "sexual orientation",
 }
 
