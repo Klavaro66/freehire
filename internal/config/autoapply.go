@@ -11,6 +11,12 @@ import "time"
 // No sidecar address here: internal/atsapply drives the browser in-process (see design.md's
 // "chromedp, not a Python/Patchright sidecar" decision) — there is no second process to
 // address.
+//
+// No drafting-specific knobs either: question drafting (openspec/changes/
+// auto-apply-llm-drafting) rides the same LLM_*/LLM_ADMIN_* environment every other
+// feature reads, attributed per candidate under feature:auto-apply-drafting — an
+// unconfigured LLM just means every attempt's unmapped free-text questions stay parked,
+// the same degrade every other LLM feature already has.
 type AutoApply struct {
 	BatchSize    int           // claim wave size
 	LeaseSeconds int           // how long a claim is held before it can be reclaimed

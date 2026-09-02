@@ -42,22 +42,37 @@ decision for the measurements and its caveats.
   question today, so there is never more than one to match in the first place. See
   `resolveOne`'s doc comment (`resolve.go`). Widening `AnswerSource` to a multi-valued
   source is what would turn this into a real gap.
-- **Most custom employer questions still don't resolve, even when relevant data exists —
-  visa sponsorship is the one exception.** `answerKeyFor` is an ID-based lookup: it matches
-  Greenhouse's own standardized field names (`first_name`, `email`, ...) but a numeric
-  `question_NNNNN` id can never match it directly. `labelAnswerKeyFor` (`resolve.go`) is a
-  narrow fallback that matches a field's *label* text instead, checked only when the id
-  lookup misses — but it covers exactly one category (`visa_sponsorship_needed`, stored as a
-  clean Yes/No) on purpose. "Are you authorized to work in this country" is deliberately NOT
-  covered despite being the same shape of gap: `candidateprofile`'s `authorized_countries` is
-  a list, not a yes/no for one specific (unknown, at this layer) country — answering it
-  without guessing needs the job's own location, which isn't wired through here, and
-  `freehire-apply` (the sibling, more mature implementation) treats work-authorization
-  questions as sensitive and never auto-answers them either, for the same reason. Free-text
-  custom questions (language proficiency, "where did you hear about us") have no matching
-  path here at all — that is `freehire-apply`'s `internal/drafting` territory (a single-shot
-  LLM call per field, gated by a keyword-based sensitive-field check, not an agentic loop),
-  not yet built here.
+- **A custom employer question resolves three ways, in order, before it parks: id match,
+  label-keyword match, then a grounded LLM draft.** `answerKeyFor` (`resolve.go`) is an
+  ID-based lookup for Greenhouse's own standardized field names; `labelAnswerKeyFor` is a
+  narrow label-text fallback (today: `visa_sponsorship_needed` only — see its doc comment
+  for why "authorized to work in this country" is deliberately NOT covered the same way,
+  even though it is the same shape of gap). `ResolveWithDrafting` (`draft.go`) is the third
+  and last resort: for a required, non-sensitive, free-text/single-choice field the first
+  two steps left unmapped, it asks a `Drafter` (`LLMDrafter`, `internal/llm`-backed) for a
+  grounded answer — ported from `freehire-apply/internal/drafting`'s pattern (single-shot
+  call, sensitive-keyword gate, never an agentic loop). A drafted answer is still checked
+  against the field's own offered options (`matchOption`, shared with the deterministic
+  path) before it is used.
+- **The sensitive-keyword gate (`sensitive.go`) runs before the model is ever called, and
+  wins absolutely.** A question whose label matches — compensation, work authorization/visa
+  sponsorship, or an EEO/demographic category — is never drafted, regardless of how
+  confident a draft would be; `draftable` checks it before `Drafter.Draft` is ever invoked.
+  `sensitiveTerms` is a port of `freehire-apply`'s own `isSensitive` list, with one fix a
+  live smoke check found: the ported `"work authoriz"` is fixed-order and never matches
+  the real, common phrasing `"authorization to work"` (words reversed) — replaced with the
+  standalone `"authoriz"`, which catches either ordering.
+- **A draft is grounded only in `Provenance.Publishable()` experience-bank atoms — never
+  raw CV text, never a system-inferred fact.** `buildGroundingContext` (`grounding.go`)
+  filters `internal/experience.Store.ListAtoms` to `cv_import`/`stated_in_chat`/`manual`
+  provenance, the same gate `internal/cvedit`'s CV-write path already enforces, applied here
+  at read time. An `agent_inferred` atom can never reach a draft.
+- **Drafting LLM spend is attributed to the candidate, tagged `feature:auto-apply-drafting`**
+  — bound fresh per attempt (`llmkey.Bind`, in `Client.resolve`), never shared across
+  attempts. `cmd/auto-apply` is one of exactly two binaries allowed to resolve a per-user
+  LLM credential at all (`internal/llmkey/scope_test.go`'s allowlist, alongside
+  `cmd/server`) — see `openspec/changes/auto-apply-llm-drafting/design.md`'s "cmd/auto-apply
+  becomes a second per-user LLM caller" decision for why.
 - **The fill/submit path (`fill.go`, `browser.go`) is the least-verified part of this
   package.** No unit tests exercise it — a real browser session cannot be faked usefully, and
   no test asserts a real submission against a live board (that would spam a real employer).
@@ -78,7 +93,9 @@ decision for the measurements and its caveats.
 ## How it works
 `Client.Submit`: captcha short-circuit → fetch the platform's schema via
 `applyform.Fetchers` → (Greenhouse only) launch a browser, render the page, `ScanGreenhouseForm`
-→ `Reconcile` → `Resolve` → if `Plan.FullyResolved()`, `fillAndSubmit`; else return
+→ `Reconcile` → `Client.resolve` (deterministic `Resolve`, then — if an experience-bank
+reader is configured — `ResolveWithDrafting` over what is still unmapped, via a freshly
+`llmkey.Bind`-ed `LLMDrafter`) → if `Plan.FullyResolved()`, `fillAndSubmit`; else return
 `StatusParked` with `Plan.Unmapped`. `fillAndSubmit` fills every resolved field (a select's
 `SetValue` is followed by a dispatched `input`/`change` event, since `SetValue` alone writes
 the DOM property without firing what a React-controlled select listens for), clicks
