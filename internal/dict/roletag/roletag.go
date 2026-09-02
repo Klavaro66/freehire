@@ -76,13 +76,17 @@ var categoryNoun = map[string]string{
 	"blockchain":           "Blockchain Engineer",
 	"architecture":         "Architect",
 	"design":               "Designer",
-	"engineering_design":   "Engineering Designer",
-	"product":              "Product Manager",
-	"project_management":   "Project Manager",
-	"management":           "Manager",
-	"marketing":            "Marketing Specialist",
-	"sales":                "Sales Specialist",
-	"support":              "Support Specialist",
+	// The category spans video, animation, art, audio and photography, so no craft
+	// noun fits it — "Creative Specialist" reads as the umbrella it is, and the
+	// crafts themselves are named roles below.
+	"creative":           "Creative Specialist",
+	"engineering_design": "Engineering Designer",
+	"product":            "Product Manager",
+	"project_management": "Project Manager",
+	"management":         "Manager",
+	"marketing":          "Marketing Specialist",
+	"sales":              "Sales Specialist",
+	"support":            "Support Specialist",
 	// IT-company roles added by expand-role-taxonomy.
 	"business_analysis":     "Business Analyst",
 	"solutions_engineering": "Solutions Engineer",
@@ -243,6 +247,43 @@ var namedRoleTable = []struct {
 		"analogue design engineer", "silicon design engineer", "memory design engineer",
 		"standard cell design engineer",
 	}},
+
+	// Media production — the crafts the `creative` category decomposes into. The
+	// bare category role says "some media craft"; these say which one. Aliases match
+	// longest-first, so the qualified art titles keep their own slug and only a
+	// title naming no craft falls through to the category role.
+	{"video_editor", "Video Editor", []string{"video editor"}},
+	{"videographer", "Videographer", []string{"videographer"}},
+	{"video_producer", "Video Producer", []string{"video producer"}},
+	{"animator", "Animator", []string{"animator", "2d animator", "3d animator"}},
+	// One slug per craft, not per label: a VFX artist rendered as "Storyboard Artist"
+	// or a 2D artist as "3D Artist" is wrong data on a facet a candidate filters by,
+	// and the saving would be two table rows. Character and environment art DO fold
+	// into 3d_artist — they are seats on the same 3D pipeline, not other crafts.
+	{"3d_artist", "3D Artist", []string{"3d artist", "character artist", "environment artist"}},
+	{"2d_artist", "2D Artist", []string{"2d artist"}},
+	{"vfx_artist", "VFX Artist", []string{"vfx artist"}},
+	{"concept_artist", "Concept Artist", []string{"concept artist"}},
+	{"technical_artist", "Technical Artist", []string{"technical artist"}},
+	{"storyboard_artist", "Storyboard Artist", []string{"storyboard artist"}},
+	// "Illustrator" is also the Adobe product, but the longer design aliases above
+	// win the length ordering, so only a title naming no design craft lands here.
+	{"illustrator", "Illustrator", []string{"illustrator"}},
+	{"photographer", "Photographer", []string{"photographer", "photo editor"}},
+	// No bare "audio engineer"/"sound engineer": those are broadcast, live sound and AV
+	// integration as often as they are this craft, and labelling a field-service AV
+	// engineer "Sound Designer" is worse than leaving the row unnamed.
+	{"sound_designer", "Sound Designer", []string{"sound designer", "audio designer", "sound design engineer", "audio design engineer"}},
+
+	// Game development. Deliberately NOT a category: "Game Developer" is software
+	// and "Game Designer" is design, so a third category would take rows away from
+	// two working facets to buy a name. The named role is what makes the craft
+	// pickable, and it is emitted whether or not a category resolves.
+	{"game_designer", "Game Designer", []string{"game designer"}},
+	{"level_designer", "Level Designer", []string{"level designer"}},
+	{"narrative_designer", "Narrative Designer", []string{"narrative designer"}},
+	{"game_producer", "Game Producer", []string{"game producer"}},
+	{"game_developer", "Game Developer", []string{"game developer", "game programmer", "gameplay engineer", "gameplay programmer"}},
 
 	// Non-software professions the catalogue carries (broad scope).
 	{"electrical_engineer", "Electrical Engineer", []string{"electrical engineer"}},

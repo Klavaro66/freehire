@@ -1425,3 +1425,79 @@ func TestParse_MinedBatch4(t *testing.T) {
 		})
 	}
 }
+
+// TestParse_CreativeToolchain covers the vocabulary the media crafts name. The
+// omissions are the point as much as the entries: "animation" and "nuke" are
+// deliberately absent, because the corroboration gate is lifted by ANY strong skill
+// and a frontend posting always has one — gating them would tag every React posting
+// that mentions a CSS animation.
+func TestParse_CreativeToolchain(t *testing.T) {
+	cases := []struct {
+		name   string
+		in     string
+		want   []string
+		absent []string
+	}{
+		{"video suite", "Video editor: DaVinci Resolve and Final Cut Pro, colour grading to spec.",
+			[]string{"davinci-resolve", "final-cut-pro", "color-grading"}, nil},
+		{"american spelling of the grade", "Post-production lead handling color grading and delivery.",
+			[]string{"color-grading"}, nil},
+		{"short-form video", "UGC editor cutting vertical video in CapCut and Premiere Pro.",
+			[]string{"capcut", "premiere-pro"}, nil},
+		{"3d suite", "3D artist: modelling in Cinema 4D, sculpting in ZBrush, texturing in Substance Painter.",
+			[]string{"cinema-4d", "zbrush", "substance-painter"}, nil},
+		{"the two substance products are two skills", "Material artist: Substance Designer for procedural materials, ZBrush for sculpts.",
+			[]string{"substance-designer", "zbrush"}, []string{"substance-painter"}},
+
+		// c4d is gated in the word pass. As a phrase it was ungated, and a phrase match
+		// is always strong — it tagged a pathology posting AND lifted the gate beside it.
+		{"c4d the biomarker", "Transplant pathologist: interpret C4d staining and biopsy grading.",
+			nil, []string{"cinema-4d"}},
+		{"c4d the 3d suite", "Motion artist working in C4d and ZBrush.",
+			[]string{"cinema-4d", "zbrush"}, nil},
+
+		// The three craft names tag on their own but must never vouch for a gated word:
+		// each is a duty listed in passing on postings from other disciplines.
+		{"video editing does not corroborate", "Marketing intern, Spring 2026 cohort. Duties: video editing and scheduling.",
+			[]string{"video-editing"}, []string{"spring"}},
+		{"video editing does not corroborate unity", "Social media coordinator: video editing, and Unity within the team matters.",
+			[]string{"video-editing"}, []string{"unity"}},
+		{"storyboarding does not corroborate sketch", "Product manager: run workshops, build storyboards, sketch out flows.",
+			[]string{"storyboarding"}, []string{"sketch"}},
+		{"colour grading does not corroborate", "Events team handling colour grading of the pitch deck and the venue booking.",
+			[]string{"color-grading"}, nil},
+		{"game engines", "Gameplay programmer: Godot and Unreal Engine, C++ throughout.",
+			[]string{"godot", "unreal-engine", "cpp"}, nil},
+		{"the craft itself", "Motion designer doing storyboarding and video editing for launch films.",
+			[]string{"storyboarding", "video-editing"}, nil},
+
+		// Gated: the token is a name or ordinary word outside this craft.
+		{"houdini the magician", "Events host: a Houdini-style escape act for corporate parties.",
+			nil, []string{"houdini"}},
+		// Both "houdini" and "maya" are gated, so the corroboration has to come from a
+		// strong token — here the render pipeline's own Substance Painter.
+		{"houdini the vfx suite", "FX artist: Houdini and Maya, texturing in Substance Painter.",
+			[]string{"houdini", "maya", "substance-painter"}, nil},
+
+		// Deliberate omissions.
+		{"animation is never a skill", "Frontend engineer: React, CSS animation and Tailwind.",
+			[]string{"react", "tailwind"}, []string{"animation"}},
+		{"nuke is never a skill", "Platform engineer: nuke the cache and redeploy via Terraform.",
+			[]string{"terraform"}, []string{"nuke"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Parse(c.in)
+			for _, w := range c.want {
+				if !slices.Contains(got, w) {
+					t.Errorf("Parse(%q) = %v, missing %q", c.in, got, w)
+				}
+			}
+			for _, a := range c.absent {
+				if slices.Contains(got, a) {
+					t.Errorf("Parse(%q) = %v, must NOT contain %q", c.in, got, a)
+				}
+			}
+		})
+	}
+}

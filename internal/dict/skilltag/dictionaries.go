@@ -381,6 +381,25 @@ var wordAliases = map[string]string{
 	"typography":    "typography",
 	"accessibility": "accessibility",
 	"a11y":          "accessibility",
+	// media production — the coined product names, plus the one practice whose gerund
+	// is unambiguous. "houdini" is listed but gated by ambiguousWords (the escapologist).
+	//
+	// Two are absent for the same reason "design systems" is: the corroboration gate is
+	// lifted by ANY strong skill, and both collide with prose that sits beside one.
+	// "animation" is the CSS property of every frontend posting that also names React,
+	// and "nuke" is what a platform posting does to a cache next to Terraform — gating
+	// them would tag exactly the postings they are wrong for. The Foundry product is
+	// reachable through the artists' other tools.
+	"godot":   "godot",
+	"zbrush":  "zbrush",
+	"capcut":  "capcut",
+	"houdini": "houdini",
+	// "c4d" is here rather than with the "cinema 4d" phrase for a reason worth stating:
+	// ambiguousWords gates the WORD pass only, and a phrase match is always strong. As
+	// a phrase this token tagged a transplant pathologist's posting ("interpret C4d
+	// staining"), C4d being a standard complement-fragment biomarker — and lifted the
+	// gate off every weak word beside it. Only the word pass can gate a single token.
+	"c4d": "cinema-4d",
 	// web3 / crypto (mined from enrichment->skills; the long tail sits below the
 	// freq-500 floor). Distinctive tokens only — the ambiguous ones are NOT added:
 	// "cosmos" (↔ Azure Cosmos DB), "foundry" (↔ Palantir/Cloud Foundry),
@@ -862,6 +881,12 @@ var ambiguousWords = map[string]bool{
 	"canva":         true,
 	"lottie":        true,
 	"wireframes":    true,
+	// The VFX suite shares its name with the escapologist, and "a Houdini act" is how
+	// an events posting spells it. A real FX posting names Maya, Nuke's neighbours or
+	// a render farm beside it. "c4d" is the transplant-pathology biomarker as often as
+	// it is the 3D suite, and only the word pass can gate a single token.
+	"houdini": true,
+	"c4d":     true,
 	// batch 4 — products whose bare token is ordinary English, a mythological name or
 	// a body part, in exactly the postings this dictionary runs over: a startup that
 	// "bootstraps" itself, a laptop that "hibernates", a culture blurb about "unity",
@@ -1164,6 +1189,25 @@ var engineeringPhraseAliases = []phraseAlias{
 	{"motion design", "motion-design"},
 	{"motion graphics", "motion-graphics"},
 	{"user flows", "user-flows"},
+	// media production — the multi-word products and the two practices. Both British
+	// and American spellings of the grade are listed: neither is the odd one out in a
+	// catalogue this international. "final cut" without "pro" is left out — it is
+	// ordinary prose ("the final cut of the budget").
+	{"davinci resolve", "davinci-resolve"}, {"da vinci resolve", "davinci-resolve"},
+	{"final cut pro", "final-cut-pro"},
+	{"cinema 4d", "cinema-4d"},
+	// Substance 3D Painter and Substance 3D Designer are two products with two job
+	// descriptions — texture painting and procedural material authoring. Folding the
+	// second into the first would have the glossary render "substance designer" as a
+	// spelling of Painter, which is the dictionary guessing.
+	{"substance painter", "substance-painter"},
+	{"substance designer", "substance-designer"},
+	{"color grading", "color-grading"}, {"colour grading", "color-grading"},
+	{"video editing", "video-editing"},
+	// Declared as phrases, not words, so nonCorroboratingPhrases can reach them — that
+	// map is consulted on the phrase pass only, and the word pass has no equivalent
+	// tier. A single-token phrase alias matches exactly as the word pass would.
+	{"storyboarding", "storyboarding"}, {"storyboards", "storyboarding"},
 	// mechanical CAD phrases (the single-token products live in wordAliases).
 	{"3ds max", "3ds-max"},
 	{"fusion 360", "fusion-360"},
@@ -1465,6 +1509,14 @@ var nonCorroboratingPhrases = map[string]bool{
 	"cnc":          true,
 	"soldering":    true,
 	"oscilloscope": true,
+	// media production — the same doctrine as the marketing disciplines above. Each is
+	// a duty a coordinator, an intern or a product manager lists in passing ("Duties:
+	// video editing…", "build storyboards, sketch out flows"), so tagging the craft is
+	// right and letting it lift the gate is how `spring`, `unity` and `sketch` came
+	// back on a marketing post.
+	"video-editing": true,
+	"color-grading": true,
+	"storyboarding": true,
 	// batch 4 — compliance frameworks and certifications. Naming a regime is evidence
 	// that the posting is SUBJECT to it, never that whoever fills it is technical: a
 	// nurse's posting carries HIPAA, an injection-moulding plant's carries ISO 9001,

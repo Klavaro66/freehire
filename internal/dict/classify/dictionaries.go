@@ -435,7 +435,12 @@ var categoryTable = []aliasEntry{
 	// Design disciplines of their own, on the product side of the split.
 	{"service design engineer", "design"},
 	{"experience design engineer", "design"},
-	{"sound design engineer", "design"},
+	// The two audio spellings that have to be declared here, above the draughting
+	// block: both end in "design engineer", so left below they fall through to the bare
+	// alias and land in draughting. They move out of `design` with the rest of audio —
+	// leaving them behind would scatter one craft across three categories.
+	{"sound design engineer", "creative"},
+	{"audio design engineer", "creative"},
 	{"game design engineer", "design"},
 	// Then engineering design. The bare "design engineer" closes the block, and it
 	// carries every qualified "<discipline> design engineer" form with it — those need
@@ -474,6 +479,14 @@ var categoryTable = []aliasEntry{
 	// own — the hyphen is a word boundary, so the bare form resolves it.
 	{"конструктор", "engineering_design"},
 	{"design engineer", "engineering_design"},
+
+	// Audio is the only media-production craft that has to be declared HERE, above the
+	// bare "designer" alias: it is the only one whose title contains that word, which
+	// is the whole reason a Sound Designer was filed with product designers. Every
+	// other creative alias is declared at the very END of this table — see the block
+	// there for why.
+	{"sound designer", "creative"},
+	{"audio designer", "creative"},
 	{"designer", "design"},
 	{"design", "design"},
 	{"ux", "design"},
@@ -921,4 +934,41 @@ var categoryTable = []aliasEntry{
 	// development. Bare tokens so any separator ("1С-разработчик", "разработчик 1С") matches.
 	{"1c", "backend"},
 	{"1с", "backend"},
+
+	// Media production, declared LAST on purpose. Every craft here is also a tool or a
+	// second hat named inside someone else's title — "Marketing Specialist (Photoshop,
+	// Illustrator)", "Graphic Designer & Photographer", "Junior Motion Designer /
+	// Animator". This table resolves in declaration order, so declaring these anywhere
+	// above `design` or `marketing` does not merely add a category: it TAKES those
+	// rows, which is the one thing this change promised not to do. Declared last, a
+	// title resolves to the craft only when it names no other discipline at all.
+	//
+	// The cost is stated rather than hidden: a "Social Media Video Editor" resolves to
+	// `marketing`, not to the craft. That is the right side to err on — the posting is
+	// still findable, on a facet that was already correct for it.
+	//
+	// The bare craft words ("video", "audio", "art", "sound", "photo") are not aliases
+	// in either block: each occurs in titles across every discipline ("Audio DSP
+	// Engineer", "Art Director", "State of the Art").
+	{"video editor", "creative"},
+	{"video producer", "creative"},
+	{"videographer", "creative"},
+	{"photographer", "creative"},
+	{"photo editor", "creative"},
+	{"animator", "creative"},
+	// "motion graphics artist" is the artist spelling of the craft; the DESIGNER
+	// spelling ("Motion Graphics Designer") stays in `design`, where its named role
+	// already lives — and would win here regardless, being declared above.
+	{"motion graphics artist", "creative"},
+	{"concept artist", "creative"},
+	{"character artist", "creative"},
+	{"environment artist", "creative"},
+	{"technical artist", "creative"},
+	{"storyboard artist", "creative"},
+	{"vfx artist", "creative"},
+	{"3d artist", "creative"},
+	{"2d artist", "creative"},
+	// Also the Adobe product, which is why it is here rather than beside the crafts it
+	// belongs with: a design or marketing title that names the tool keeps its own row.
+	{"illustrator", "creative"},
 }
