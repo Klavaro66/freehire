@@ -7,24 +7,24 @@
 ## 2. Go queue store (`internal/autoapply`)
 
 - [x] 2.1 Define the `Store` port (`Claim`, `Submit` (success), `Park` (unresolved), `Fail` (retry)) per design.md's decision that this is its own interface, not `applyform.Store` reused
-- [ ] 2.2 Implement `Store` against the generated queries from 1.2
-- [ ] 2.3 Unit test `Store`'s claim/park/fail behavior against a fake DB layer (or as an `integration`-tagged test against a real one, matching how `internal/applyform`'s store is tested)
+- [x] 2.2 Implement `Store` against the generated queries from 1.2 (`cmd/auto-apply/store.go`, mirroring `cmd/capture-apply-form`'s `dbStore` — the implementation lives beside the binary, not inside the domain package, matching that existing split)
+- [x] 2.3 Unit test `Store`'s claim/park/fail behavior as an `integration`-tagged test against a real Postgres (`internal/db/auto_apply_queue_integration_test.go`), matching how `internal/applyform`'s queries are tested
 
 ## 3. Sidecar HTTP client (Go side)
 
-- [ ] 3.1 Define a `SidecarClient` interface (`Submit(ctx, jobURL, provider, answers) (Result, error)`) and an HTTP implementation with a bounded call timeout (config, default matching `applyform`'s `_CALL_TIMEOUT_SECONDS` convention)
-- [ ] 3.2 Unit test the HTTP implementation against a local test server covering the three response shapes (`applied`, `parked`, error) and a timeout
+- [x] 3.1 Define a `SidecarClient` interface (`Submit(ctx, jobURL, provider, answers) (Result, error)`) and an HTTP implementation with a bounded call timeout (config, default matching `applyform`'s `_CALL_TIMEOUT_SECONDS` convention)
+- [x] 3.2 Unit test the HTTP implementation against a local test server covering the three response shapes (`applied`, `parked`, error) and a timeout
 
 ## 4. `cmd/auto-apply` worker
 
 - [x] 4.1 Implement the per-attempt process function: assemble `answers` via `autofillProfile()`/`profileFields()`, call `SidecarClient.Submit`, map the result to `Store.Submit`/`Park`/`Fail`
-- [ ] 4.2 Wire `internal/outbox.RunPool` + `Store` + `SidecarClient` into `cmd/auto-apply/main.go`, following `cmd/capture-apply-form`'s bootstrap shape (`internal/worker` conventions: `DATABASE_URL`, exit codes, batch/lease/concurrency env vars)
+- [x] 4.2 Wire `internal/outbox.RunPool` + `Store` + `SidecarClient` into `cmd/auto-apply/main.go`, following `cmd/capture-apply-form`'s bootstrap shape (`internal/worker` conventions: `DATABASE_URL`, exit codes, batch/lease/concurrency env vars). Along the way, extracted `autofillProfile`/`profileFields` out of `internal/handler` into a new `internal/candidateprofile` package — they were unexported and handler-scoped, so `cmd/auto-apply` could not call them as originally assumed. Both the extension autofill path and this worker now share one `Assembler` (`internal/handler`'s tests moved with the code they were testing).
 - [x] 4.3 Unit test the process function with a mock `Store` and mock `SidecarClient`: `applied` → `Submit` called; `parked` → `Park` called with reasons; transient error → `Fail` called (plus two cases the design surfaced: an answer-assembly failure never reaches the sidecar, and a lost post-submit record forces an immediate dead-letter rather than the normal retry path, to keep the "never twice" requirement)
 
 ## 5. Application-tracking integration
 
-- [ ] 5.1 Compose `jobtracking.MarkJobApplied` and marking the queue row `done` under one transaction/lock (reusing `LockJobForApply`'s existing serialization), so a double-claim cannot double-submit — this is what the spec's "never twice" requirement rests on
-- [ ] 5.2 Test: an attempt already reflected in `user_jobs` (already applied) is never resubmitted
+- [x] 5.1 Compose `db.Queries.MarkJobApplied` (the same statement `jobtracking.QueriesRepository.MarkApplied` runs, called directly rather than through the slug-based `jobtracking.Service`, since the queue already carries `job_id`) and marking the queue row done under one transaction/lock (`LockJobForApply`), so a double-claim cannot double-submit — this is what the spec's "never twice" requirement rests on. `EventSource` is `appevent.SourceSystem`: the platform acting on the candidate's behalf, not something they typed.
+- [x] 5.2 Test: a pair that already has a submitted application is not double-counted on a second `Submit` (`cmd/auto-apply/store_integration_test.go`, real Postgres — verifies exactly one `applications` row and `jobs.applied_count` staying at 1)
 
 ## 6. Python sidecar (`services/auto-apply`)
 
