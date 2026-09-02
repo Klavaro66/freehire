@@ -6,13 +6,13 @@
 
 ## 2. Sensitive-field gate
 
-- [ ] 2.1 Port `freehire-apply/internal/drafting`'s `isSensitive` keyword list into `internal/atsapply` (compensation, work authorization/visa sponsorship, EEO/demographic categories) as a pure, unit-tested function over a question's label text
-- [ ] 2.2 Unit test: every category in the ported list is caught; a representative set of non-sensitive labels (language proficiency, referral source, "why this company") are not
+- [x] 2.1 Port `freehire-apply/internal/drafting`'s `isSensitive` keyword list into `internal/atsapply` (compensation, work authorization/visa sponsorship, EEO/demographic categories) as a pure, unit-tested function over a question's label text
+- [x] 2.2 Unit test: every category in the ported list is caught; a representative set of non-sensitive labels (language proficiency, referral source, "why this company") are not
 
 ## 3. Grounding source
 
-- [ ] 3.1 Add a grounding-context builder that reads `experience.Store.ListAtoms`/`ListEmployments` for the attempt's candidate and filters to `Provenance.Publishable()` atoms only
-- [ ] 3.2 Unit test: an `agent_inferred` atom is excluded from the grounding context even when it would otherwise answer the question well
+- [x] 3.1 Add a grounding-context builder that reads `experience.Store.ListAtoms`/`ListEmployments` for the attempt's candidate and filters to `Provenance.Publishable()` atoms only
+- [x] 3.2 Unit test: an `agent_inferred` atom is excluded from the grounding context even when it would otherwise answer the question well
 
 ## 4. Drafter
 
