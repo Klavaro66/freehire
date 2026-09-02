@@ -33,9 +33,12 @@ import (
 // the result and to avoid gluing words across a tag boundary.
 var htmlTagRE = regexp.MustCompile(`<[^>]*>`)
 
-// wordTokenRE splits normalized text into bare alphanumeric tokens for the word
-// pass. Punctuated terms (c++, node.js) are handled separately by the phrase pass.
-var wordTokenRE = regexp.MustCompile(`[a-z0-9]+`)
+// wordTokenRE splits normalized text into Unicode alphanumeric tokens for the
+// word pass. Keeping non-ASCII letters inside the token is important for
+// multilingual text: Hungarian "elkészítése" must remain one token rather than
+// splitting into "elk", "sz", "t", "se". Punctuated terms (c++, node.js) are
+// handled separately by the phrase pass.
+var wordTokenRE = regexp.MustCompile(`[\p{L}\p{N}]+`)
 
 // sepRE matches a run of the word-joiners '-'/'_' and whitespace. It is used to
 // split a multi-word alias into its segments; the text itself is NOT rewritten, so

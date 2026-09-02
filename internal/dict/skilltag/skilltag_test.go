@@ -24,6 +24,69 @@ func TestWordTokens(t *testing.T) {
 	}
 }
 
+// Unicode letters are part of words and must not act as token separators.
+// The parser normally tokenizes normalized text, so this test follows the
+// same path and verifies that accented Hungarian words remain intact.
+func TestWordTokensUnicode(t *testing.T) {
+	got := wordTokens(normalize("Ajánlatok elkészítése és ellenőrzése"))
+	want := []string{"ajánlatok", "elkészítése", "és", "ellenőrzése"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("wordTokens = %#v, want %#v", got, want)
+	}
+}
+
+// Unicode letters must remain part of the same token.
+//
+// The skill matcher used to tokenize only ASCII letters ([a-z0-9]+). That caused
+// words containing accented characters to be split into multiple tokens. For
+// example, the Hungarian word "elkészítése" became:
+//
+//	"elk", "sz", "t", "se"
+//
+// Because "elk" is also a valid skill alias for the ELK stack, ordinary Hungarian
+// job descriptions could incorrectly receive the "elk" skill tag.
+//
+// These cases guard against that regression: accented Hungarian words containing
+// an ASCII prefix that happens to be a skill alias must remain a single token and
+// must not produce that skill.
+func TestParseDoesNotSplitUnicodeWordsIntoSkillAliases(t *testing.T) {
+	tests := []string{
+		"Ajánlatok elkészítése és ártárgyalások lebonyolítása.",
+		"Elkötelezett munkatársat keresünk.",
+		"Az elkészített dokumentáció ellenőrzése.",
+	}
+
+	for _, text := range tests {
+		got := Parse(text)
+
+		if slices.Contains(got, "elk") {
+			t.Fatalf("Parse(%q) unexpectedly returned elk: %v", text, got)
+		}
+	}
+}
+
+// The Unicode-tokenization fix must not break legitimate ELK detection.
+//
+// ELK is still expected to resolve when it appears as its own token. This makes
+// the regression test two-sided: Hungarian words such as "elkészítése" must not
+// match, while an actual reference to the ELK stack must continue to match.
+func TestParseELKStillMatches(t *testing.T) {
+	tests := []string{
+		"Experience with ELK Stack.",
+		"Monitoring with elk and Grafana.",
+		"ELK, Elasticsearch, Logstash and Kibana.",
+	}
+
+	for _, text := range tests {
+		got := Parse(text)
+
+		if !slices.Contains(got, "elk") {
+			t.Fatalf("Parse(%q) did not return elk: %v", text, got)
+		}
+	}
+}
+
 func TestParse(t *testing.T) {
 	cases := []struct {
 		name string
