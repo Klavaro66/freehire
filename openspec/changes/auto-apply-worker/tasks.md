@@ -1,8 +1,8 @@
 ## 1. Data model
 
-- [ ] 1.1 Add migration creating `auto_apply_queue` (`user_id`, `job_id`, `status` — `pending`/`blocked`/`done`/`failed`, `attempts`, `last_error`, `claimed_until`, `unmapped` jsonb nullable, `created_at`)
-- [ ] 1.2 Add sqlc queries: claim a leased batch, mark done (within the same statement/transaction as the application-tracking write — see 5.1), mark blocked with `unmapped`, mark failed with attempts/dead-letter, matching `internal/applyform`'s existing query shapes
-- [ ] 1.3 Run `make sqlc` and commit generated `internal/db` output
+- [x] 1.1 Add migration creating `auto_apply_queue` (`user_id`, `job_id`, `status` — `pending`/`blocked`/`done`/`failed`, `attempts`, `last_error`, `claimed_until`, `unmapped` jsonb nullable, `created_at`)
+- [x] 1.2 Add sqlc queries: claim a leased batch, mark done (within the same statement/transaction as the application-tracking write — see 5.1), mark blocked with `unmapped`, mark failed with attempts/dead-letter, matching `internal/applyform`'s existing query shapes
+- [x] 1.3 Run `make sqlc` and commit generated `internal/db` output
 
 ## 2. Go queue store (`internal/autoapply`)
 

@@ -171,6 +171,19 @@ type AssistantSession struct {
 	CvID      *uuid.UUID         `json:"cv_id"`
 }
 
+type AutoApplyQueue struct {
+	ID        int64              `json:"id"`
+	UserID    int64              `json:"user_id"`
+	JobID     int64              `json:"job_id"`
+	Attempts  int32              `json:"attempts"`
+	ClaimedAt pgtype.Timestamptz `json:"claimed_at"`
+	FailedAt  pgtype.Timestamptz `json:"failed_at"`
+	BlockedAt pgtype.Timestamptz `json:"blocked_at"`
+	LastError string             `json:"last_error"`
+	Unmapped  []byte             `json:"unmapped"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type BoardHealth struct {
 	Provider            string             `json:"provider"`
 	Board               string             `json:"board"`
