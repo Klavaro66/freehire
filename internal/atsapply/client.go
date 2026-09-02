@@ -3,12 +3,22 @@ package atsapply
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/chromedp/chromedp"
 
 	"github.com/strelov1/freehire/internal/applyform"
 	"github.com/strelov1/freehire/internal/autoapply"
+	"github.com/strelov1/freehire/internal/llm"
+	"github.com/strelov1/freehire/internal/llmkey"
 )
+
+// tagAutoApplyDrafting attributes drafting LLM spend to the candidate the application
+// belongs to, distinct from every other feature's tag — see
+// openspec/changes/auto-apply-llm-drafting/design.md's "cmd/auto-apply becomes a second
+// per-user LLM caller" decision for why this worker may resolve a per-user credential at
+// all.
+const tagAutoApplyDrafting = "feature:auto-apply-drafting"
 
 // requiresCaptcha marks providers whose form always renders a captcha, so a blind fill
 // attempt would either fail or (worse) look like it might work and then silently not
@@ -25,15 +35,31 @@ var requiresCaptcha = map[string]bool{
 type Client struct {
 	fetchers      map[string]applyform.Fetcher
 	allocatorOpts []chromedp.ExecAllocatorOption
+	// llmClient is the BASE, unbound client; nil means drafting is off (an unconfigured
+	// deployment, the same convention every other LLM-backed feature follows). Bound
+	// per attempt, per candidate, in Submit — never shared across attempts, the same
+	// reason RunAgentAutofill binds per request rather than once at startup.
+	llmClient *llm.Client
+	llmKeys   *llmkey.Resolver
+	// atoms is nil-checked directly (not nil-safe like llmkey.Resolver): a nil reader
+	// means "no grounding source configured", and drafting is skipped entirely rather
+	// than run against an always-empty GroundingContext.
+	atoms AtomReader
 }
 
 // NewClient builds a Client. transport is the same one internal/applyform's own capture
 // worker uses (internal/sources.Client) — the Greenhouse/Ashby schema fetch this package
-// reuses needs nothing different from it.
-func NewClient(transport applyform.Transport) *Client {
+// reuses needs nothing different from it. llmClient/llmKeys/atoms may all be nil, which
+// disables question drafting entirely and leaves every other behavior unchanged (a form
+// drafting could have completed instead parks, exactly as it did before this capability
+// existed).
+func NewClient(transport applyform.Transport, llmClient *llm.Client, llmKeys *llmkey.Resolver, atoms AtomReader) *Client {
 	return &Client{
 		fetchers:      applyform.Fetchers(transport),
 		allocatorOpts: stealthAllocatorOptions(),
+		llmClient:     llmClient,
+		llmKeys:       llmKeys,
+		atoms:         atoms,
 	}
 }
 
@@ -80,7 +106,10 @@ func (c *Client) Submit(ctx context.Context, claimed autoapply.Claimed, answers 
 		merged = mergedFromAPIOnly(apiForm)
 	}
 
-	plan := Resolve(merged, answers)
+	plan, err := c.resolve(ctx, claimed, merged, answers)
+	if err != nil {
+		return autoapply.SidecarResult{}, fmt.Errorf("resolve fields for job %d: %w", claimed.JobID, err)
+	}
 	if !plan.FullyResolved() {
 		return autoapply.SidecarResult{Status: autoapply.StatusParked, Unmapped: plan.Unmapped}, nil
 	}
@@ -112,6 +141,30 @@ func (c *Client) Submit(ctx context.Context, claimed autoapply.Claimed, answers 
 		return autoapply.SidecarResult{Status: autoapply.StatusUnconfirmed}, nil
 	}
 	return autoapply.SidecarResult{Status: autoapply.StatusApplied}, nil
+}
+
+// resolve runs the deterministic pass and, where a drafting source is configured, offers
+// the drafter what it left unmapped. The drafter is bound fresh for this one attempt's
+// candidate (llmkey.Bind, tagged tagAutoApplyDrafting) — never shared across attempts, so
+// one candidate's answers can never leak into another's LLM spend or grounding.
+//
+// A failure to read the grounding source degrades to "draft nothing" rather than failing
+// the whole attempt: the deterministic Plan is still useful (it may already be fully
+// resolved, or a partial answer is still better than none at submit time) — see the
+// requirement that a non-groundable question parks rather than blocking every other field.
+func (c *Client) resolve(ctx context.Context, claimed autoapply.Claimed, merged []MergedField, answers map[string]string) (Plan, error) {
+	if c.atoms == nil {
+		return Resolve(merged, answers), nil
+	}
+
+	grounding, err := buildGroundingContext(ctx, c.atoms, claimed.UserID)
+	if err != nil {
+		log.Printf("atsapply: read grounding context for user %d: %v — drafting nothing for this attempt", claimed.UserID, err)
+		return Resolve(merged, answers), nil
+	}
+
+	bound := llmkey.Bind(ctx, c.llmKeys, c.llmClient, claimed.UserID, tagAutoApplyDrafting)
+	return ResolveWithDrafting(ctx, merged, answers, NewLLMDrafter(bound), grounding)
 }
 
 // fetchSchema reuses internal/applyform's own per-provider fetcher rather than

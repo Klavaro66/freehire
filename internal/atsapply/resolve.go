@@ -151,14 +151,29 @@ func resolveOne(f MergedField, answers map[string]string) (ResolvedField, string
 		return ResolvedField{}, fmt.Sprintf("candidate has not stated %q", key), false
 	}
 
-	if len(f.Options) == 0 {
-		return ResolvedField{ID: f.ID, Kind: f.Kind, Multi: f.Multi, Value: value}, "", true
+	platformValue, matched := matchOption(f, value)
+	if !matched {
+		return ResolvedField{}, fmt.Sprintf("answer %q matches none of this field's offered options", value), false
 	}
+	return ResolvedField{ID: f.ID, Kind: f.Kind, Multi: f.Multi, Value: platformValue}, "", true
+}
 
+// matchOption resolves free text against a field's offered options, returning the
+// PLATFORM value (not the label) for whichever option it case-insensitively matches. A
+// field with no enumerated options at all takes the text verbatim — there is nothing to
+// validate it against. Shared by resolveOne (a deterministic answer) and draft.go's
+// ResolveWithDrafting (a drafted one): the "never answer with an option the platform did
+// not offer" rule applies identically to both, per
+// auto-apply-question-drafting's spec.
+func matchOption(f MergedField, text string) (value string, ok bool) {
+	text = strings.TrimSpace(text)
+	if len(f.Options) == 0 {
+		return text, true
+	}
 	for _, opt := range f.Options {
-		if strings.EqualFold(strings.TrimSpace(opt.Label), strings.TrimSpace(value)) {
-			return ResolvedField{ID: f.ID, Kind: f.Kind, Multi: f.Multi, Value: opt.Value}, "", true
+		if strings.EqualFold(strings.TrimSpace(opt.Label), text) {
+			return opt.Value, true
 		}
 	}
-	return ResolvedField{}, fmt.Sprintf("answer %q matches none of this field's offered options", value), false
+	return "", false
 }

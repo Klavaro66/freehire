@@ -2,7 +2,7 @@
 
 - [x] 1.1 Extract `userLLM` (the `llmkey.Resolver.For` + `llm.Client.As` composition in `internal/handler/user_llm.go`) into `internal/llmkey`, renamed to fit that package (e.g. `Bind`); update `internal/handler`'s call sites to the moved function; no behavior change
 - [x] 1.2 Update `internal/llmkey/scope_test.go`'s allowlist to admit `cmd/auto-apply` by name alongside the existing `cmd/server` exemption, with a one-line comment carrying the same reasoning
-- [ ] 1.3 Wire `cmd/auto-apply/main.go` to construct an `llmkey.Resolver` and bind an `internal/llm.Client` per attempt via the moved `Bind`, tagged `feature:auto-apply-drafting` (new tag constant) — deferred to land together with 4.3 (`Client.Submit` is where `claimed.UserID` becomes available to bind against; wiring the constructor before a consumer exists would leave unused fields)
+- [x] 1.3 Wired `cmd/auto-apply/main.go`: constructs `llm.NewClient`/`llmkey.New`/`llmkey.NewResolver`/`experience.NewStore`, passed into `atsapply.NewClient`. Binding itself happens per-attempt in `atsapply.Client.resolve` (`llmkey.Bind(ctx, c.llmKeys, c.llmClient, claimed.UserID, tagAutoApplyDrafting)`), landed together with 4.3 as planned.
 
 ## 2. Sensitive-field gate
 
@@ -16,10 +16,10 @@
 
 ## 4. Drafter
 
-- [ ] 4.1 Define the `Drafter` interface (`Draft(ctx, question MergedField, grounding GroundingContext) (answer string, ok bool, err error)`) in `internal/atsapply`
-- [ ] 4.2 Implement the real `Drafter` over `internal/llm.Client` with a structured-output schema (grounded answer, or an explicit "no basis" signal — never an empty string standing in for "nothing to say")
-- [ ] 4.3 Wire the drafter into `Resolve`'s (or a new orchestration step's) handling of an unmapped, non-sensitive, free-text-kind field: draft, then re-run the existing "must match an offered option, where the field has any" check before accepting the value
-- [ ] 4.4 Unit test the wiring with a fake `Drafter`: a sensitive field never reaches `Draft` at all; a drafted value that fails the offered-options check still parks; a `Drafter` returning `ok=false` still parks; a successful, grounded draft fills the field
+- [x] 4.1 Define the `Drafter` interface (`Draft(ctx, question MergedField, grounding GroundingContext) (answer string, ok bool, err error)`) in `internal/atsapply`
+- [x] 4.2 Implement the real `Drafter` over `internal/llm.Client` with a structured-output schema (grounded answer, or an explicit "no basis" signal — never an empty string standing in for "nothing to say")
+- [x] 4.3 Wire the drafter into `Resolve`'s (or a new orchestration step's) handling of an unmapped, non-sensitive, free-text-kind field: draft, then re-run the existing "must match an offered option, where the field has any" check before accepting the value
+- [x] 4.4 Unit test the wiring with a fake `Drafter`: a sensitive field never reaches `Draft` at all; a drafted value that fails the offered-options check still parks; a `Drafter` returning `ok=false` still parks; a successful, grounded draft fills the field
 
 ## 5. Verification and documentation
 

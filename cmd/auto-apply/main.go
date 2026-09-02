@@ -18,6 +18,9 @@ import (
 	"github.com/strelov1/freehire/internal/config"
 	"github.com/strelov1/freehire/internal/cv"
 	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/experience"
+	"github.com/strelov1/freehire/internal/llm"
+	"github.com/strelov1/freehire/internal/llmkey"
 	"github.com/strelov1/freehire/internal/resume"
 	"github.com/strelov1/freehire/internal/screeninganswers"
 	"github.com/strelov1/freehire/internal/sources"
@@ -66,11 +69,35 @@ func run() int {
 		assembler: candidateprofile.NewAssembler(cvStore, resumeStore, queries, screeningAnswersSvc),
 	}
 
+	// Question drafting (openspec/changes/auto-apply-llm-drafting) is optional: an
+	// unconfigured LLM degrades to no drafting, the same convention llm.NewClient gives
+	// every other feature — every field either resolves deterministically or parks,
+	// exactly as it did before this capability existed.
+	llmClient, llmFlush, err := llm.NewClient(cfg.Settings(cfg.Model), "auto-apply")
+	if err != nil {
+		log.Printf("llm: %v", err)
+		return 1
+	}
+	defer llmFlush()
+	// The gateway's administrative API mints the per-candidate credential a draft call
+	// spends under (llmkey.Bind, called per attempt in internal/atsapply.Client.resolve).
+	// Nil-safe: an unconfigured admin API just means every draft call spends on the
+	// service credential instead, still tagged.
+	llmKeys := llmkey.New(llmkey.Config{
+		BaseURL:      cfg.LLMAdminURL,
+		AdminKey:     cfg.LLMAdminKey,
+		MaxBudget:    cfg.LLMUserMaxBudget,
+		RPMLimit:     cfg.LLMUserRPMLimit,
+		BudgetWindow: cfg.LLMUserBudgetWindow,
+	})
+	llmKeyResolver := llmkey.NewResolver(queries, llmKeys)
+	atoms := experience.NewStore(experience.NewQueriesRepository(queries))
+
 	// The same HTTP client the crawl and internal/applyform's own capture worker use: the
 	// Greenhouse/Ashby endpoints internal/atsapply reuses via applyform.Fetchers are the
 	// platforms' own public job-board APIs, so its user agent, timeouts and size caps are
 	// exactly right here too.
-	sidecar := atsapply.NewClient(sources.NewClient())
+	sidecar := atsapply.NewClient(sources.NewClient(), llmClient, llmKeyResolver, atoms)
 
 	stats, err := autoapply.Run(ctx, newDBStore(pool), answers, sidecar, autoapply.RunOptions{
 		BatchSize:    acfg.BatchSize,
