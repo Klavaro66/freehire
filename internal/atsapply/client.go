@@ -97,10 +97,19 @@ func (c *Client) Submit(ctx context.Context, claimed autoapply.Claimed, answers 
 
 	confirmed, err := fillAndSubmit(browserCtx, claimed.JobURL, plan)
 	if err != nil {
+		// A fill action failing, or the board EXPLICITLY refusing the submit click
+		// (SUBMIT_REFUSED_MARKERS in fill.go), both mean no submission happened — safe
+		// to retry normally. This is deliberately distinct from the timeout-with-no-
+		// marker case below, which is NOT known to be safe to retry.
 		return autoapply.SidecarResult{}, fmt.Errorf("fill and submit: %w", err)
 	}
 	if !confirmed {
-		return autoapply.SidecarResult{}, fmt.Errorf("submission not confirmed — see CONFIRMATION_MARKERS/SUBMIT_REFUSED_MARKERS in fill.go")
+		// Neither a confirmation nor a refusal appeared before the timeout — the click
+		// may or may not have gone through. Reported as StatusUnconfirmed, not a plain
+		// error: internal/autoapply's runner dead-letters this immediately rather than
+		// retrying it through the ordinary attempts budget, because retrying risks a
+		// second real submission to the employer.
+		return autoapply.SidecarResult{Status: autoapply.StatusUnconfirmed}, nil
 	}
 	return autoapply.SidecarResult{Status: autoapply.StatusApplied}, nil
 }

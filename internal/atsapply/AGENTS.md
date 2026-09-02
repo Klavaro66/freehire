@@ -33,7 +33,15 @@ decision for the measurements and its caveats.
   close, not a design decision to defend.
 - **File uploads are not resolved.** `resolve.go`'s `answerKeyFor` never matches a `file`
   kind field — a required résumé/cover-letter upload always parks. There is no artifact
-  (which stored CV, which version) wired through yet.
+  (which stored CV, which version) wired through yet. Because of this, `cmd/auto-apply`
+  never needs object storage today — `candidateprofile`'s only résumé read
+  (`resume.Store.Structured`) is a Postgres read that never touches `blobs` — so `main.go`
+  does not require `S3_*` to be configured; it will once this gap closes.
+- **A `Multi` field (a checkbox group taking several answers) only ever resolves at most one
+  value.** Not a shortcut: `AnswerSource` never supplies more than one candidate value per
+  question today, so there is never more than one to match in the first place. See
+  `resolveOne`'s doc comment (`resolve.go`). Widening `AnswerSource` to a multi-valued
+  source is what would turn this into a real gap.
 - **Custom employer questions rarely resolve, even when relevant data exists.**
   `answerKeyFor` is an ID-based lookup: it matches Greenhouse's own standardized field names
   (`first_name`, `email`, ...) but a numeric `question_NNNNN` id can never match it, even when
@@ -47,18 +55,27 @@ decision for the measurements and its caveats.
   no test asserts a real submission against a live board (that would spam a real employer).
   Correctness rests on a single spike's measurements and the reference implementation's own
   documented rules, not on this package's own live testing, until real submit volume proves
-  otherwise. Two known gaps: no assertion that a react-select-style field's typed value
-  actually "stuck" before submitting (the reference implementation calls this out as its own
-  main failure mode), and one field shape scanned with an empty id on a real posting that
-  this package does not yet name correctly.
+  otherwise. One known gap: one field shape was scanned with an empty id on a real posting
+  that this package does not yet name correctly.
+- **An unconfirmed submission is never retried through the ordinary path.** If neither a
+  confirmation nor a refusal marker appears after the submit click, `fillAndSubmit` reports
+  that honestly rather than guessing either way, and `Client.Submit` returns
+  `autoapply.StatusUnconfirmed` — a distinct outcome from an error. `internal/autoapply`'s
+  runner dead-letters it immediately (the same forced path a lost post-submit DB record
+  takes), because the click may well have gone through: retrying normally would risk a
+  second real submission. A code review caught an earlier version of this that mapped the
+  same situation to a plain retryable error — see `internal/autoapply/runner_test.go`'s
+  `TestRunDeadLettersImmediatelyOnAnUnconfirmedSubmission`.
 
 ## How it works
 `Client.Submit`: captcha short-circuit → fetch the platform's schema via
 `applyform.Fetchers` → (Greenhouse only) launch a browser, render the page, `ScanGreenhouseForm`
 → `Reconcile` → `Resolve` → if `Plan.FullyResolved()`, `fillAndSubmit`; else return
-`StatusParked` with `Plan.Unmapped`. `fillAndSubmit` fills every resolved field, clicks
+`StatusParked` with `Plan.Unmapped`. `fillAndSubmit` fills every resolved field (a select's
+`SetValue` is followed by a dispatched `input`/`change` event, since `SetValue` alone writes
+the DOM property without firing what a React-controlled select listens for), clicks
 Greenhouse's submit button, and waits for a text-based confirmation or refusal marker —
-matching neither is reported as unconfirmed (an error), never silently treated as success.
+matching neither reports `StatusUnconfirmed`, never silently treated as success.
 
 `stealthAllocatorOptions` (`browser.go`) is the whole anti-detection surface: headless plus
 `disable-blink-features=AutomationControlled`, the one flag the spike measured flipping

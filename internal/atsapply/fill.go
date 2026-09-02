@@ -18,6 +18,17 @@ const fillTimeout = 5 * time.Second
 // appear after the submit click.
 const submitVerifyTimeout = 15 * time.Second
 
+// dispatchChangeEventsJS fires the events a real user interaction would after
+// chromedp.SetValue writes a <select>'s value directly — SetValue does not fire them
+// itself, and a React-controlled select's onChange (and so its component state) never
+// otherwise observes the write. %q (via fmt.Sprintf) is the element's own CSS selector.
+const dispatchChangeEventsJS = `(() => {
+	const el = document.querySelector(%q);
+	if (!el) return;
+	el.dispatchEvent(new Event('input', {bubbles: true}));
+	el.dispatchEvent(new Event('change', {bubbles: true}));
+})()`
+
 // CONFIRMATION_MARKERS are positive acknowledgements only, per the reference
 // implementation's own rule: matching none of these means "unconfirmed", never "failed".
 // Extend, never invert — a false "confirmed" risks recording an application that never went
@@ -74,20 +85,31 @@ func fillOne(parent context.Context, f ResolvedField) error {
 		// Text and the react-select-backed autocomplete fields (country,
 		// candidate-location) are indistinguishable in this package's DOM scan — both
 		// render as a plain <input type="text">. The trailing Enter is a no-op on a
-		// plain text field and, for an autocomplete field, commits the first suggestion
-		// — the same "type, then confirm" interaction a person uses. Unverified beyond
-		// the reference implementation's own account of the pattern; see fill.go's doc.
+		// plain text field and, for an autocomplete field, commits the highlighted
+		// suggestion — the same "type, then confirm" interaction a person uses.
+		// Unverified beyond the reference implementation's own account of the pattern;
+		// see fill.go's doc — a typed value with no matching suggestion can still
+		// submit empty, which is exactly why StatusUnconfirmed exists as a distinct,
+		// non-retried outcome rather than trusting this always worked.
 		return chromedp.Run(ctx,
 			chromedp.Clear(sel, chromedp.ByID),
 			chromedp.SendKeys(sel, f.Value, chromedp.ByID),
-			chromedp.SendKeys(sel, kb.Escape, chromedp.ByID), // close any open suggestion list before Enter, in case the typed text already matched nothing
+			chromedp.SendKeys(sel, kb.Enter, chromedp.ByID),
 		)
 	case "select":
-		return chromedp.Run(ctx, chromedp.SetValue(sel, f.Value, chromedp.ByID))
+		// SetValue sets the DOM .value property directly, which a React-controlled
+		// select does not observe as a change — its own onChange handler never fires,
+		// so the framework's state (and the value actually posted on submit) can stay
+		// unset even though the raw DOM value looks right. Dispatching the events a
+		// real interaction would fire is what makes React notice.
+		return chromedp.Run(ctx,
+			chromedp.SetValue(sel, f.Value, chromedp.ByID),
+			chromedp.Evaluate(fmt.Sprintf(dispatchChangeEventsJS, sel), nil),
+		)
 	case "checkbox_group":
-		// f.Value is one option's value; Multi fields may need more than one — see
-		// resolve.go's note that this package resolves at most one value per field
-		// today (a scope gap alongside file uploads, not handled here).
+		// f.Value is one option's value — resolveOne (resolve.go) never resolves more
+		// than one for a Multi field, since AnswerSource never supplies more than one
+		// candidate value per question today. See resolveOne's doc comment.
 		optSel := fmt.Sprintf(`input[name=%q][value=%q]`, f.ID, f.Value)
 		return chromedp.Run(ctx, chromedp.Click(optSel, chromedp.ByQuery))
 	default:

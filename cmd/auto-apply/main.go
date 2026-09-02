@@ -38,6 +38,12 @@ func run() int {
 
 	acfg := config.LoadAutoApply()
 
+	// blobStore is nil when S3_* is unconfigured, and that is fine here: the only résumé
+	// read this worker makes is candidateprofile's Structured(), which reads the parsed
+	// structure from Postgres and never touches object storage (resume.Store.Structured
+	// reads only its repo). Object storage only matters once this package attaches a
+	// résumé file to a submission, which it does not do yet — see resolve.go's file-kind
+	// handling and internal/atsapply/AGENTS.md's known gaps.
 	blobStore, err := blobstore.New(blobstore.Config{
 		Endpoint:  cfg.S3Endpoint,
 		Bucket:    cfg.S3Bucket,
@@ -46,10 +52,6 @@ func run() int {
 	})
 	if err != nil {
 		log.Printf("blobstore: %v", err)
-		return 1
-	}
-	if blobStore == nil {
-		log.Print("auto-apply: résumé storage (S3_*) is not configured")
 		return 1
 	}
 

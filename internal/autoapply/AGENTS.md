@@ -15,12 +15,16 @@ application, and record the outcome. Pgx/Fiber-free — `Store`, `AnswerSource` 
 - **`Park` is not a retry.** A parked attempt needs new data, not another try — it is
   excluded from reclaim (`blocked_at`) rather than counted against `MaxAttempts`. Only a
   genuine transient failure (`Fail`) spends the retry budget.
-- **A real submission that fails to record locally is dead-lettered immediately, not
-  retried normally.** `recordApplied` forces `Fail(..., maxAttempts=1)` rather than the
-  run's configured attempts budget when `Store.Submit` errors after the sidecar already
-  reported `StatusApplied` — the ordinary retry path would eventually re-arm the row for
-  reclaim and risk calling the browser driver again for a job already applied to, which the
-  "never submit twice" invariant forbids outright. See `recordApplied`'s doc comment.
+- **Two outcomes are dead-lettered immediately rather than retried normally, both through
+  the shared `deadLetterImmediately` (`Fail(..., maxAttempts=1)`):** a real submission that
+  fails to record locally (`recordApplied`, when `Store.Submit` errors after the sidecar
+  already reported `StatusApplied`), and an unconfirmed submission (`StatusUnconfirmed` —
+  the sidecar pressed submit but could not tell whether the employer accepted it). Both
+  share the same reasoning: the ordinary retry path would eventually re-arm the row for
+  reclaim and risk calling the browser driver again for a job that may already have been
+  applied to, which the "never submit twice" invariant forbids outright. The second case was
+  found by code review, not the original design — an earlier version mapped an unconfirmed
+  result to a plain `error`, which took the ordinary (retryable) path.
 - **`SidecarClient.Submit` takes the whole `Claimed`, not its individual fields** — mirroring
   `internal/applyform.Fetcher.Fetch`'s own reasoning: what a submission needs is not the same
   for every provider (Greenhouse/Ashby need `ExternalID`, not just `JobURL`), so the seam

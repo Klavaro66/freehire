@@ -54,6 +54,15 @@ const (
 	// StatusParked means every required question was NOT resolved, so the sidecar
 	// touched nothing on the employer's form.
 	StatusParked SubmitStatus = "parked"
+	// StatusUnconfirmed means the sidecar pressed submit but could not tell whether the
+	// employer accepted it — neither a confirmation nor an explicit refusal appeared.
+	// This is NOT a plain transient failure: the click may well have gone through, so
+	// retrying it through the ordinary attempts budget risks a second real submission —
+	// exactly the "never twice" requirement the forced dead-letter in recordApplied
+	// exists to protect on the DB-write side. See runner.go's process/fail handling: an
+	// unconfirmed result is dead-lettered immediately, the same way a lost post-submit
+	// record is, rather than spending a retry.
+	StatusUnconfirmed SubmitStatus = "unconfirmed"
 )
 
 // SidecarResult is what the sidecar returned for one attempt.
@@ -215,6 +224,8 @@ func (rn *run) process(ctx context.Context, c Claimed) outbox.Outcome {
 			log.Printf("auto-apply: record parked attempt %d (job %d): %v", c.QueueID, c.JobID, err)
 		}
 		return outbox.Discarded
+	case StatusUnconfirmed:
+		return rn.deadLetterImmediately(ctx, c, "submission unconfirmed: neither a confirmation nor a refusal was seen")
 	default:
 		return rn.fail(ctx, c, fmt.Errorf("sidecar returned unknown status %q", result.Status))
 	}
@@ -233,9 +244,18 @@ func (rn *run) recordApplied(ctx context.Context, c Claimed) outbox.Outcome {
 	if err == nil {
 		return outbox.Succeeded
 	}
-
 	log.Printf("auto-apply: CRITICAL lost the local record of a real submission for queue entry %d (user %d, job %d): %v", c.QueueID, c.UserID, c.JobID, err)
-	if _, failErr := rn.store.Fail(ctx, c.QueueID, fmt.Sprintf("submitted but failed to record: %v", err), 1); failErr != nil {
+	return rn.deadLetterImmediately(ctx, c, fmt.Sprintf("submitted but failed to record: %v", err))
+}
+
+// deadLetterImmediately forces a dead-letter (maxAttempts=1) rather than spending the run's
+// configured retry budget — the shared ending for every outcome where retrying normally
+// risks a second real submission to the employer: a lost post-submit record
+// (recordApplied) and an unconfirmed submission (process's StatusUnconfirmed case) both
+// land here. The row never becomes reclaimable again; it surfaces as work a human must look
+// at, not as a queue that quietly retries its way into a duplicate application.
+func (rn *run) deadLetterImmediately(ctx context.Context, c Claimed, reason string) outbox.Outcome {
+	if _, failErr := rn.store.Fail(ctx, c.QueueID, reason, 1); failErr != nil {
 		log.Printf("auto-apply: also failed to dead-letter queue entry %d: %v", c.QueueID, failErr)
 	}
 	return outbox.DeadLettered

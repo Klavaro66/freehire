@@ -197,6 +197,30 @@ func TestRunDeadLettersImmediatelyWhenRecordingASuccessfulSubmitFails(t *testing
 	}
 }
 
+// The symmetric case on the browser side: the sidecar pressed submit but could not tell
+// whether the employer accepted it. Retrying this normally risks a second real submission
+// the same way a lost post-submit record does, so it must take the same forced-dead-letter
+// path rather than the ordinary attempts budget.
+func TestRunDeadLettersImmediatelyOnAnUnconfirmedSubmission(t *testing.T) {
+	store := &fakeStore{waves: [][]Claimed{{{QueueID: 6, UserID: 10, JobID: 100}}}}
+	answers := &fakeAnswers{answers: map[string]string{}}
+	sidecar := &fakeSidecar{result: SidecarResult{Status: StatusUnconfirmed}}
+
+	stats, err := Run(context.Background(), store, answers, sidecar, opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.DeadLettered != 1 {
+		t.Errorf("DeadLettered = %d, want 1 — an unconfirmed submission must never be silently retried", stats.DeadLettered)
+	}
+	if len(store.submitted) != 0 {
+		t.Error("Store.Submit must not be called for an unconfirmed result — it is not a known success")
+	}
+	if got := store.failAttempts[6]; got != 1 {
+		t.Errorf("Fail called %d times, want exactly 1 (forced dead-letter, not the normal retry budget)", got)
+	}
+}
+
 func TestRunDegradedOnDeadLetterOrTotalFailure(t *testing.T) {
 	cases := []struct {
 		name string

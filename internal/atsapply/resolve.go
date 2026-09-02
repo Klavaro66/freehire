@@ -80,6 +80,13 @@ func Resolve(fields []MergedField, answers map[string]string) Plan {
 	return plan
 }
 
+// resolveOne resolves a single field's answer. For a Multi field (a checkbox group taking
+// several answers) this matches at most ONE option's value, even when more than one would
+// be correct — AnswerSource only ever supplies single-value identity/work-authorization
+// facts today (see runner.go's AnswerSource doc), so there is never more than one candidate
+// value to match against a Multi field's options in the first place. Widening AnswerSource
+// to a source that can state several values for one question is what would make this a real
+// gap; until then it is a direct consequence of the answer shape, not a shortcut taken here.
 func resolveOne(f MergedField, answers map[string]string) (ResolvedField, string, bool) {
 	if f.Kind == "file" {
 		// File attachment (résumé/cover letter) needs its own artifact-resolution
