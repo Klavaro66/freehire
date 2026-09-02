@@ -13,8 +13,8 @@ import "strings"
 // use that word at all.
 //
 // A question matching any of these is never drafted, regardless of how confident a draft
-// would be — see Drafter's doc comment for why the check runs before the model is ever
-// called.
+// would be — draftable (draft.go) checks isSensitiveLabel before Drafter.Draft is ever
+// invoked, so a sensitive question never reaches the model at all.
 var sensitiveTerms = []string{
 	"salary", "compensation", "sponsor", "visa", "authoriz", "right to work",
 	"gender", "race", "ethnic", "veteran", "disab", "demographic", "sexual orientation",
