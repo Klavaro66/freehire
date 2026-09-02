@@ -37,11 +37,12 @@ func (s *dbStore) Claim(ctx context.Context, batch, leaseSeconds int) ([]autoapp
 	out := make([]autoapply.Claimed, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, autoapply.Claimed{
-			QueueID:  r.ID,
-			UserID:   r.UserID,
-			JobID:    r.JobID,
-			Provider: r.Source,
-			JobURL:   r.URL,
+			QueueID:    r.ID,
+			UserID:     r.UserID,
+			JobID:      r.JobID,
+			Provider:   r.Source,
+			ExternalID: r.ExternalID,
+			JobURL:     r.URL,
 		})
 	}
 	return out, nil

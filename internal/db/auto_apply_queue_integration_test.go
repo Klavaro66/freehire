@@ -52,6 +52,9 @@ func TestAutoApplyQueueClaim(t *testing.T) {
 		if claimed[0].Source != "test" || claimed[0].URL != "http://example.test" {
 			t.Errorf("claimed source/url = (%q, %q), want the job's own", claimed[0].Source, claimed[0].URL)
 		}
+		if claimed[0].ExternalID != "gh-claim" {
+			t.Errorf("claimed external_id = %q, want the job's own (internal/atsapply needs it to reuse internal/applyform's schema fetchers)", claimed[0].ExternalID)
+		}
 	})
 
 	t.Run("a claimed entry is leased away from a second claim", func(t *testing.T) {

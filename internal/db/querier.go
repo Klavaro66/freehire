@@ -212,9 +212,11 @@ type Querier interface {
 	// parked attempt is never reclaimed by this query — auto_apply_queue_claimable_idx exists
 	// for exactly this predicate.
 	//
-	// Returns job.source and job.url because the caller builds the sidecar request from the
-	// row alone — source doubles as the ATS provider name, the same vocabulary
-	// internal/applyform's Provider field already uses.
+	// Returns job.source, job.external_id and job.url because the caller builds the sidecar
+	// request from the row alone — source doubles as the ATS provider name, the same vocabulary
+	// internal/applyform's Provider field already uses, and external_id (board:posting-id) is
+	// what internal/applyform's own schema fetchers need to reuse their existing per-provider
+	// API calls rather than re-deriving them.
 	ClaimAutoApplyBatch(ctx context.Context, arg ClaimAutoApplyBatchParams) ([]ClaimAutoApplyBatchRow, error)
 	// Lease a batch of pending nudges, oldest first. FOR UPDATE OF n + SKIP LOCKED
 	// lets overlapping worker passes take disjoint rows so a nudge fires at most

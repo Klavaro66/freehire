@@ -7,9 +7,11 @@
 -- parked attempt is never reclaimed by this query — auto_apply_queue_claimable_idx exists
 -- for exactly this predicate.
 --
--- Returns job.source and job.url because the caller builds the sidecar request from the
--- row alone — source doubles as the ATS provider name, the same vocabulary
--- internal/applyform's Provider field already uses.
+-- Returns job.source, job.external_id and job.url because the caller builds the sidecar
+-- request from the row alone — source doubles as the ATS provider name, the same vocabulary
+-- internal/applyform's Provider field already uses, and external_id (board:posting-id) is
+-- what internal/applyform's own schema fetchers need to reuse their existing per-provider
+-- API calls rather than re-deriving them.
 WITH claimable AS (
     SELECT q.id, q.user_id, q.job_id
     FROM auto_apply_queue q
@@ -26,7 +28,7 @@ SET claimed_at = now()
 FROM claimable c
 JOIN jobs j ON j.id = c.job_id
 WHERE q.id = c.id
-RETURNING q.id, q.user_id, q.job_id, j.source, j.url;
+RETURNING q.id, q.user_id, q.job_id, j.source, j.external_id, j.url;
 
 -- name: DeleteAutoApplyEntry :exec
 -- Retire an attempt that submitted successfully. jobtracking's MarkJobApplied (called in

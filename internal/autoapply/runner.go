@@ -27,6 +27,10 @@ type Claimed struct {
 	// Provider is the ATS this posting came from (jobs.source), the sidecar's routing key
 	// — the same vocabulary internal/applyform's Provider field already uses.
 	Provider string
+	// ExternalID is the board-namespaced posting id (sources.NamespaceExternalID:
+	// "board:id") — what internal/applyform's own schema fetchers need to reuse their
+	// existing per-provider API calls.
+	ExternalID string
 	// JobURL is the posting's own address, the page the sidecar opens to scan and fill the
 	// application form.
 	JobURL string
