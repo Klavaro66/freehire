@@ -31,6 +31,31 @@ decision for the measurements and its caveats.
   resolved form for one of them still parks rather than being submitted through a fill path
   never built or verified. Widening the live DOM-scan to another provider is a real gap to
   close, not a design decision to defend.
+- **A Greenhouse posting whose form cannot be scanned parks with a named reason instead of
+  erroring.** `ScanGreenhouseForm`'s known selector (`greenhouseFormReadySelector`,
+  `#application-form`) only ever matched the vanilla `job-boards.greenhouse.io` template.
+  Live verification found a real, likely-common case it does not: a white-label custom
+  domain (a real GoDaddy posting on `careers.godaddy`) renders a completely different DOM id
+  scheme and is gated by reCAPTCHA Enterprise on the form itself. `renderedHTML` (`browser.go`)
+  waits the full, unchanged `pageLoadTimeout` for the known selector and only then — not
+  before — spends an ADDITIONAL `classifyTimeout` capturing the page's current HTML and
+  classifying it (`classifyUnscannableForm`, pure and fixture-tested, no live browser
+  needed): a reCAPTCHA footprint (`recaptcha` in an iframe `src` or script tag) maps to
+  `reasonCaptchaProtected`, otherwise `reasonUnrecognizedLayout`. Either maps to
+  `autoapply.StatusParked` (`unscannableFormResult`, `client.go`) — never a plain error —
+  so `internal/autoapply`'s runner never spends its transient-failure retry/dead-letter
+  budget on a form that will never change shape or stop being challenge-protected. **A live
+  finding while verifying this fix, worth remembering**: an earlier cut shortened the
+  selector wait itself to make room for classification inside the same overall budget, and
+  that intermittently misclassified an ordinary, fully-scannable vanilla-template posting as
+  `unrecognized_form_layout` under real load — classification time must stay strictly
+  additive, never subtracted from the selector wait, or every fillable posting quietly loses
+  reliability margin. If either park reason ever spikes among providers that were previously
+  filling fine, treat it as a possible regression in the vanilla template's own DOM shape (or
+  this detection itself), not as expected background noise. See
+  `openspec/changes/auto-apply-whitelabel-greenhouse`. Scope stays detection-only: this does
+  not add fill/submit coverage for a white-label domain's own bespoke form — an attempt still
+  parks even when its layout IS eventually recognized as "just not ours to fill."
 - **File uploads are not resolved.** `resolve.go`'s `answerKeyFor` never matches a `file`
   kind field — a required résumé/cover-letter upload always parks. There is no artifact
   (which stored CV, which version) wired through yet. Because of this, `cmd/auto-apply`
@@ -92,11 +117,13 @@ decision for the measurements and its caveats.
 
 ## How it works
 `Client.Submit`: captcha short-circuit → fetch the platform's schema via
-`applyform.Fetchers` → (Greenhouse only) launch a browser, render the page, `ScanGreenhouseForm`
-→ `Reconcile` → `Client.resolve` (deterministic `Resolve`, then — if an experience-bank
-reader is configured — `ResolveWithDrafting` over what is still unmapped, via a freshly
-`llmkey.Bind`-ed `LLMDrafter`) → if `Plan.FullyResolved()`, `fillAndSubmit`; else return
-`StatusParked` with `Plan.Unmapped`. `fillAndSubmit` fills every resolved field (a select's
+`applyform.Fetchers` → (Greenhouse only) launch a browser, render the page via `renderedHTML`
+(known selector, or — on that wait's own timeout — classify why via `classifyUnscannableForm`
+and return early as `StatusParked`), `ScanGreenhouseForm` → `Reconcile` → `Client.resolve`
+(deterministic `Resolve`, then — if an experience-bank reader is configured —
+`ResolveWithDrafting` over what is still unmapped, via a freshly `llmkey.Bind`-ed
+`LLMDrafter`) → if `Plan.FullyResolved()`, `fillAndSubmit`; else return `StatusParked` with
+`Plan.Unmapped`. `fillAndSubmit` fills every resolved field (a select's
 `SetValue` is followed by a dispatched `input`/`change` event, since `SetValue` alone writes
 the DOM property without firing what a React-controlled select listens for), clicks
 Greenhouse's submit button, and waits for a text-based confirmation or refusal marker —

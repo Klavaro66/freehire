@@ -132,6 +132,36 @@ func TestRunParksAnUnresolvedAttemptWithoutRetrying(t *testing.T) {
 	}
 }
 
+// A parked result whose form could not be scanned at all (openspec/changes/
+// auto-apply-whitelabel-greenhouse) carries a whole-form Reason with no Unmapped list — the
+// same shape the pre-existing Lever captcha short-circuit already produces. Run does not
+// branch on Reason at all, so this is a regression guard for that "no special-casing" fact
+// as much as a behavior test: any future change that starts inspecting Reason here must not
+// start treating a Reason it does not otherwise care about differently for these values,
+// naming the literal strings internal/atsapply produces
+// (unrecognized_form_layout/form_captcha_protected) so a rename there fails visibly here.
+func TestRunParksAnUnscannableFormWithoutRetrying(t *testing.T) {
+	for _, reason := range []string{"unrecognized_form_layout", "form_captcha_protected"} {
+		store := &fakeStore{waves: [][]Claimed{{{QueueID: 20, UserID: 10, JobID: 100}}}}
+		answers := &fakeAnswers{answers: map[string]string{}}
+		sidecar := &fakeSidecar{result: SidecarResult{Status: StatusParked, Reason: reason}}
+
+		stats, err := Run(context.Background(), store, answers, sidecar, opts())
+		if err != nil {
+			t.Fatalf("reason %q: %v", reason, err)
+		}
+		if stats.Blocked != 1 || stats.Degraded() {
+			t.Errorf("reason %q: stats = %+v, want Blocked=1 and not Degraded", reason, stats)
+		}
+		if len(store.parked) != 1 || store.parked[0] != 20 {
+			t.Errorf("reason %q: Store.Park calls = %v, want [20]", reason, store.parked)
+		}
+		if len(store.failed) != 0 {
+			t.Errorf("reason %q: Store.Fail calls = %v, want none — an unscannable form must never spend the retry/dead-letter budget", reason, store.failed)
+		}
+	}
+}
+
 func TestRunRetriesATransientSidecarFailure(t *testing.T) {
 	store := &fakeStore{waves: [][]Claimed{{{QueueID: 3, UserID: 10, JobID: 100}}}}
 	answers := &fakeAnswers{answers: map[string]string{}}

@@ -2,6 +2,7 @@ package atsapply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -103,6 +104,9 @@ func (c *Client) Submit(ctx context.Context, claimed autoapply.Claimed, answers 
 
 		pageHTML, err := renderedHTML(browserCtx, claimed.JobURL, greenhouseFormReadySelector)
 		if err != nil {
+			if result, parked := unscannableFormResult(err); parked {
+				return result, nil
+			}
 			return autoapply.SidecarResult{}, fmt.Errorf("render application page: %w", err)
 		}
 		dom, err := ScanGreenhouseForm(pageHTML)
@@ -194,6 +198,22 @@ func (c *Client) fetchSchema(ctx context.Context, claimed autoapply.Claimed) (ap
 		ExternalID: claimed.ExternalID,
 		URL:        claimed.JobURL,
 	})
+}
+
+// unscannableFormResult reports whether err is renderedHTML's classified outcome for a form
+// it could not scan — a white-label custom domain's own DOM shape, or a reCAPTCHA-gated
+// form — and if so, the parked result Submit should return for it instead of a plain error.
+// Neither case is a transient failure worth retrying: this parks like any other attempt
+// correctly declining to guess, rather than spending the ordinary Fail/dead-letter budget on
+// a form that will never change shape or stop being challenge-protected. Kept as a pure
+// function, separate from Submit's real browser call, so the mapping is unit-testable
+// without a live browser. See openspec/changes/auto-apply-whitelabel-greenhouse.
+func unscannableFormResult(err error) (autoapply.SidecarResult, bool) {
+	var unscannable *unscannableFormError
+	if !errors.As(err, &unscannable) {
+		return autoapply.SidecarResult{}, false
+	}
+	return autoapply.SidecarResult{Status: autoapply.StatusParked, Reason: string(unscannable.reason)}, true
 }
 
 // mergedFromAPIOnly builds a merged-field list straight from the platform's declared

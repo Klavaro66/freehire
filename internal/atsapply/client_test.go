@@ -2,6 +2,7 @@ package atsapply
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/strelov1/freehire/internal/applyform"
@@ -21,6 +22,25 @@ func TestSubmit_LeverAlwaysParksOnCaptchaWithoutTouchingFetchersOrBrowser(t *tes
 	}
 	if result.Status != autoapply.StatusParked || result.Reason != "requires_captcha" {
 		t.Errorf("result = %+v, want parked/requires_captcha", result)
+	}
+}
+
+func TestUnscannableFormResult_MapsBothReasonsToParked(t *testing.T) {
+	for _, reason := range []unscannableFormReason{reasonCaptchaProtected, reasonUnrecognizedLayout} {
+		result, parked := unscannableFormResult(&unscannableFormError{reason: reason})
+		if !parked {
+			t.Fatalf("unscannableFormResult(%q): parked = false, want true", reason)
+		}
+		if result.Status != autoapply.StatusParked || result.Reason != string(reason) {
+			t.Errorf("unscannableFormResult(%q) = %+v, want parked/%s", reason, result, reason)
+		}
+	}
+}
+
+func TestUnscannableFormResult_LeavesAGenuineErrorUnparked(t *testing.T) {
+	result, parked := unscannableFormResult(errors.New("net/http: TLS handshake timeout"))
+	if parked {
+		t.Errorf("unscannableFormResult(plain error) = %+v, parked = true, want an ordinary retryable error", result)
 	}
 }
 

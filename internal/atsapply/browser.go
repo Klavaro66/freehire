@@ -3,6 +3,7 @@ package atsapply
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -22,9 +23,22 @@ func stealthAllocatorOptions() []chromedp.ExecAllocatorOption {
 }
 
 // pageLoadTimeout bounds how long a single navigation+render may take before this package
-// gives up on the attempt. Generous: an application form pulls in its own JS bundle and,
-// on Greenhouse, a client-side render pass.
+// gives up waiting for the known selector and falls back to classifying why it never
+// appeared (see classifyTimeout). Generous: an application form pulls in its own JS bundle
+// and, on Greenhouse, a client-side render pass.
 const pageLoadTimeout = 20 * time.Second
+
+// classifyTimeout bounds the one follow-up HTML capture renderedHTML makes to classify why
+// the known Greenhouse selector never appeared. Deliberately ADDITIONAL to pageLoadTimeout,
+// not carved out of it: an earlier version shortened the selector wait itself to make room
+// for classification, and live verification against a real, ordinary vanilla-template
+// posting (openspec/changes/auto-apply-whitelabel-greenhouse task 4.2) caught that
+// regression directly — the shortened wait intermittently misclassified a normal,
+// fillable posting as unrecognized_form_layout under real load, exactly the false-positive
+// risk design.md's Risks anticipated. Keeping the full pageLoadTimeout for the selector
+// wait (unchanged from before this change) and only spending extra time on classification
+// after it genuinely elapses removes that regression entirely.
+const classifyTimeout = 10 * time.Second
 
 // newBrowser starts one browser process for one attempt. Callers must call the returned
 // cancel to tear it down — nothing here pools or reuses a browser across attempts, so one
@@ -49,22 +63,98 @@ func (c *Client) newBrowser(ctx context.Context) (context.Context, context.Cance
 // renderedHTML navigates to url, waits for readySelector to appear (the application form
 // itself — proof the client-side render pass that reveals fields like Greenhouse's
 // `country` has actually run), and returns the page's rendered HTML.
+//
+// If readySelector never appears within pageLoadTimeout, this does not treat every
+// non-appearance as an undifferentiated, retryable error: it spends up to classifyTimeout
+// MORE capturing whatever HTML the page currently has and classifying it
+// (classifyUnscannableForm) — a white-label custom Greenhouse domain renders a different DOM
+// shape entirely, and some such pages are also gated by a reCAPTCHA challenge on the form
+// itself. Either classification comes back as an *unscannableFormError so Client.Submit can
+// map it to a parked result instead of a plain failure. See
+// openspec/changes/auto-apply-whitelabel-greenhouse/design.md.
 func renderedHTML(ctx context.Context, url, readySelector string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, pageLoadTimeout)
-	defer cancel()
-
+	probeCtx, probeCancel := context.WithTimeout(ctx, pageLoadTimeout)
 	var pageHTML string
-	err := chromedp.Run(ctx,
+	err := chromedp.Run(probeCtx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(readySelector, chromedp.ByID),
 		chromedp.OuterHTML("html", &pageHTML),
 	)
-	if err != nil {
+	probeCancel()
+	if err == nil {
+		return pageHTML, nil
+	}
+	if ctx.Err() != nil {
+		// The caller's own context (or an outer cancellation) is already done — nothing
+		// left to classify with, propagate as-is.
 		return "", err
 	}
-	return pageHTML, nil
+
+	classifyCtx, classifyCancel := context.WithTimeout(ctx, classifyTimeout)
+	defer classifyCancel()
+	var currentHTML string
+	captureErr := chromedp.Run(classifyCtx, chromedp.OuterHTML("html", &currentHTML))
+	if captureErr != nil {
+		// Couldn't even capture the page's current state — the original probe error is
+		// more informative than a failure from a follow-up call on a page that may have
+		// navigated away or crashed.
+		return "", err
+	}
+	return "", &unscannableFormError{reason: classifyUnscannableForm(currentHTML)}
 }
 
 // greenhouseFormReadySelector is Greenhouse's own form element id, confirmed against a
-// live posting in the 2026-09-02 spike.
+// live posting in the 2026-09-02 spike. Only the vanilla job-boards.greenhouse.io template
+// is known to use it — a white-label custom domain may not (see classifyUnscannableForm).
 const greenhouseFormReadySelector = "application-form"
+
+// unscannableFormReason classifies why a Greenhouse posting's application form could not be
+// scanned, when its known selector never appeared.
+type unscannableFormReason string
+
+const (
+	// reasonCaptchaProtected means the page's HTML carries a reCAPTCHA footprint — the
+	// form is gated by a challenge this package cannot pass, regardless of whether its
+	// layout would otherwise be recognized.
+	reasonCaptchaProtected unscannableFormReason = "form_captcha_protected"
+	// reasonUnrecognizedLayout is the fallback: no known selector, no reCAPTCHA
+	// footprint either — the page's form does not match any layout this package knows
+	// how to read (e.g. a white-label custom domain's own bespoke DOM shape).
+	reasonUnrecognizedLayout unscannableFormReason = "unrecognized_form_layout"
+)
+
+// unscannableFormError is renderedHTML's classified outcome for a form whose known selector
+// never appeared, distinct from a plain error so callers can map it to a parked result
+// instead of the ordinary retryable-failure path.
+type unscannableFormError struct {
+	reason unscannableFormReason
+}
+
+func (e *unscannableFormError) Error() string {
+	return fmt.Sprintf("application form not scannable: %s", e.reason)
+}
+
+// classifyUnscannableForm inspects a page's already-rendered HTML (captured after its known
+// selector failed to appear within pageLoadTimeout) to tell a reCAPTCHA-gated form apart
+// from one whose layout this package simply does not recognize. Pure and fixture-testable,
+// the same way ScanGreenhouseForm already is — no further browser interaction needed to
+// classify.
+//
+// Narrow and named, matching resolve.go's "never guess" rule: this looks only for
+// reCAPTCHA's own footprint, not a generic "something looks locked" heuristic. A form gated
+// by a different challenge vendor still falls back to reasonUnrecognizedLayout — still a
+// safe park, just a less specific reason (see design.md's Risks).
+func classifyUnscannableForm(pageHTML string) unscannableFormReason {
+	if hasRecaptchaMarker(pageHTML) {
+		return reasonCaptchaProtected
+	}
+	return reasonUnrecognizedLayout
+}
+
+// hasRecaptchaMarker reports whether pageHTML carries reCAPTCHA's own footprint: an iframe
+// it injects (present for the visible-checkbox and invisible/enterprise variants alike) and
+// the script tag loading its API both reference "recaptcha" in a URL, which is enough to
+// tell it apart from an ordinary application form without parsing DOM structure for it.
+func hasRecaptchaMarker(pageHTML string) bool {
+	return strings.Contains(strings.ToLower(pageHTML), "recaptcha")
+}
