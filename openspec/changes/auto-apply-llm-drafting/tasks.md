@@ -1,8 +1,8 @@
 ## 1. Per-user LLM attribution for cmd/auto-apply
 
-- [ ] 1.1 Extract `userLLM` (the `llmkey.Resolver.For` + `llm.Client.As` composition in `internal/handler/user_llm.go`) into `internal/llmkey`, renamed to fit that package (e.g. `Bind`); update `internal/handler`'s call sites to the moved function; no behavior change
-- [ ] 1.2 Update `internal/llmkey/scope_test.go`'s allowlist to admit `cmd/auto-apply` by name alongside the existing `cmd/server` exemption, with a one-line comment carrying the same reasoning
-- [ ] 1.3 Wire `cmd/auto-apply/main.go` to construct an `llmkey.Resolver` and bind an `internal/llm.Client` per attempt via the moved `Bind`, tagged `feature:auto-apply-drafting` (new tag constant)
+- [x] 1.1 Extract `userLLM` (the `llmkey.Resolver.For` + `llm.Client.As` composition in `internal/handler/user_llm.go`) into `internal/llmkey`, renamed to fit that package (e.g. `Bind`); update `internal/handler`'s call sites to the moved function; no behavior change
+- [x] 1.2 Update `internal/llmkey/scope_test.go`'s allowlist to admit `cmd/auto-apply` by name alongside the existing `cmd/server` exemption, with a one-line comment carrying the same reasoning
+- [ ] 1.3 Wire `cmd/auto-apply/main.go` to construct an `llmkey.Resolver` and bind an `internal/llm.Client` per attempt via the moved `Bind`, tagged `feature:auto-apply-drafting` (new tag constant) — deferred to land together with 4.3 (`Client.Submit` is where `claimed.UserID` becomes available to bind against; wiring the constructor before a consumer exists would leave unused fields)
 
 ## 2. Sensitive-field gate
 
