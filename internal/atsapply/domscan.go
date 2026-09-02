@@ -120,12 +120,9 @@ func scanInput(n *html.Node, order *[]string, groups map[string]*DOMField) {
 	if typ == "file" {
 		kind = "file"
 	}
-	key := id
-	if key == "" {
-		key = name
-	}
+	key := fallbackKey(id, name, order)
 	if _, ok := groups[key]; ok {
-		return // already recorded (shouldn't happen for a plain input, but stay idempotent)
+		return // a real duplicate of an already-keyed (id or name) field — stay idempotent
 	}
 	groups[key] = &DOMField{ID: id, Name: name, Kind: kind, Required: hasAttr(n, "required")}
 	*order = append(*order, key)
@@ -134,15 +131,25 @@ func scanInput(n *html.Node, order *[]string, groups map[string]*DOMField) {
 func scanSimple(n *html.Node, kind string, order *[]string, groups map[string]*DOMField) {
 	id := attr(n, "id")
 	name := attr(n, "name")
-	key := id
-	if key == "" {
-		key = name
-	}
-	if key == "" {
-		return
-	}
+	key := fallbackKey(id, name, order)
 	groups[key] = &DOMField{ID: id, Name: name, Kind: kind, Required: hasAttr(n, "required")}
 	*order = append(*order, key)
+}
+
+// fallbackKey is id, or name when id is empty, or — when BOTH are empty — a synthetic key
+// unique to this scan (order's current length, which only ever grows). Found by code
+// review: two id-less/name-less controls on one page both fell back to the bare empty
+// string, so the second silently collided with and dropped the first — a required field
+// that vanished from the scan entirely rather than merely being unfillable, which let
+// Plan.FullyResolved() report true while a real required question had never been seen.
+func fallbackKey(id, name string, order *[]string) string {
+	if id != "" {
+		return id
+	}
+	if name != "" {
+		return name
+	}
+	return fmt.Sprintf("_unnamed_%d", len(*order))
 }
 
 // findByID returns the first descendant element with the given id, or nil.

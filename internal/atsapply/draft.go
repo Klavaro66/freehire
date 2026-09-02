@@ -16,12 +16,16 @@ type Drafter interface {
 }
 
 // draftable reports whether a field is even a candidate for drafting: required (an
-// optional field with no answer is already a fine outcome, nothing to fix), a kind a
+// optional field with no answer is already a fine outcome, nothing to fix), labeled (a
+// field with no label — the DOM-only shape reconcile.go's own tests measure, e.g. an
+// undeclared EEOC control — can never be VERIFIED non-sensitive, since isSensitiveLabel
+// has no text to check; failing closed here is what found and fixed by code review after
+// the empty-string case slipped through isSensitiveLabel's Contains checks), a kind a
 // free-text or single-choice answer actually fits (never a file — see resolveOne's file
 // case — and never a checkbox_group, which resolveOne's own Multi note already scopes
 // out), and not sensitive.
 func draftable(f MergedField) bool {
-	if !f.Required {
+	if !f.Required || f.Label == "" {
 		return false
 	}
 	switch f.Kind {

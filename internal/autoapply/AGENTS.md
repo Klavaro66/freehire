@@ -29,12 +29,22 @@ application, and record the outcome. Pgx/Fiber-free — `Store`, `AnswerSource` 
   `internal/applyform.Fetcher.Fetch`'s own reasoning: what a submission needs is not the same
   for every provider (Greenhouse/Ashby need `ExternalID`, not just `JobURL`), so the seam
   should not grow a parameter every time a provider needs one more piece of the claim.
-- **`AnswerSource` supplies identity/work-authorization facts only (Tier A/B).** There is no
-  Tier C (LLM-drafted answer) yet — a question outside that set always parks. The real
+- **`AnswerSource` supplies identity/work-authorization facts only (Tier A/B).** A question
+  outside that set parks unless `internal/atsapply`'s own drafting fallback answers it (see
+  its AGENTS.md) — `AnswerSource` itself is unaware of drafting either way. The real
   implementation (`cmd/auto-apply`'s `assemblerAnswerSource`) wraps
   `internal/candidateprofile.Assembler`, the same one the browser extension's autofill path
   reads, so a value a person sees in a form and a value this worker resolves against can
   never diverge.
+- **`process` always assembles answers before calling `Submit`, even for a row that
+  `SidecarClient` will immediately park (Lever's captcha, e.g.) without ever touching them.**
+  A known, accepted inefficiency, not an oversight: `answers` is `Submit`'s argument (not a
+  lazy source `SidecarClient` could pull from only if it turns out to need them), and
+  `process` has no ATS-specific knowledge — deliberately, per `SidecarClient`'s own doc
+  comment — so it cannot know in advance which rows will discard the answers unused. Fixing
+  this would mean either leaking provider/captcha knowledge into this generic queue-drain
+  layer, or reworking `SidecarClient.Submit` to pull answers lazily — both costlier than the
+  handful of avoidable DB reads per already-doomed-to-park row that this saves.
 
 ## How it works
 `Run` wires `outbox.RunPool` over `Store.Claim`, mirroring `internal/applyform`'s own

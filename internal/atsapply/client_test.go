@@ -6,6 +6,7 @@ import (
 
 	"github.com/strelov1/freehire/internal/applyform"
 	"github.com/strelov1/freehire/internal/autoapply"
+	"github.com/strelov1/freehire/internal/experience"
 )
 
 // Lever always parks on its captcha before any fetcher or browser is touched — a nil
@@ -34,6 +35,39 @@ func TestMergedFromAPIOnly_SkipsHiddenAndInfoFields(t *testing.T) {
 
 	if len(got) != 1 || got[0].ID != "keep" {
 		t.Fatalf("merged = %+v, want only the one answerable field", got)
+	}
+}
+
+// recordingAtomReader records every ListAtoms call, so a test can prove drafting's
+// (expensive: a real grounding read plus an LLM call) path was never entered.
+type recordingAtomReader struct {
+	calls int
+}
+
+func (r *recordingAtomReader) ListAtoms(context.Context, int64) ([]experience.Atom, error) {
+	r.calls++
+	return nil, nil
+}
+
+// Found by code review: Client.resolve ran the full drafting path — a grounding-context DB
+// read plus a real, budget-attributed LLM call — for EVERY provider, even Ashby, whose
+// result Submit unconditionally discards two lines later ("submission not yet implemented
+// for this provider"). Every Ashby attempt with an unmapped field paid for an LLM call
+// whose answer could never be used.
+func TestClientResolve_SkipsDraftingForAProviderSubmitCannotHandle(t *testing.T) {
+	atoms := &recordingAtomReader{}
+	c := &Client{atoms: atoms}
+
+	fields := []MergedField{{ID: "q1", Label: "Where did you hear about us?", Kind: "text", Required: true}}
+	plan, err := c.resolve(context.Background(), autoapply.Claimed{Provider: "ashby"}, fields, map[string]string{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if atoms.calls != 0 {
+		t.Errorf("ListAtoms called %d times, want 0 — Ashby can never reach fillAndSubmit, so drafting for it is pure waste", atoms.calls)
+	}
+	if len(plan.Unmapped) != 1 {
+		t.Fatalf("unmapped = %+v, want the deterministic (undrafted) result", plan.Unmapped)
 	}
 }
 

@@ -88,3 +88,58 @@ func TestScanGreenhouseForm_NoApplicationFormIsAnError(t *testing.T) {
 		t.Fatal("want an error when #application-form is not on the page")
 	}
 }
+
+// Found by code review: a plain input with neither an id nor a name attribute — the real
+// shape the 2026-09-02 live smoke test measured on a live posting — must still be recorded
+// as its own field, not silently dropped. Dropping a required one would let
+// Plan.FullyResolved() report true while a real required question was never even seen.
+func TestScanGreenhouseForm_APlainInputWithNoIDOrNameIsStillScanned(t *testing.T) {
+	const html = `<html><body><form id="application-form">
+	  <input type="text" required>
+	</form></body></html>`
+
+	fields, err := ScanGreenhouseForm(html)
+	if err != nil {
+		t.Fatalf("ScanGreenhouseForm: %v", err)
+	}
+	if len(fields) != 1 {
+		t.Fatalf("fields = %d, want the id-less/name-less input recorded, not dropped", len(fields))
+	}
+	if !fields[0].Required {
+		t.Error("want the field's required attribute preserved")
+	}
+}
+
+// The severe version of the same gap: TWO id-less/name-less inputs on one page must not
+// collide on the same fallback key — the second must not silently vanish.
+func TestScanGreenhouseForm_TwoPlainInputsWithNoIDOrNameDoNotCollide(t *testing.T) {
+	const html = `<html><body><form id="application-form">
+	  <input type="text" required>
+	  <input type="text" required>
+	</form></body></html>`
+
+	fields, err := ScanGreenhouseForm(html)
+	if err != nil {
+		t.Fatalf("ScanGreenhouseForm: %v", err)
+	}
+	if len(fields) != 2 {
+		t.Fatalf("fields = %d, want both id-less/name-less inputs kept as distinct fields", len(fields))
+	}
+}
+
+// A textarea/select with no id or name must not be dropped either — scanSimple's own,
+// even more direct instance of the same gap (it returned immediately on an empty key,
+// never recording anything at all).
+func TestScanGreenhouseForm_ATextareaWithNoIDOrNameIsStillScanned(t *testing.T) {
+	const html = `<html><body><form id="application-form">
+	  <textarea required></textarea>
+	</form></body></html>`
+
+	fields, err := ScanGreenhouseForm(html)
+	if err != nil {
+		t.Fatalf("ScanGreenhouseForm: %v", err)
+	}
+	if len(fields) != 1 {
+		t.Fatalf("fields = %d, want the id-less/name-less textarea recorded, not dropped", len(fields))
+	}
+}

@@ -28,6 +28,14 @@ var requiresCaptcha = map[string]bool{
 	"lever": true,
 }
 
+// fillProviders is the single source of truth for which providers Submit can actually
+// fill/submit for — today, Greenhouse alone (see fillAndSubmit/browser.go). Checked both
+// before drafting is attempted (resolve, to avoid paying for a draft nothing can use) and
+// before a fill+submit is attempted (Submit) — one set, so the two can never drift apart.
+var fillProviders = map[string]bool{
+	"greenhouse": true,
+}
+
 // Client drives a headless browser to resolve and, where possible, submit one application
 // attempt. It implements autoapply.SidecarClient — the in-process replacement for the
 // Python/Patchright sidecar the design originally proposed (see design.md's "chromedp, not
@@ -114,7 +122,7 @@ func (c *Client) Submit(ctx context.Context, claimed autoapply.Claimed, answers 
 		return autoapply.SidecarResult{Status: autoapply.StatusParked, Unmapped: plan.Unmapped}, nil
 	}
 
-	if claimed.Provider != "greenhouse" {
+	if !fillProviders[claimed.Provider] {
 		// Fill/submit is only wired for Greenhouse so far — see fill.go. A form for
 		// another provider that DID fully resolve still parks rather than being
 		// submitted through a path never built or verified.
@@ -152,8 +160,14 @@ func (c *Client) Submit(ctx context.Context, claimed autoapply.Claimed, answers 
 // the whole attempt: the deterministic Plan is still useful (it may already be fully
 // resolved, or a partial answer is still better than none at submit time) — see the
 // requirement that a non-groundable question parks rather than blocking every other field.
+//
+// Skipped entirely for a provider Submit cannot fill/submit for (today: everything but
+// Greenhouse — see fillProviders). Found by code review: this used to run unconditionally,
+// so every Ashby attempt with an unmapped field paid for a real grounding read and a real,
+// budget-attributed LLM call whose answer Submit then discarded two lines later ("submission
+// not yet implemented for this provider") — spend with no possible use.
 func (c *Client) resolve(ctx context.Context, claimed autoapply.Claimed, merged []MergedField, answers map[string]string) (Plan, error) {
-	if c.atoms == nil {
+	if c.atoms == nil || !fillProviders[claimed.Provider] {
 		return Resolve(merged, answers), nil
 	}
 

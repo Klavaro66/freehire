@@ -84,13 +84,23 @@ func fillOne(parent context.Context, f ResolvedField) error {
 	case "textarea", "text":
 		// Text and the react-select-backed autocomplete fields (country,
 		// candidate-location) are indistinguishable in this package's DOM scan — both
-		// render as a plain <input type="text">. The trailing Enter is a no-op on a
-		// plain text field and, for an autocomplete field, commits the highlighted
+		// render as a plain <input type="text">. The trailing Enter is meant as a no-op
+		// on a plain text field and, for an autocomplete field, commits the highlighted
 		// suggestion — the same "type, then confirm" interaction a person uses.
-		// Unverified beyond the reference implementation's own account of the pattern;
-		// see fill.go's doc — a typed value with no matching suggestion can still
-		// submit empty, which is exactly why StatusUnconfirmed exists as a distinct,
-		// non-retried outcome rather than trusting this always worked.
+		// Unverified beyond the reference implementation's own account of the pattern,
+		// and a code review flagged a specific, plausible way that assumption could be
+		// wrong: a React-driven SPA form can bind its own Enter-submits-the-form
+		// behavior regardless of field count (unlike plain HTML's multi-field implicit-
+		// submission exemption), which would trigger a real submit mid-fill-loop rather
+		// than a no-op. There is no reliable signal in this package's current scan data
+		// to tell a true autocomplete field apart from a plain one (the field's Options
+		// are empty for both, since Greenhouse never declares country/location as an
+		// enumerated field) — a targeted fix needs live verification against a real
+		// board, not a guess. Named here as a known, accepted risk rather than
+		// worked around blind. A typed value with no matching suggestion, or an
+		// unintended early submit, can still surface as an unconfirmed or malformed
+		// outcome, which is exactly why StatusUnconfirmed exists as a distinct,
+		// non-retried outcome rather than trusting any of this always worked.
 		return chromedp.Run(ctx,
 			chromedp.Clear(sel, chromedp.ByID),
 			chromedp.SendKeys(sel, f.Value, chromedp.ByID),
@@ -124,6 +134,17 @@ func fieldSelector(id string) string {
 	return "#" + id
 }
 
+// classifyPollError reports whether a failed poll call should be treated as unconfirmed
+// (the same outcome the between-polls ctx.Done() case already reports) rather than a real
+// error. A non-nil ctx.Err() means the deadline/cancellation is what actually ended the
+// call, regardless of what chromedp's own error text says — the same timeout firing a
+// moment earlier or later would have hit the ordinary ctx.Done() branch instead, and this
+// must report identically either way. Found by code review: this check did not exist, so a
+// deadline firing mid-call surfaced as a plain retryable error.
+func classifyPollError(ctx context.Context, err error) (unconfirmed bool) {
+	return ctx.Err() != nil
+}
+
 // verifySubmission waits for either a confirmation or an explicit refusal marker in the
 // page text. Neither appearing within the timeout is reported as unconfirmed (false),
 // distinct from an error — see the CONFIRMATION_MARKERS doc comment for why the two
@@ -136,6 +157,9 @@ func verifySubmission(parent context.Context) (bool, error) {
 	for time.Now().Before(deadline) {
 		var bodyText string
 		if err := chromedp.Run(ctx, chromedp.Text("body", &bodyText, chromedp.ByQuery)); err != nil {
+			if classifyPollError(ctx, err) {
+				return false, nil
+			}
 			return false, err
 		}
 		lower := strings.ToLower(bodyText)

@@ -160,3 +160,24 @@ func TestResolveWithDrafting_ADrafterErrorPropagates(t *testing.T) {
 		t.Fatal("want the drafter's error surfaced, not swallowed into a park")
 	}
 }
+
+// Found by code review: isSensitiveLabel("") is unconditionally false (an empty string
+// contains no keyword), so a DOM-only field the platform's schema never labeled — exactly
+// the shape reconcile.go's own test cites an EEOC/demographic field as the canonical
+// example of — passed draftable's sensitivity check by having nothing to check at all. A
+// field with no label can never be VERIFIED non-sensitive, so it must never be drafted.
+func TestResolveWithDrafting_AFieldWithNoLabelIsNeverDrafted(t *testing.T) {
+	fields := []MergedField{{ID: "42736", Label: "", Kind: "text", Required: true}}
+	drafter := &fakeDrafter{answer: "should never be used", ok: true}
+
+	plan, err := ResolveWithDrafting(context.Background(), fields, map[string]string{}, drafter, GroundingContext{})
+	if err != nil {
+		t.Fatalf("ResolveWithDrafting: %v", err)
+	}
+	if len(drafter.calls) != 0 {
+		t.Fatalf("Draft calls = %v, want none — an unlabeled field cannot be verified non-sensitive", drafter.calls)
+	}
+	if len(plan.Unmapped) != 1 || plan.Unmapped[0].ID != "42736" {
+		t.Fatalf("unmapped = %+v, want the unlabeled field parked", plan.Unmapped)
+	}
+}
