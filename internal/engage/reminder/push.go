@@ -32,10 +32,14 @@ func NewPushNotifier(tokens PushTokenLister, transport pushnotify.Notifier) *Pus
 	return &PushNotifier{tokens: tokens, transport: transport}
 }
 
-// Send renders the reminder and fans it out to every device registered for the
-// user encoded in dest (see recipient()'s ChannelPush case). The channel argument
-// is ignored — this notifier only serves the push channel.
-func (n *PushNotifier) Send(ctx context.Context, _ string, dest string, m ReminderMessage) error {
+// Send renders the account's batch as ONE notification and fans it out to every
+// device registered for the user encoded in dest (see recipient()'s ChannelPush
+// case). The channel argument is ignored — this notifier only serves the push
+// channel.
+func (n *PushNotifier) Send(ctx context.Context, _ string, dest string, ms []ReminderMessage) error {
+	if len(ms) == 0 {
+		return nil
+	}
 	userID, err := strconv.ParseInt(dest, 10, 64)
 	if err != nil {
 		return fmt.Errorf("reminder: invalid push user id %q: %w", dest, err)
@@ -49,18 +53,29 @@ func (n *PushNotifier) Send(ctx context.Context, _ string, dest string, m Remind
 		tokens[i] = row.Token
 	}
 
-	title, body := renderReminder(m)
-	// A reminder always concerns exactly one job, so the deep-link data is
-	// unconditional here — unlike a subscription digest, which only carries a
-	// slug when it matched a single job.
-	data := map[string]string{"slug": m.Slug}
+	title, body := renderReminderBatch(ms)
+	// The deep link needs one destination, so it is carried only when the batch
+	// names one job — the same rule a subscription digest follows.
+	var data map[string]string
+	if len(ms) == 1 {
+		data = map[string]string{"slug": ms[0].Slug}
+	}
 	return pushnotify.SendToDevices(ctx, n.transport, tokens, title, body, data)
 }
 
-// renderReminder produces the short, human-readable title/body for a reminder,
-// shared by the push channel's own copy and the notification-center record — both
-// need the identical wording for the same delivery event (see the
-// add-notification-center design).
+// renderReminderBatch produces the short, human-readable title/body for one
+// account's batch, shared by the push channel's own copy and the
+// notification-center record — both need the identical wording for the same
+// delivery event (see the add-notification-center design).
+func renderReminderBatch(ms []ReminderMessage) (title, body string) {
+	if len(ms) == 1 {
+		return renderReminder(ms[0])
+	}
+	return "⏰ Reminder", fmt.Sprintf("You saved %d jobs and haven't applied yet — still interested?", len(ms))
+}
+
+// renderReminder is the single-job wording, kept as its own function because it is
+// the one a batch of one must be indistinguishable from.
 func renderReminder(m ReminderMessage) (title, body string) {
 	return "⏰ Reminder", fmt.Sprintf("You saved %s at %s — still interested?", m.JobTitle, m.Company)
 }

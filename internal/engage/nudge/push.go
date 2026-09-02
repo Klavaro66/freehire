@@ -32,10 +32,13 @@ func NewPushNotifier(tokens PushTokenLister, transport pushnotify.Notifier) *Pus
 	return &PushNotifier{tokens: tokens, transport: transport}
 }
 
-// Send resolves dest as a user id, lists that user's registered devices, and
-// fans the rendered message out to all of them. The channel argument is
+// Send resolves dest as a user id, lists that user's registered devices, and fans
+// ONE notification for the whole batch out to all of them. The channel argument is
 // ignored — this notifier only serves the push channel.
-func (n *PushNotifier) Send(ctx context.Context, _ string, dest string, m Message) error {
+func (n *PushNotifier) Send(ctx context.Context, _ string, dest, kind string, ms []Message) error {
+	if len(ms) == 0 {
+		return nil
+	}
 	userID, err := strconv.ParseInt(dest, 10, 64)
 	if err != nil {
 		return fmt.Errorf("nudge: invalid push user id %q: %w", dest, err)
@@ -49,15 +52,38 @@ func (n *PushNotifier) Send(ctx context.Context, _ string, dest string, m Messag
 		tokens[i] = d.Token
 	}
 
-	title, body := renderNudge(m)
-	data := map[string]string{"slug": m.Slug}
+	title, body := renderNudgeBatch(kind, ms)
+	// The deep link needs one destination, so it is carried only when the batch
+	// names one job.
+	var data map[string]string
+	if len(ms) == 1 {
+		data = map[string]string{"slug": ms[0].Slug}
+	}
 	return pushnotify.SendToDevices(ctx, n.transport, tokens, title, body, data)
 }
 
-// renderNudge is the shared title/body copy for one nudge Message, used by both
-// the push channel (Send, above) and the notification-center record written by
-// Runner.fire in nudge.go — one rendering, two readers, so the in-app record
-// never drifts from what push already shows.
+// renderNudgeBatch is the shared title/body copy for one (account, kind) batch,
+// used by both the push channel (Send, above) and the notification-center record
+// written by Runner.deliverBatch in nudge.go — one rendering, two readers, so the
+// in-app record never drifts from what push already shows.
+func renderNudgeBatch(kind string, ms []Message) (title, body string) {
+	if len(ms) == 1 {
+		return renderNudge(ms[0])
+	}
+	switch kind {
+	case KindFollowUp:
+		return "👋 Follow up?", fmt.Sprintf("%d of your applications have gone quiet.", len(ms))
+	case KindInterviewPrep:
+		return "🎯 Interviews coming up", fmt.Sprintf("You're interviewing for %d roles.", len(ms))
+	case KindJobClosed:
+		return "📪 Jobs closed", fmt.Sprintf("%d jobs you were tracking were closed.", len(ms))
+	default:
+		return "freehire", fmt.Sprintf("%d updates on jobs you are tracking.", len(ms))
+	}
+}
+
+// renderNudge is the single-nudge wording, kept as its own function because it is
+// the one a batch of one must be indistinguishable from.
 func renderNudge(m Message) (title, body string) {
 	switch m.Kind {
 	case KindFollowUp:

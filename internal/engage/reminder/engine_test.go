@@ -2,10 +2,13 @@ package reminder
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/strelov1/freehire/internal/engage/notify"
 	"github.com/strelov1/freehire/internal/platform/db"
 )
 
@@ -62,14 +65,17 @@ func (s *fakeStore) RecordNotification(_ context.Context, arg db.RecordNotificat
 // fakeNotifier records deliveries and can be told to fail.
 type fakeNotifier struct {
 	sent []string // "channel:dest"
-	err  error
+	// groups is the message list of each recorded send, so a test can assert what
+	// a delivery carried and not only that it happened.
+	groups [][]ReminderMessage
+	err    error
 	// errByChannel fails only the named channels, so a test can model one channel
 	// dying while another lands — which is the whole point of a multi-channel
 	// reminder and the case a blanket err cannot express.
 	errByChannel map[string]error
 }
 
-func (n *fakeNotifier) Send(_ context.Context, channel, dest string, _ ReminderMessage) error {
+func (n *fakeNotifier) Send(_ context.Context, channel, dest string, ms []ReminderMessage) error {
 	if err, ok := n.errByChannel[channel]; ok {
 		return err
 	}
@@ -77,6 +83,7 @@ func (n *fakeNotifier) Send(_ context.Context, channel, dest string, _ ReminderM
 		return n.err
 	}
 	n.sent = append(n.sent, channel+":"+dest)
+	n.groups = append(n.groups, ms)
 	return nil
 }
 
@@ -89,6 +96,17 @@ func actionableRow(id int64, channels []string, chatID *int64, email string) db.
 	if chatID != nil {
 		row.TelegramChatID = pgtype.Int8{Int64: *chatID, Valid: true}
 	}
+	return row
+}
+
+// ownedBy is actionableRow's multi-account variant: the same deliverable row, but
+// belonging to userID and naming its own job, so a test can put two accounts in one
+// pass.
+func ownedBy(id, userID int64, channels []string, email string) db.GetReminderForDeliveryRow {
+	row := actionableRow(id, channels, nil, email)
+	row.UserID = userID
+	row.Title = "Job " + strconv.FormatInt(id, 10)
+	row.PublicSlug = "job-" + strconv.FormatInt(id, 10)
 	return row
 }
 
@@ -197,6 +215,257 @@ func TestRun_RecordsFailureOnDeliveryError(t *testing.T) {
 	}
 	if stats.Failed != 1 {
 		t.Errorf("stats.Failed = %d, want 1", stats.Failed)
+	}
+}
+
+// The change's whole point: a day's saves become one message, not one each.
+func TestRun_GroupsOneAccountsRemindersIntoOneSend(t *testing.T) {
+	store := &fakeStore{
+		due: []int64{1, 2, 3},
+		rows: map[int64]db.GetReminderForDeliveryRow{
+			1: ownedBy(1, 42, []string{"email"}, "a@b.c"),
+			2: ownedBy(2, 42, []string{"email"}, "a@b.c"),
+			3: ownedBy(3, 42, []string{"email"}, "a@b.c"),
+		},
+	}
+	notifier := &fakeNotifier{}
+	stats := run(t, store, notifier)
+
+	if len(notifier.sent) != 1 {
+		t.Fatalf("sent = %v, want exactly one message for one account", notifier.sent)
+	}
+	if got := notifier.groups[0]; len(got) != 3 {
+		t.Errorf("the message carried %d jobs, want 3", len(got))
+	}
+	if len(store.delivered) != 3 {
+		t.Errorf("delivered = %v, want all three reminders stamped", store.delivered)
+	}
+	if stats.Delivered != 3 {
+		t.Errorf("stats.Delivered = %d, want 3 — the counter stays per reminder", stats.Delivered)
+	}
+}
+
+// Grouping must not leak one account's saved jobs into another's message.
+func TestRun_DifferentAccountsGetTheirOwnSend(t *testing.T) {
+	store := &fakeStore{
+		due: []int64{1, 2},
+		rows: map[int64]db.GetReminderForDeliveryRow{
+			1: ownedBy(1, 42, []string{"email"}, "a@b.c"),
+			2: ownedBy(2, 77, []string{"email"}, "x@y.z"),
+		},
+	}
+	notifier := &fakeNotifier{}
+	run(t, store, notifier)
+
+	if len(notifier.sent) != 2 {
+		t.Fatalf("sent = %v, want one message per account", notifier.sent)
+	}
+	for i, group := range notifier.groups {
+		if len(group) != 1 {
+			t.Errorf("group %d carried %d jobs, want 1", i, len(group))
+		}
+	}
+}
+
+// A reminder that lost its intent leaves the batch; the rest still go out together.
+func TestRun_CancelledReminderLeavesTheGroup(t *testing.T) {
+	stale := ownedBy(2, 42, []string{"email"}, "a@b.c")
+	stale.StillActionable = false
+	store := &fakeStore{
+		due: []int64{1, 2, 3},
+		rows: map[int64]db.GetReminderForDeliveryRow{
+			1: ownedBy(1, 42, []string{"email"}, "a@b.c"),
+			2: stale,
+			3: ownedBy(3, 42, []string{"email"}, "a@b.c"),
+		},
+	}
+	notifier := &fakeNotifier{}
+	stats := run(t, store, notifier)
+
+	if len(store.cancelled) != 1 || store.cancelled[0] != 2 {
+		t.Errorf("cancelled = %v, want [2]", store.cancelled)
+	}
+	if len(notifier.groups) != 1 || len(notifier.groups[0]) != 2 {
+		t.Fatalf("groups = %v, want one message carrying the two survivors", notifier.groups)
+	}
+	if stats.Delivered != 2 || stats.Cancelled != 1 {
+		t.Errorf("stats = %+v, want Delivered=2 Cancelled=1", stats)
+	}
+}
+
+// The group is the retry unit: a failed send costs every member an attempt, so the
+// whole batch comes back on a later pass rather than half of it going missing.
+func TestRun_FailedGroupRecordsFailureForEveryMember(t *testing.T) {
+	store := &fakeStore{
+		due: []int64{1, 2},
+		rows: map[int64]db.GetReminderForDeliveryRow{
+			1: ownedBy(1, 42, []string{"email"}, "a@b.c"),
+			2: ownedBy(2, 42, []string{"email"}, "a@b.c"),
+		},
+	}
+	stats := run(t, store, &fakeNotifier{err: context.DeadlineExceeded})
+
+	if len(store.failed) != 2 {
+		t.Errorf("failed = %v, want an attempt recorded against both members", store.failed)
+	}
+	if len(store.delivered) != 0 {
+		t.Errorf("delivered = %v, want none", store.delivered)
+	}
+	if stats.Failed != 2 {
+		t.Errorf("stats.Failed = %d, want 2", stats.Failed)
+	}
+}
+
+// A multi-job group has no single slug to point at, so it records the job list the
+// notification center's /jobs page renders — the shape a subscription digest uses.
+func TestRun_MultiJobGroupRecordsOneListNotification(t *testing.T) {
+	store := &fakeStore{
+		due: []int64{1, 2},
+		rows: map[int64]db.GetReminderForDeliveryRow{
+			1: ownedBy(1, 42, []string{"email"}, "a@b.c"),
+			2: ownedBy(2, 42, []string{"email"}, "a@b.c"),
+		},
+	}
+	run(t, store, &fakeNotifier{})
+
+	if len(store.recorded) != 1 {
+		t.Fatalf("recorded = %v, want exactly one notification for the group", store.recorded)
+	}
+	rec := store.recorded[0]
+	if rec.PublicSlug.Valid {
+		t.Errorf("PublicSlug = %+v, want unset for a multi-job group", rec.PublicSlug)
+	}
+	// Unmarshalled into the SHARED shape, not a local copy of it: the column's
+	// contract is notify.SnapshotJob, and a private struct here would keep passing
+	// while the two drifted apart.
+	var jobs []notify.SnapshotJob
+	if err := json.Unmarshal(rec.Jobs, &jobs); err != nil {
+		t.Fatalf("Jobs is not a job list: %v (raw %s)", err, rec.Jobs)
+	}
+	if len(jobs) != 2 || jobs[0].Slug != "job-1" || jobs[1].Slug != "job-2" {
+		t.Errorf("Jobs = %+v, want both saved jobs in claim order", jobs)
+	}
+}
+
+// A group of one is the message and the record we already shipped.
+func TestRun_SingleJobGroupKeepsTheSlugRecord(t *testing.T) {
+	store := &fakeStore{
+		due:  []int64{1},
+		rows: map[int64]db.GetReminderForDeliveryRow{1: ownedBy(1, 42, []string{"email"}, "a@b.c")},
+	}
+	run(t, store, &fakeNotifier{})
+
+	rec := store.recorded[0]
+	if !rec.PublicSlug.Valid || rec.PublicSlug.String != "job-1" {
+		t.Errorf("PublicSlug = %+v, want the single job's slug", rec.PublicSlug)
+	}
+	if rec.Jobs != nil {
+		t.Errorf("Jobs = %s, want unset for a single-job group", rec.Jobs)
+	}
+}
+
+// job_reminders snapshots the channel set at schedule time (migration 0034), so two
+// reminders of one account can carry different sets. Merging them would send one over
+// the other's channels and stamp it delivered anyway.
+func TestRun_DifferentChannelSetsAreNotMerged(t *testing.T) {
+	both := ownedBy(2, 42, []string{"email", "telegram"}, "a@b.c")
+	both.TelegramChatID = pgtype.Int8{Int64: 555, Valid: true}
+	store := &fakeStore{
+		due: []int64{1, 2},
+		rows: map[int64]db.GetReminderForDeliveryRow{
+			1: ownedBy(1, 42, []string{"email"}, "a@b.c"),
+			2: both,
+		},
+	}
+	notifier := &fakeNotifier{}
+	run(t, store, notifier)
+
+	// One message for the email-only reminder, two for the one that also wants
+	// Telegram — three sends, and never a job in a message it did not belong to.
+	if len(notifier.sent) != 3 {
+		t.Fatalf("sent = %v, want the two channel sets kept apart", notifier.sent)
+	}
+	for i, group := range notifier.groups {
+		if len(group) != 1 {
+			t.Errorf("group %d carried %d jobs, want 1", i, len(group))
+		}
+	}
+}
+
+// The same account's reminders group even when their channel sets were stored in a
+// different order — the key is the SET, not the slice.
+func TestRun_ChannelOrderDoesNotSplitTheGroup(t *testing.T) {
+	second := ownedBy(2, 42, []string{"telegram", "email"}, "a@b.c")
+	second.TelegramChatID = pgtype.Int8{Int64: 555, Valid: true}
+	first := ownedBy(1, 42, []string{"email", "telegram"}, "a@b.c")
+	first.TelegramChatID = pgtype.Int8{Int64: 555, Valid: true}
+	store := &fakeStore{
+		due:  []int64{1, 2},
+		rows: map[int64]db.GetReminderForDeliveryRow{1: first, 2: second},
+	}
+	notifier := &fakeNotifier{}
+	run(t, store, notifier)
+
+	// One batch, delivered over both of its channels.
+	if len(notifier.groups) != 2 {
+		t.Fatalf("sent = %v, want one batch over two channels", notifier.sent)
+	}
+	for i, group := range notifier.groups {
+		if len(group) != 2 {
+			t.Errorf("group %d carried %d jobs, want both", i, len(group))
+		}
+	}
+}
+
+// Beyond SnapshotCap the excess is RELEASED, never stamped: a reminder marked
+// delivered while appearing in no message is gone for good.
+func TestRun_BatchOverflowIsReleasedNotDelivered(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SnapshotCap = 2
+	store := &fakeStore{
+		due: []int64{1, 2, 3, 4},
+		rows: map[int64]db.GetReminderForDeliveryRow{
+			1: ownedBy(1, 42, []string{"email"}, "a@b.c"),
+			2: ownedBy(2, 42, []string{"email"}, "a@b.c"),
+			3: ownedBy(3, 42, []string{"email"}, "a@b.c"),
+			4: ownedBy(4, 42, []string{"email"}, "a@b.c"),
+		},
+	}
+	notifier := &fakeNotifier{}
+	r := NewRunner(store, notifier, cfg)
+	stats, err := r.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(notifier.groups) != 1 || len(notifier.groups[0]) != 2 {
+		t.Fatalf("groups = %v, want one message carrying the cap", notifier.groups)
+	}
+	if len(store.delivered) != 2 {
+		t.Errorf("delivered = %v, want only what the message carried", store.delivered)
+	}
+	if len(store.released) != 2 || len(store.failed) != 0 {
+		t.Errorf("released = %v failed = %v, want the overflow released and no attempt burnt", store.released, store.failed)
+	}
+	if stats.Deferred != 2 {
+		t.Errorf("stats.Deferred = %d, want the 2 overflow reminders counted", stats.Deferred)
+	}
+}
+
+// A hand-built Config with no SnapshotCap would make every batch full at zero
+// members: nothing delivered, nothing failed, forever.
+func TestNewRunner_ZeroSnapshotCapDoesNotStallDelivery(t *testing.T) {
+	store := &fakeStore{
+		due:  []int64{1},
+		rows: map[int64]db.GetReminderForDeliveryRow{1: ownedBy(1, 42, []string{"email"}, "a@b.c")},
+	}
+	notifier := &fakeNotifier{}
+	r := NewRunner(store, notifier, Config{LeaseSeconds: 600, ClaimBatch: 500, MaxAttempts: 5})
+	if _, err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(store.delivered) != 1 {
+		t.Errorf("delivered = %v, want the reminder delivered despite an unset SnapshotCap", store.delivered)
 	}
 }
 

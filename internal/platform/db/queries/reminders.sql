@@ -28,6 +28,20 @@ ON CONFLICT (user_id) DO UPDATE
       updated_at         = now()
 RETURNING *;
 
+-- name: GetReminderScheduleContext :one
+-- The two halves of "when should this account hear from us": the daily
+-- notification hour (notification_settings.digest_time) and the timezone to read
+-- it in (users.timezone). Both are optional and both are read here rather than
+-- from GetNotificationSettings, which knows nothing about the user row — one
+-- statement so the hour and the zone can never come from different reads and
+-- disagree. The row always exists for a real user; a NULL in either column is the
+-- unconfigured state the caller resolves to its own defaults.
+SELECT ns.digest_time AS digest_time,
+       u.timezone     AS timezone
+FROM users u
+LEFT JOIN notification_settings ns ON ns.user_id = u.id
+WHERE u.id = $1;
+
 -- name: UpsertJobReminder :one
 -- Schedule a one-shot reminder for a saved job, or replace the pending one if the
 -- job is re-saved with a new choice. The arbiter is the partial unique index on
@@ -71,12 +85,18 @@ WITH claimable AS (
     ORDER BY r.fire_at, r.id
     FOR UPDATE OF r SKIP LOCKED
     LIMIT sqlc.arg(batch_size)
+), claimed AS (
+    UPDATE job_reminders r
+    SET claimed_at = now()
+    FROM claimable c
+    WHERE r.id = c.id
+    RETURNING r.id, r.fire_at
 )
-UPDATE job_reminders r
-SET claimed_at = now()
-FROM claimable c
-WHERE r.id = c.id
-RETURNING r.id;
+-- Sorted OUTSIDE the UPDATE. The CTE's ORDER BY only picks WHICH rows are claimed;
+-- an UPDATE ... RETURNING is not obliged to emit them in that order, and the engine
+-- groups the result into one message per account, listing the jobs in the order it
+-- receives them. Without this the list order is whatever the join produced.
+SELECT id FROM claimed ORDER BY fire_at, id;
 
 -- name: GetReminderForDelivery :one
 -- The delivery context for one reminder: the job display fields, the channel set,

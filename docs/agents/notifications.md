@@ -14,6 +14,37 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
 
 ## Always true
 
+- **All three engines deliver in GROUPS, and a group is the unit of everything.**
+  `notify` groups a subscription's matched jobs; `internal/engage/reminder` groups an
+  account's due reminders; `internal/engage/nudge` groups an account's due nudges **of one
+  kind**, and `internal/engage/reminder` additionally splits on the CHANNEL SET (see the
+  bullet below). Every `Notifier.Send` therefore takes a whole group — a `notify.Digest`
+  for subscriptions, a slice for the other two — and none of them takes a single item, so
+  no per-item send path is left for a channel to keep using. That is the point: eight
+  saves in a day were eight emails three days later. The kinds stay apart because "your
+  application went quiet" and "prepare for your interview" are different errands with
+  different call-to-actions; merging them would need a mail that says neither. One send
+  outcome decides the whole group: a failure records an attempt against every member and
+  the group returns whole on a later pass, because a partial result would need a second
+  delivery ledger to describe and nothing reads one. A group of ONE must stay
+  byte-identical to the pre-grouping message — that is what makes the change invisible to
+  everyone it doesn't help.
+- **A reminder's channels are a SNAPSHOT, so they are part of its batch key.**
+  `job_reminders.channels` is frozen when the reminder is scheduled — migration 0034 says
+  why: "a later rule edit never rewrites a pending reminder". So an account that changed
+  its rule between two saves has two genuinely different deliveries due, and grouping on
+  the account alone would send one of them over the other's channels and stamp it
+  delivered anyway. The key is `(user_id, sorted channel set)`; only the KEY is sorted, so
+  the send still walks the first member's own slice. `internal/engage/nudge` has no such
+  split: `GetNudgeForDelivery` reads `notification_settings.channels` live, which IS an
+  account property.
+- **A reminder's `fire_at` is rounded forward to the account's notification hour**
+  (`notification_settings.digest_time` in the account's timezone; 09:00 and UTC when
+  unset). Grouping alone would have bought the reminder engine almost nothing: `fire_at`
+  was save + 3 days exactly and `freehire-remind` ticks every 15 minutes, so two saves
+  hours apart landed in different passes. `internal/engage/nudge` needs no such rounding —
+  it has no `fire_at`, and MATCH+DELIVER share a pass, so everything an account has
+  pending is already together.
 - **A new channel is a new `Notifier` implementation — but there are THREE of them.** Each engine
   depends only on its own `Notifier` interface plus a `Router` (a `map[channel]Notifier`); the
   three interfaces share a signature and differ in payload, and `notify`/`reminder`/`nudge` each
@@ -26,6 +57,15 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
   three small, near-identical `PushNotifier`s (a few lines of message-rendering each) rather than
   three copies of anything structurally significant. Revisit if a fourth channel makes the
   per-engine cost look different.
+  **Grouping made the duplication bigger, and that is the seam to watch.** `reminder` and
+  `nudge` now each carry a near-identical `collect` + `deliverBatch` pair — claim, validate
+  per item, group, send once, finalize every member — differing only in their ledger's
+  method names and in nudge's kind in the group key. Two copies is not yet an abstraction:
+  a shared engine would have to be generic over the delivery row, the ledger's five
+  statements and the message type, which is more machinery than the ~80 duplicated lines
+  cost. What IS shared is what would silently diverge — `notify.ListLimit` and `Listed`,
+  `notify.SnapshotJob`/`JobsSnapshot`, and `telegramnotify.MaxMessageLen`/`UTF16Len`. A
+  third batching engine is the signal to extract the loop itself.
 - **Push needs no server-side credential and is therefore always registered.** Unlike Telegram
   (`TELEGRAM_BOT_TOKEN`) and email (`AWS_REGION`+`NOTIFY_EMAIL_FROM`), Expo's relay holds the
   APNs/FCM credential on its own side (set up once via `eas credentials` in `freehire-mobile`), so
@@ -88,12 +128,15 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
   No snooze interval, no notified-count column. `internal/engage/reminder`/`internal/engage/notify` don't need
   this — a reminder fires once from a pre-scheduled `fire_at`, a subscription match is a distinct
   `(subscription, job)` pair already.
-- **A digest is bounded twice, and the two bounds are not the same number.** `Digest.Jobs` is
-  everything the digest carries (ceiling: `Config.SnapshotCap`, 200) and is what the in-app
-  notification records — it is what `/my/notifications/:id/jobs` renders. `Digest.Listed()` is
-  the first `notify.ListLimit` (10) and is what a channel message itemizes; the "and N more"
-  tail is the difference. They were one knob until 2026-08-21, which meant lowering the email's
-  list length silently truncated the on-site page the email's own "view all" pointed at.
+- **Every grouped message is bounded twice, and the two bounds are not the same number.**
+  `Config.SnapshotCap` (200) is everything the group carries and is what the in-app
+  notification records — what `/my/notifications/:id/jobs` renders. `notify.ListLimit`
+  (10) is what a channel message itemizes; the "and N more" tail is the difference. All
+  three engines carry both, and `ListLimit` is a single exported constant shared by all of
+  them. They were one knob until 2026-08-21, which meant lowering the email's list length
+  silently truncated the on-site page the email's own "view all" pointed at. Beyond
+  `SnapshotCap` the excess is RELEASED back to the pending queue, never stamped delivered:
+  an item marked delivered while appearing in no message is gone for good.
 - **`Digest.Total` is `len(Jobs)`, and that is load-bearing.** A pass can claim more matches for
   one subscription than `SnapshotCap` allows; `deliverOne` calls `deferOverflow` to release the
   excess back to the pending queue BEFORE building the digest, so a later pass delivers it. Do
@@ -108,14 +151,22 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
   direction — the digest goes out with `NotificationID` zero and each channel's tail falls back
   to `/my/notifications`. `internal/engage/reminder` and `internal/engage/nudge` still record after delivery
   and discard the returned id.
+- **`user_notifications.jobs` is one shape owned by one package.** `notify.SnapshotJob`
+  (`{title, company, slug}`, migration 0091) is what all three engines write and what the
+  single `/my/notifications/:id/jobs` page reads. A group of MORE than one fills `jobs`
+  and leaves `public_slug` NULL; a group of one does the opposite. Three private copies of
+  the shape would each be right until one of them changed.
 - `DigestJob` deliberately carries **no internal job id** — only the public slug and URL.
 - **The Telegram link token is deliberately NOT a JWT.** Telegram's deep-link `start`
   parameter allows only 1–64 chars of `[A-Za-z0-9_-]`, which a dotted ~200-char JWT
   violates, so the token is a ~43-char base64url(payload‖truncated-HMAC) blob signed with
   `JWT_SECRET` (`internal/engage/telegramnotify`). The 4096-char message cap is measured the way
   Telegram measures it — UTF-16 code units, with the widest possible "+ N more" tail
-  reserved up front — because an oversized digest fails deterministically, every retry
-  re-fails, and the whole batch is dead-lettered.
+  reserved up front — because an oversized message fails deterministically, every retry
+  re-fails, and the whole batch is dead-lettered. `telegramnotify.MaxMessageLen` and
+  `UTF16Len` are exported together for that reason: the limit without the way to measure
+  against it invites `len()`, which counts bytes. Every engine that can build a multi-job
+  message needs both, which since grouping is all three.
 - Salary fields are projected from enrichment; zero min/max or an empty currency means
   unknown, and the renderer omits the line rather than printing a zero.
 

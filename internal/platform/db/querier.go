@@ -209,6 +209,10 @@ type Querier interface {
 	// once; the lease predicate reclaims rows whose sender died (stale claimed_at).
 	// Delivery happens OUTSIDE this transaction, so no network call is held under a
 	// row lock. Mirrors ClaimDueReminders.
+	// Sorted OUTSIDE the UPDATE. The CTE's ORDER BY only picks WHICH rows are claimed;
+	// an UPDATE ... RETURNING is not obliged to emit them in that order, and the engine
+	// groups the result into one message per (account, kind), listing the jobs in the
+	// order it receives them. Mirrors ClaimDueReminders.
 	ClaimDueNudges(ctx context.Context, arg ClaimDueNudgesParams) ([]int64, error)
 	// Tickets old enough for Expo to have an answer, oldest first. Read-only
 	// (this queue has no lease/claim bookkeeping — see DeletePushTickets):
@@ -220,6 +224,10 @@ type Querier interface {
 	// rows so a reminder fires at most once; the lease predicate reclaims rows whose
 	// sender died (stale claimed_at), so no separate reaper is needed. Delivery happens
 	// OUTSIDE this transaction, so no network call is held under a row lock.
+	// Sorted OUTSIDE the UPDATE. The CTE's ORDER BY only picks WHICH rows are claimed;
+	// an UPDATE ... RETURNING is not obliged to emit them in that order, and the engine
+	// groups the result into one message per account, listing the jobs in the order it
+	// receives them. Without this the list order is whatever the join produced.
 	ClaimDueReminders(ctx context.Context, arg ClaimDueRemindersParams) ([]int64, error)
 	// Claim a wave of live, unleased entries by stamping claimed_at, newest email first,
 	// returning the email fields the matcher/classifier need. FOR UPDATE OF o locks only
@@ -1581,6 +1589,14 @@ type Querier interface {
 	// cancel-and-skip a reminder whose job has since closed or is no longer
 	// saved-but-unapplied, closing the race between a cancel and the fire.
 	GetReminderForDelivery(ctx context.Context, id int64) (GetReminderForDeliveryRow, error)
+	// The two halves of "when should this account hear from us": the daily
+	// notification hour (notification_settings.digest_time) and the timezone to read
+	// it in (users.timezone). Both are optional and both are read here rather than
+	// from GetNotificationSettings, which knows nothing about the user row — one
+	// statement so the hour and the zone can never come from different reads and
+	// disagree. The row always exists for a real user; a NULL in either column is the
+	// unconfigured state the caller resolves to its own defaults.
+	GetReminderScheduleContext(ctx context.Context, id int64) (GetReminderScheduleContextRow, error)
 	// Load a single report by id for the review path, with the reporter's email and the
 	// reported job's slug and title — the decision notice needs them, and joining here spares
 	// the decision path a second round trip. The resolve/dismiss flow guards the status in the
