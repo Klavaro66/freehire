@@ -42,14 +42,22 @@ decision for the measurements and its caveats.
   question today, so there is never more than one to match in the first place. See
   `resolveOne`'s doc comment (`resolve.go`). Widening `AnswerSource` to a multi-valued
   source is what would turn this into a real gap.
-- **Custom employer questions rarely resolve, even when relevant data exists.**
-  `answerKeyFor` is an ID-based lookup: it matches Greenhouse's own standardized field names
-  (`first_name`, `email`, ...) but a numeric `question_NNNNN` id can never match it, even when
-  `candidateprofile` holds the relevant fact (e.g. `visa_sponsorship_needed`) — nothing here
-  reads a *label* to connect the two. Measured against a live posting (task 7.1): 5 of 7
-  unmapped required fields were exactly this shape. Label/keyword matching for the handful of
-  near-universal custom questions (work authorization, sponsorship) is the highest-value next
-  increment, not a currently-open task in this change's scope.
+- **Most custom employer questions still don't resolve, even when relevant data exists —
+  visa sponsorship is the one exception.** `answerKeyFor` is an ID-based lookup: it matches
+  Greenhouse's own standardized field names (`first_name`, `email`, ...) but a numeric
+  `question_NNNNN` id can never match it directly. `labelAnswerKeyFor` (`resolve.go`) is a
+  narrow fallback that matches a field's *label* text instead, checked only when the id
+  lookup misses — but it covers exactly one category (`visa_sponsorship_needed`, stored as a
+  clean Yes/No) on purpose. "Are you authorized to work in this country" is deliberately NOT
+  covered despite being the same shape of gap: `candidateprofile`'s `authorized_countries` is
+  a list, not a yes/no for one specific (unknown, at this layer) country — answering it
+  without guessing needs the job's own location, which isn't wired through here, and
+  `freehire-apply` (the sibling, more mature implementation) treats work-authorization
+  questions as sensitive and never auto-answers them either, for the same reason. Free-text
+  custom questions (language proficiency, "where did you hear about us") have no matching
+  path here at all — that is `freehire-apply`'s `internal/drafting` territory (a single-shot
+  LLM call per field, gated by a keyword-based sensitive-field check, not an agentic loop),
+  not yet built here.
 - **The fill/submit path (`fill.go`, `browser.go`) is the least-verified part of this
   package.** No unit tests exercise it — a real browser session cannot be faked usefully, and
   no test asserts a real submission against a live board (that would spam a real employer).
