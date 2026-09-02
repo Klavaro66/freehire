@@ -80,6 +80,47 @@ func Resolve(fields []MergedField, answers map[string]string) Plan {
 	return plan
 }
 
+// labelAnswerKeyFor matches a field's LABEL text against a curated, narrow set of semantic
+// categories, for the custom employer-authored questions a numeric id (Greenhouse's
+// question_NNNNN, and the equivalent on other platforms) can never match by id alone —
+// even when candidateprofile holds the exact fact the question is asking for. Measured
+// against a live posting (task 7.1 in openspec/changes/auto-apply-worker/tasks.md): visa
+// sponsorship was asked as a custom question there.
+//
+// Deliberately narrow. "Are you authorized to work in [this posting's country]" is NOT
+// covered here even though it is the same shape of gap: candidateprofile's
+// authorized_countries is a list of countries the candidate holds work authorization in,
+// not a yes/no answer to "in THIS specific country" — answering it would need the job's own
+// location, which nothing here has, and freehire-apply (a sibling, more mature
+// implementation) treats work-authorization questions as sensitive and never auto-answers
+// them either. visa_sponsorship_needed has no such ambiguity: it is stored as a plain
+// "Yes"/"No" (internal/screeninganswers.Answers.AutofillFields), so matching it here can
+// never produce a wrong-country answer the way authorization would.
+var labelAnswerKeyFor = []struct {
+	answerKey string
+	keywords  []string // ALL must appear (case-insensitive) for the rule to fire
+}{
+	{"visa_sponsorship_needed", []string{"visa", "sponsor"}},
+}
+
+// matchLabelAnswerKey returns the answer key a field's label matches, if any.
+func matchLabelAnswerKey(label string) (string, bool) {
+	lower := strings.ToLower(label)
+	for _, rule := range labelAnswerKeyFor {
+		matched := true
+		for _, kw := range rule.keywords {
+			if !strings.Contains(lower, kw) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return rule.answerKey, true
+		}
+	}
+	return "", false
+}
+
 // resolveOne resolves a single field's answer. For a Multi field (a checkbox group taking
 // several answers) this matches at most ONE option's value, even when more than one would
 // be correct — AnswerSource only ever supplies single-value identity/work-authorization
@@ -96,6 +137,12 @@ func resolveOne(f MergedField, answers map[string]string) (ResolvedField, string
 	}
 
 	key, known := answerKeyFor[f.ID]
+	if !known {
+		// The id is opaque (a custom employer-authored question) — fall back to matching
+		// its label against the narrow set of known semantic categories. An id match, when
+		// one exists, is always more specific/trustworthy and is never shadowed by this.
+		key, known = matchLabelAnswerKey(f.Label)
+	}
 	if !known {
 		return ResolvedField{}, fmt.Sprintf("no known answer source for %q", f.ID), false
 	}
