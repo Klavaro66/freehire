@@ -6,7 +6,7 @@
 
 ## 2. Go queue store (`internal/autoapply`)
 
-- [ ] 2.1 Define the `Store` port (`Claim`, `Submit` (success), `Park` (unresolved), `Fail` (retry)) per design.md's decision that this is its own interface, not `applyform.Store` reused
+- [x] 2.1 Define the `Store` port (`Claim`, `Submit` (success), `Park` (unresolved), `Fail` (retry)) per design.md's decision that this is its own interface, not `applyform.Store` reused
 - [ ] 2.2 Implement `Store` against the generated queries from 1.2
 - [ ] 2.3 Unit test `Store`'s claim/park/fail behavior against a fake DB layer (or as an `integration`-tagged test against a real one, matching how `internal/applyform`'s store is tested)
 
@@ -17,9 +17,9 @@
 
 ## 4. `cmd/auto-apply` worker
 
-- [ ] 4.1 Implement the per-attempt process function: assemble `answers` via `autofillProfile()`/`profileFields()`, call `SidecarClient.Submit`, map the result to `Store.Submit`/`Park`/`Fail`
+- [x] 4.1 Implement the per-attempt process function: assemble `answers` via `autofillProfile()`/`profileFields()`, call `SidecarClient.Submit`, map the result to `Store.Submit`/`Park`/`Fail`
 - [ ] 4.2 Wire `internal/outbox.RunPool` + `Store` + `SidecarClient` into `cmd/auto-apply/main.go`, following `cmd/capture-apply-form`'s bootstrap shape (`internal/worker` conventions: `DATABASE_URL`, exit codes, batch/lease/concurrency env vars)
-- [ ] 4.3 Unit test the process function with a mock `Store` and mock `SidecarClient`: `applied` → `Submit` called; `parked` → `Park` called with reasons; transient error → `Fail` called
+- [x] 4.3 Unit test the process function with a mock `Store` and mock `SidecarClient`: `applied` → `Submit` called; `parked` → `Park` called with reasons; transient error → `Fail` called (plus two cases the design surfaced: an answer-assembly failure never reaches the sidecar, and a lost post-submit record forces an immediate dead-letter rather than the normal retry path, to keep the "never twice" requirement)
 
 ## 5. Application-tracking integration
 
