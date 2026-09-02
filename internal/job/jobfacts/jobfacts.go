@@ -84,6 +84,105 @@ func EmploymentType(title, description string) string {
 	return ""
 }
 
+// Requirement facts must not be derived from optional/preferred qualifications.
+//
+// Job descriptions often contain both hard requirements and a later "preferred"
+// section. education_level and english_level are consumed as hard constraints, so
+// treating a preferred qualification as required can incorrectly hide a job from
+// an otherwise eligible candidate.
+//
+// Block tags are converted to line boundaries first because scraped job boards
+// commonly use <p>/<li> headings rather than punctuation. Explicit optional
+// sections are discarded entirely, while inline optional clauses such as
+// "Bachelor required, Master's preferred" keep the required clause.
+var (
+	reFactBlockTag = regexp.MustCompile(`(?i)</?(?:p|br|li|ul|ol|div|h[1-6])\b[^>]*>`)
+	reFactHTMLTag  = regexp.MustCompile(`<[^>]+>`)
+
+	reOptionalFactSection = regexp.MustCompile(
+		`(?m)^\s*(?:` +
+			`(?:az állás betöltéséhez\s+)?előnyt jelent(?:het)?|` +
+			`előny(?:ök)?|` +
+			`preferred qualifications?|` +
+			`nice to have` +
+			`)\s*:?\s*$`,
+	)
+
+	reOptionalFactMarker = regexp.MustCompile(
+		`(?i)\bpreferred\b|\ba plus\b|\bnice to have\b|` +
+			`(?:^|[^\p{L}])előny(?:t)?(?:\s+jelent)?(?:$|[^\p{L}])`,
+	)
+
+	reFactClause = regexp.MustCompile(`[^;\n.]+`)
+)
+
+// requiredFactText removes explicitly optional qualification text before hard
+// requirement facts are derived.
+//
+// The parser intentionally prefers false negatives over false positives here:
+// returning no education/English level is safer than turning a preferred
+// qualification into a hard candidate constraint.
+func requiredFactText(description string) string {
+	s := strings.ToLower(description)
+
+	// Preserve structural boundaries from scraped HTML before removing tags.
+	s = reFactBlockTag.ReplaceAllString(s, "\n")
+	s = reFactHTMLTag.ReplaceAllString(s, " ")
+
+	// Normalize dotted degree abbreviations before sentence-level clause splitting.
+	// Otherwise "Ph.D." would be split into unrelated fragments.
+	s = strings.ReplaceAll(s, "ph.d.", "phd")
+	s = strings.ReplaceAll(s, "ph.d", "phd")
+	s = strings.ReplaceAll(s, "m.sc.", "msc")
+	s = strings.ReplaceAll(s, "m.sc", "msc")
+	s = strings.ReplaceAll(s, "min.", "min")
+
+	// A dedicated preferred section marks everything after it as optional for the
+	// purposes of hard requirement derivation. On supported boards these sections
+	// follow the mandatory requirements.
+	if loc := reOptionalFactSection.FindStringIndex(s); loc != nil {
+		s = s[:loc[0]]
+	}
+
+	// Remove inline optional clauses without discarding required clauses next to
+	// them, e.g. "Bachelor required, Master's preferred".
+	clauses := reFactClause.FindAllString(s, -1)
+	required := make([]string, 0, len(clauses))
+
+	for _, clause := range clauses {
+		clause = strings.TrimSpace(clause)
+		if clause == "" {
+			continue
+		}
+
+		// Optional markers qualify the segment immediately preceding them.
+		//
+		// If the sentence contains a comma, keep only the earlier mandatory segment:
+		// "Bachelor's required, PhD preferred" -> "Bachelor's required".
+		//
+		// Without such a separator the whole clause is optional:
+		// "Master's degree is preferred" -> discarded.
+		// "MSc végzettség előnyt jelent" -> discarded.
+		if loc := reOptionalFactMarker.FindStringIndex(clause); loc != nil {
+			prefix := strings.TrimSpace(clause[:loc[0]])
+
+			if comma := strings.LastIndex(prefix, ","); comma >= 0 {
+				clause = strings.TrimSpace(strings.TrimRight(prefix[:comma], ",:- "))
+			} else {
+				continue
+			}
+
+			if clause == "" {
+				continue
+			}
+		}
+
+		required = append(required, clause)
+	}
+
+	return strings.Join(required, "\n")
+}
+
 // Education-level matchers, highest degree first so "Master's or PhD" resolves to
 // the ceiling actually named. "none" is emitted only on an explicit negation, and
 // only when no positive degree is named (see EducationLevel).
@@ -93,11 +192,14 @@ func EmploymentType(title, description string) string {
 // "MS SQL" and "bs"/"b.s" with everyday text — and bare "master" is excluded because
 // "scrum master" is not a degree. The "'s" possessive, an explicit "<level> degree",
 // or the -Sc/MBA/PhD tokens are required instead.
+// Hungarian forms are included alongside the existing English vocabulary.
+// Generic "felsőfokú végzettség" maps conservatively to bachelor: it establishes
+// tertiary education, but does not prove that a master's degree is required.
 var (
-	rePhD      = regexp.MustCompile(`\b(ph\.?\s?d|phd|doctorate|doctoral)\b`)
-	reMaster   = regexp.MustCompile(`\b(master'?s|master degree|m\.?sc|mba|graduate degree)\b`)
-	reBachelor = regexp.MustCompile(`\b(bachelor'?s|bachelor degree|b\.?sc|undergraduate degree)\b`)
-	reNoDegree = regexp.MustCompile(`\b(no (?:degree|diploma)|degree not required|without a degree|no degree required)\b`)
+	rePhD      = regexp.MustCompile(`\b(ph\.?\s?d|phd|doctorate|doctoral|doktori|doktori fokozat)\b`)
+	reMaster   = regexp.MustCompile(`\b(master'?s|master degree|m\.?sc|mba|graduate degree|mesterképzés|mesterfokozat|msc)\b|(?:^|[^\p{L}\p{N}])mesterfokú(?:$|[^\p{L}\p{N}])`)
+	reBachelor = regexp.MustCompile(`\b(bachelor'?s|bachelor degree|b\.?sc|undergraduate degree|alapképzés|alapfokozat|bsc|főiskolai végzettség|egyetemi végzettség|felsőfokú végzettség)\b`)
+	reNoDegree = regexp.MustCompile(`\b(no (?:degree|diploma)|degree not required|without a degree|no degree required|végzettség nem szükséges|végzettség nem elvárás)\b`)
 )
 
 // EducationLevel resolves the required education from the description, returning
@@ -105,7 +207,7 @@ var (
 // wins over a "no degree" phrase (a posting that says "Bachelor's or equivalent;
 // no degree required for exceptional candidates" still has a degree signal).
 func EducationLevel(description string) string {
-	s := strings.ToLower(description)
+	s := requiredFactText(description)
 	switch {
 	case rePhD.MatchString(s):
 		return "phd"
@@ -200,7 +302,7 @@ func ExperienceYearsMin(description string) *int {
 }
 
 // English-level detection. Precision-first like the matchers above: it resolves an
-// explicit CEFR code or a well-known level phrase (EN + RU + PL — the Telegram
+// explicit CEFR code or a well-known level phrase (EN + RU + PL + HU — the Telegram
 // sources are Russian-heavy, and Polish boards like NoFluffJobs/JustJoinIT state the
 // requirement in Polish, e.g. "Angielski na poziomie min. B2+") and emits "" when
 // nothing is stated. Every signal must sit near an English keyword, so a bare
@@ -209,30 +311,54 @@ func ExperienceYearsMin(description string) *int {
 var (
 	// reEnglishKw gates the whole parse and anchors every phrase: english_level is
 	// about English, so a description that never names it yields nothing.
-	reEnglishKw = regexp.MustCompile(`english|английск|angielsk`)
+	// Hungarian job postings commonly use "angol" rather than "English".
+	reEnglishKw = regexp.MustCompile(`english|английск|angielsk|angol`)
+
 	// A CEFR code counts only adjacent (either order) to an English keyword.
-	reCEFRForward = regexp.MustCompile(`(?:english|английск\w*)[^.\n]{0,20}\b([abc][12])\b`)
-	reCEFRBack    = regexp.MustCompile(`\b([abc][12])\b[^.\n]{0,20}(?:english|английск\w*)`)
+	// Forward matchers use a non-greedy gap so "English (C1) and German (B2)"
+	// resolves the first level associated with English instead of borrowing the
+	// later German level.
+	reCEFRForward = regexp.MustCompile(`(?:english|английск\w*)[^.\n]{0,60}?\b([abc][12])\b`)
+	reCEFRBack    = regexp.MustCompile(`\b([abc][12])\b[^.\n]{0,60}(?:english|английск\w*)`)
 	// Polish CEFR proximity tolerates one interior "." that the EN/RU gap above
 	// disallows: Polish postings near-universally phrase the requirement as "na
 	// poziomie min. B2" — the abbreviation dot in "min." would otherwise break the
 	// EN/RU-style no-period gap and hide an otherwise unambiguous, adjacent CEFR code.
-	reCEFRForwardPl = regexp.MustCompile(`angielsk\w*[^.\n]{0,20}\.?[^.\n]{0,10}\b([abc][12])\b`)
+	reCEFRForwardPl = regexp.MustCompile(`angielsk\w*[^.\n]{0,20}?\.?[^.\n]{0,10}?\b([abc][12])\b`)
 	reCEFRBackPl    = regexp.MustCompile(`\b([abc][12])\b[^.\n]{0,10}\.?[^.\n]{0,20}angielsk\w*`)
+	reCEFRForwardHu = regexp.MustCompile(`angol[^.\n]{0,60}?\b([abc][12])\b`)
+	reCEFRBackHu    = regexp.MustCompile(`\b([abc][12])\b[^.\n]{0,60}angol`)
+
+	// Hungarian explicit proficiency levels are kept separate from qualitative
+	// wording. An explicit level is a stronger requirement signal than wording
+	// such as "társalgási", "folyékony" or "tárgyalóképes".
+	reHuAdvancedForward     = regexp.MustCompile(`angol[^.\n]{0,60}felsőfok\p{L}*`)
+	reHuAdvancedBack        = regexp.MustCompile(`felsőfok\p{L}*[^.\n]{0,60}angol`)
+	reHuIntermediateForward = regexp.MustCompile(`angol[^.\n]{0,60}közép(?:fok|szint)\p{L}*`)
+	reHuIntermediateBack    = regexp.MustCompile(`közép(?:fok|szint)\p{L}*[^.\n]{0,60}angol`)
+	reHuBasicForward        = regexp.MustCompile(`angol[^.\n]{0,60}alap(?:fok|szint)\p{L}*`)
+	reHuBasicBack           = regexp.MustCompile(`alap(?:fok|szint)\p{L}*[^.\n]{0,60}angol`)
+
+	// Hungarian qualitative wording is used only when no explicit CEFR or
+	// alap-/közép-/felsőfok signal is available.
+	reHuFluentForward  = regexp.MustCompile(`angol[^.\n]{0,60}(?:folyékony\p{L}*|tárgyalóképes\p{L}*)`)
+	reHuFluentBack     = regexp.MustCompile(`(?:folyékony\p{L}*|tárgyalóképes\p{L}*)[^.\n]{0,60}angol`)
+	reHuConversForward = regexp.MustCompile(`angol[^.\n]{0,60}társalgási\p{L}*`)
+	reHuConversBack    = regexp.MustCompile(`társalgási\p{L}*[^.\n]{0,60}angol`)
 
 	// Level phrases (checked for English proximity via near). The intermediate family
 	// carries its prefix so "upper-intermediate"→b2 and "pre-intermediate"→a2 resolve
 	// without a lookbehind (RE2 has none); the Russian "средн" and Polish "średni"
 	// families mirror it via their own "above this level" prefix.
-	reNative     = regexp.MustCompile(`\bnative\b|родн\w*|носител\w*`)
+	reNative     = regexp.MustCompile(`\bnative\b|родн\w*|носител\w*|anyanyelvi`)
 	reFluentAdv  = regexp.MustCompile(`fluen\w*|\badvanced\b|свободн\w*|продвинут\w*|biegł\w*|zaawansowan\w*`)
 	reInterFam   = regexp.MustCompile(`\b(upper[\s-]?|pre[\s-]?)?intermediate\b`)
 	reRuMidFam   = regexp.MustCompile(`(выше\s+)?средн\w*`)
 	rePlMidFam   = regexp.MustCompile(`(wyższy\s+)?średni\w*`)
-	reConvers    = regexp.MustCompile(`\bconversational\b|разговорн\w*|komunikatywn\w*`)
+	reConvers    = regexp.MustCompile(`\bconversational\b|разговорн\w*|komunikatywn\w*|kommunikációs szint\p{L}*`)
 	reElementary = regexp.MustCompile(`\belementary\b|\bbeginner\b|начальн\w*|początkując\w*`)
 	reBasic      = regexp.MustCompile(`\bbasic\b|базов\w*|podstawow\w*`)
-	reNoEnglish  = regexp.MustCompile(`no english|english (?:is )?not required|without english|без английск\w*|bez angielsk\w*`)
+	reNoEnglish  = regexp.MustCompile(`no english|english (?:is )?not required|without english|без английск\w*|bez angielsk\w*|angol (?:nyelvtudás )?nem (?:szükséges|elvárás)`)
 )
 
 // englishRank orders the vocabulary lowest→highest so the minimum named level is
@@ -257,8 +383,11 @@ const englishScanMaxRunes = 20000
 // one of vocab.EnglishLevelValues or "" when nothing is stated. When several levels
 // are named it returns the lowest (the minimum requirement); an explicit "no English"
 // phrase resolves to "none" only when no positive level is present.
+// Explicit CEFR codes and explicit Hungarian proficiency levels take precedence
+// over qualitative wording. This prevents phrases such as
+// "középfokú, társalgási szintű angol" from being downgraded from B2 to B1.
 func EnglishLevel(description string) string {
-	s := strings.ToLower(description)
+	s := requiredFactText(description)
 	s = truncateRunes(s, englishScanMaxRunes)
 	if !reEnglishKw.MatchString(s) {
 		return ""
@@ -270,18 +399,84 @@ func EnglishLevel(description string) string {
 	kws := reEnglishKw.FindAllStringIndex(s, -1)
 
 	levels := map[string]bool{}
+
+	// Prefer CEFR codes appearing after the English keyword. This prevents a
+	// preceding level belonging to another language from being borrowed by English,
+	// e.g. "German ... C1. English ... B1".
+	forwardCEFR := false
+
 	for _, m := range reCEFRForward.FindAllStringSubmatch(s, -1) {
 		levels[m[1]] = true
-	}
-	for _, m := range reCEFRBack.FindAllStringSubmatch(s, -1) {
-		levels[m[1]] = true
+		forwardCEFR = true
 	}
 	for _, m := range reCEFRForwardPl.FindAllStringSubmatch(s, -1) {
 		levels[m[1]] = true
+		forwardCEFR = true
 	}
-	for _, m := range reCEFRBackPl.FindAllStringSubmatch(s, -1) {
+	for _, m := range reCEFRForwardHu.FindAllStringSubmatch(s, -1) {
 		levels[m[1]] = true
+		forwardCEFR = true
 	}
+
+	// Backward forms such as "C1 English" remain supported, but only when no
+	// forward CEFR signal was found.
+	if !forwardCEFR {
+		for _, m := range reCEFRBack.FindAllStringSubmatch(s, -1) {
+			levels[m[1]] = true
+		}
+		for _, m := range reCEFRBackPl.FindAllStringSubmatch(s, -1) {
+			levels[m[1]] = true
+		}
+		for _, m := range reCEFRBackHu.FindAllStringSubmatch(s, -1) {
+			levels[m[1]] = true
+		}
+	}
+
+	// CEFR is the strongest available signal. If an explicit CEFR level is tied to
+	// English, qualitative wording elsewhere must not alter it.
+	if len(levels) > 0 {
+		best := ""
+		for lv := range levels {
+			if best == "" || englishRank[lv] < englishRank[best] {
+				best = lv
+			}
+		}
+		return best
+	}
+
+	// Hungarian named proficiency levels are the next strongest signal. They take
+	// precedence over qualitative wording such as "társalgási", "folyékony" and
+	// "tárgyalóképes".
+	if reHuAdvancedForward.MatchString(s) || reHuAdvancedBack.MatchString(s) {
+		levels["c1"] = true
+	}
+	if reHuIntermediateForward.MatchString(s) || reHuIntermediateBack.MatchString(s) {
+		levels["b2"] = true
+	}
+	if reHuBasicForward.MatchString(s) || reHuBasicBack.MatchString(s) {
+		levels["a2"] = true
+	}
+
+	if len(levels) > 0 {
+		best := ""
+		for lv := range levels {
+			if best == "" || englishRank[lv] < englishRank[best] {
+				best = lv
+			}
+		}
+		return best
+	}
+
+	// Hungarian qualitative wording is considered only when no explicit CEFR or
+	// named Hungarian proficiency level was found.
+	if reHuFluentForward.MatchString(s) || reHuFluentBack.MatchString(s) {
+		levels["c1"] = true
+	}
+	if reHuConversForward.MatchString(s) || reHuConversBack.MatchString(s) {
+		levels["b1"] = true
+	}
+
+	// Existing generic EN/RU/PL qualitative signals.
 	if near(s, kws, reNative) {
 		levels["native"] = true
 	}
