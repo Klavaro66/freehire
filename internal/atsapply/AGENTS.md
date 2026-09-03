@@ -118,8 +118,9 @@ decision for the measurements and its caveats.
 ## How it works
 `Client.Submit`: captcha short-circuit → fetch the platform's schema via
 `applyform.Fetchers` → (Greenhouse only) launch a browser, render the page via `renderedHTML`
-(known selector, or — on that wait's own timeout — classify why via `classifyUnscannableForm`
-and return early as `StatusParked`), `ScanGreenhouseForm` → `Reconcile` → `Client.resolve`
+(known selector, or — on that wait's own timeout — classify why via `classifyUnscannableForm`,
+which `Submit` maps to an early `StatusParked` return via `unscannableFormResult`),
+`ScanGreenhouseForm` → `Reconcile` → `Client.resolve`
 (deterministic `Resolve`, then — if an experience-bank reader is configured —
 `ResolveWithDrafting` over what is still unmapped, via a freshly `llmkey.Bind`-ed
 `LLMDrafter`) → if `Plan.FullyResolved()`, `fillAndSubmit`; else return `StatusParked` with
