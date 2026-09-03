@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { resolve } from '$app/paths';
-  import { Bookmark, Eye, EyeOff, FileText, Lock } from '@lucide/svelte';
+  import { Bookmark, Check, Eye, EyeOff, FileText, Lock } from '@lucide/svelte';
   import { companyLogoUrl } from '$lib/logo';
   import CountryFlagStack from './CountryFlagStack.svelte';
   import JobMatchBar from './JobMatchBar.svelte';
@@ -22,7 +22,8 @@
   import RealityBadge from './RealityBadge.svelte';
   import SkillIcon from './SkillIcon.svelte';
   import { skillLabel } from '$lib/facets';
-  import { timeAgo } from '$lib/utils';
+  import { formatCount, timeAgo } from '$lib/utils';
+  import { cardFreshnessBadges } from '$lib/freshness';
   import { hasViewed } from '$lib/viewedJobs.svelte';
   import { isSaved, markSaved, markUnsaved } from '$lib/savedJobs.svelte';
   import { markDismissed, markUndismissed } from '$lib/dismissedJobs.svelte';
@@ -97,6 +98,22 @@
   const ghost = $derived('ghost' in job ? job.ghost : undefined);
   // How recently it was posted is a key signal, so it leads the header.
   const posted = $derived(timeAgo(job.posted_at));
+  // How many people have opened the posting — the materialized counter, maintained
+  // offline from the access logs (never counted on this read). A card projection does
+  // not carry it, so the `in` narrowing is what lets those rows simply omit it, the
+  // same way they omit salary. Zero renders nothing at all: "0 views" reads as a dead
+  // figure rather than as information.
+  const views = $derived('view_count' in job ? job.view_count : 0);
+  const applied = $derived('applied_count' in job ? job.applied_count : 0);
+  // The two freshness badges, through the card's own gate: a projection that carries no
+  // reality signal earns none, because on those surfaces the posting date alone would
+  // vouch for a job the signal was written to distrust. Thresholds and wording are the
+  // shared rule's — the same one the job's own page renders, closed-job rule included.
+  // No listing can currently serve a closed job WITH a reality signal, so that arm is
+  // stated rather than needed; the two surfaces must not disagree if one ever does.
+  const freshness = $derived(
+    job.closed_at ? [] : cardFreshnessBadges(job.posted_at, reality, applied),
+  );
 
   const MAX_SKILLS = 5;
   const shownSkills = $derived(skills.slice(0, MAX_SKILLS));
@@ -253,8 +270,21 @@
     <div class="flex shrink-0 items-center gap-1.5 text-muted-foreground">
       {#if isViewed}
         <!-- A quiet "you've seen this" marker, paired with the lighter dim on the card
-             so viewed jobs recede without becoming hard to read. -->
-        <Eye class="size-3.5" aria-label="Viewed" />
+             so viewed jobs recede without becoming hard to read.
+             A check, not an eye: the eye beside it carries the PUBLIC view count, and
+             two eyes in one rail meaning different things cannot be told apart. -->
+        <Check class="size-3.5" aria-label="You have viewed this" />
+      {/if}
+      {#if views > 0}
+        <!-- Abbreviated only because the rail shares its width with a company name that
+             truncates, and a five-digit figure spelled out crowds the name off the card.
+             A screen reader has no such constraint, so it hears the exact figure — the
+             same one the job's own page shows. -->
+        <span class="flex items-center gap-1 text-xs tabular-nums">
+          <Eye class="size-3.5" aria-hidden="true" />
+          <span aria-hidden="true">{formatCount(views)}</span>
+          <span class="sr-only">{views} views</span>
+        </span>
       {/if}
       {#if posted}
         <span class="text-xs tabular-nums">{posted}</span>
@@ -279,7 +309,7 @@
 
   <!-- Signal row: reality chip + the region/employment facets, grouped under the
        title as quiet outline chips so they read as metadata, not decoration. -->
-  {#if reality || tags.length > 0 || job.countries?.length || credentials.length > 0}
+  {#if reality || freshness.length > 0 || tags.length > 0 || job.countries?.length || credentials.length > 0}
     <div class="mt-2 flex flex-wrap items-center gap-1.5">
       <!-- evergreen_posting IS the reality verdict, so showing both chips states one
            fact twice, the second time louder. The ghost chip carries it inside its
@@ -289,6 +319,22 @@
       {:else}
         <RealityBadge {reality} />
       {/if}
+      <!-- Freshness before the facets: "New" is a fact about right now, the facets are
+           stable attributes of the role. Both sit behind the reality/ghost chip, because
+           a warning that a posting may not be real outranks a note that it is fresh.
+           Each badge's title is the claim's own basis, not a restatement of its label —
+           "be an early applicant" counts the people who told US they applied, and the
+           tooltip is where that limit is stated. -->
+      {#each freshness as badge (badge.label)}
+        <!-- The tooltip rides a wrapper, not the Badge: the primitive takes only
+             variant/class/children, so a `title` passed to it would be dropped
+             silently and the badge would state a claim with its evidence gone. The
+             wrapper (rather than a span inside) also makes the badge's own padding
+             hoverable — the same shape the job's own page uses. -->
+        <span title={badge.tooltip} class="inline-flex shrink-0">
+          <Badge variant="brand">{badge.label}</Badge>
+        </span>
+      {/each}
       {#each tags as tag (tag)}
         <Badge variant="outline">{tag}</Badge>
       {/each}
