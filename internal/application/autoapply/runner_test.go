@@ -20,7 +20,6 @@ type fakeStore struct {
 	failed       []int64
 	failAttempts map[int64]int
 	failMax      int
-	deadLetterOn int // dead-letters once failAttempts[id] reaches this
 	failErr      error
 }
 
