@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { resolve } from '$app/paths';
-  import { Bookmark, Eye, EyeOff } from '@lucide/svelte';
+  import { Bookmark, Eye, EyeOff, FileText, Lock } from '@lucide/svelte';
   import { companyLogoUrl } from '$lib/logo';
   import CountryFlagStack from './CountryFlagStack.svelte';
   import JobMatchBar from './JobMatchBar.svelte';
@@ -136,6 +136,13 @@
       : null,
   );
 
+  // One copy of the invitation, shared by the sighted line under the blurred strip and
+  // the sr-only span that stands in for it — so the two can't drift into different
+  // wording for the same call to action.
+  const matchInvite = $derived(
+    matchState === 'guest' ? 'Sign in to see your match' : 'Upload your CV to see your match',
+  );
+
   // A chip is red when the viewer's own profile lacks the skill, or — under the teaser —
   // when the teaser marked it missing. Both tints come from the same source as the strip
   // below, so the chips and the percentage can never tell different stories.
@@ -224,9 +231,9 @@
        The name truncates to a single line, so a long company (e.g. "Veterinary
        Emergency Group (VEG)") keeps the logo centred and the card rhythm even
        instead of wrapping into a ragged multi-line header. -->
-  <!-- pr-9 reserves the top-right corner for the save button (an overlay outside
+  <!-- pr-8 reserves the top-right corner for the save button (an overlay outside
        this link), so the timestamp never slides under it. -->
-  <div class="flex items-center justify-between gap-3 pr-9">
+  <div class="flex items-center justify-between gap-3 pr-8">
     <div class="flex min-w-0 items-center gap-2">
       <EntityLogo
         name={job.company || 'Unknown company'}
@@ -350,7 +357,9 @@
       {/if}
     </div>
     {#if salary}
-      <span class="shrink-0 text-base font-bold tabular-nums tracking-tight">{salary}</span>
+      <span class="self-end shrink-0 text-sm font-semibold tabular-nums tracking-tight sm:self-auto">
+        {salary}
+      </span>
     {/if}
   </div>
 
@@ -360,6 +369,25 @@
        other and render a genuine score under a blur. `gutterRight` keeps the percent
        clear of the feed's bottom-right hide control. -->
   <JobMatchBar match={match ?? teaser} blurred={!match && !!teaser} gutterRight={!!onHide} />
+  {#if teaser}
+    <!-- The sighted invitation, under the blurred strip rather than over it — the same
+         icon + line the job page's own match block uses below its teaser. `aria-hidden`
+         because the accessible equivalent is the sr-only span below, outside the <a> —
+         this text sits inside the card-wide link and must not join its accessible name.
+         No button here (unlike the job page's): a second activation target inside this
+         <a> would be invalid markup, and the card itself is already the link. -->
+    <div
+      class={['mt-1.5 flex items-center justify-center gap-1.5 text-xs text-muted-foreground', onHide && 'pr-9']}
+      aria-hidden="true"
+    >
+      {#if matchState === 'guest'}
+        <Lock class="size-3.5 shrink-0" />
+      {:else}
+        <FileText class="size-3.5 shrink-0" />
+      {/if}
+      {matchInvite}
+    </div>
+  {/if}
 </a>
 
 {#if teaser}
@@ -368,11 +396,7 @@
        outside the card link deliberately: `sr-only` is clip-based, not display:none, so
        inside the <a> it would join the link's accessible name and every card in the feed
        would announce a sign-in instruction that the link doesn't carry out. -->
-  <span class="sr-only">
-    {matchState === 'guest'
-      ? 'Sign in to see how this job matches your profile'
-      : 'Add your skills to see how this job matches your profile'}
-  </span>
+  <span class="sr-only">{matchInvite}</span>
 {/if}
 
 {#if footer}
@@ -396,7 +420,7 @@
   aria-label={saved ? 'Remove from saved' : 'Save job'}
   title={saved ? 'Saved' : 'Save'}
   class={[
-    'absolute right-2.5 top-2.5 grid size-8 place-items-center rounded-lg transition hover:bg-accent hover:text-brand disabled:pointer-events-none disabled:opacity-50',
+    'absolute right-2.5 top-4 grid size-8 place-items-center rounded-lg transition hover:bg-accent hover:text-brand disabled:pointer-events-none disabled:opacity-50',
     saved ? 'text-brand' : 'text-muted-foreground',
   ]}
 >
