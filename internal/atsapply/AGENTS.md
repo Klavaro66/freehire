@@ -40,8 +40,9 @@ decision for the measurements and its caveats.
   waits the full, unchanged `pageLoadTimeout` for the known selector and only then — not
   before — spends an ADDITIONAL `classifyTimeout` capturing the page's current HTML and
   classifying it (`classifyUnscannableForm`, pure and fixture-tested, no live browser
-  needed): a reCAPTCHA footprint (`recaptcha` in an iframe `src` or script tag) maps to
-  `reasonCaptchaProtected`, otherwise `reasonUnrecognizedLayout`. Either maps to
+  needed): `"recaptcha"` appearing anywhere in the page's HTML (an unscoped substring search,
+  not parsed against a specific iframe/script element — see `hasRecaptchaMarker`'s doc
+  comment for why) maps to `reasonCaptchaProtected`, otherwise `reasonUnrecognizedLayout`. Either maps to
   `autoapply.StatusParked` (`unscannableFormResult`, `client.go`) — never a plain error —
   so `internal/autoapply`'s runner never spends its transient-failure retry/dead-letter
   budget on a form that will never change shape or stop being challenge-protected. **A live

@@ -2,6 +2,7 @@ package atsapply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -64,13 +65,17 @@ func (c *Client) newBrowser(ctx context.Context) (context.Context, context.Cance
 // itself — proof the client-side render pass that reveals fields like Greenhouse's
 // `country` has actually run), and returns the page's rendered HTML.
 //
-// If readySelector never appears within pageLoadTimeout, this does not treat every
-// non-appearance as an undifferentiated, retryable error: it spends up to classifyTimeout
-// MORE capturing whatever HTML the page currently has and classifying it
-// (classifyUnscannableForm) — a white-label custom Greenhouse domain renders a different DOM
-// shape entirely, and some such pages are also gated by a reCAPTCHA challenge on the form
-// itself. Either classification comes back as an *unscannableFormError so Client.Submit can
-// map it to a parked result instead of a plain failure. See
+// If readySelector genuinely never appears — the probe's own pageLoadTimeout elapses, not
+// some other failure — this does not treat that as an undifferentiated, retryable error: it
+// spends up to classifyTimeout MORE capturing whatever HTML the page currently has and
+// classifying it (classifyUnscannableForm) — a white-label custom Greenhouse domain renders
+// a different DOM shape entirely, and some such pages are also gated by a reCAPTCHA
+// challenge on the form itself. Either classification comes back as an *unscannableFormError
+// so Client.Submit can map it to a parked result instead of a plain failure. Any OTHER
+// failure (a DNS error, connection refused, a crashed tab — anything that is not "the known
+// selector simply never showed up in time") propagates as an ordinary error instead: nothing
+// here can safely explain it as an unscannable form, and doing so anyway would silently park
+// an attempt that a normal retry might well have succeeded on. See
 // openspec/changes/auto-apply-whitelabel-greenhouse/design.md.
 func renderedHTML(ctx context.Context, url, readySelector string) (string, error) {
 	probeCtx, probeCancel := context.WithTimeout(ctx, pageLoadTimeout)
@@ -80,13 +85,18 @@ func renderedHTML(ctx context.Context, url, readySelector string) (string, error
 		chromedp.WaitVisible(readySelector, chromedp.ByID),
 		chromedp.OuterHTML("html", &pageHTML),
 	)
+	// Checked before cancel: once a context's Done channel closes for one reason, a later
+	// cancel() call cannot overwrite Err() with a different one (see context.WithTimeout),
+	// so this reliably tells "the probe's own deadline fired" apart from any other failure
+	// — the same errors.Is(callCtx.Err(), context.DeadlineExceeded) idiom
+	// internal/embed/runner.go and internal/searchdrain/runner.go already use for the
+	// analogous "was it really this call's own budget" question.
+	probeTimedOut := errors.Is(probeCtx.Err(), context.DeadlineExceeded)
 	probeCancel()
 	if err == nil {
 		return pageHTML, nil
 	}
-	if ctx.Err() != nil {
-		// The caller's own context (or an outer cancellation) is already done — nothing
-		// left to classify with, propagate as-is.
+	if !probeTimedOut {
 		return "", err
 	}
 
@@ -151,10 +161,15 @@ func classifyUnscannableForm(pageHTML string) unscannableFormReason {
 	return reasonUnrecognizedLayout
 }
 
-// hasRecaptchaMarker reports whether pageHTML carries reCAPTCHA's own footprint: an iframe
-// it injects (present for the visible-checkbox and invisible/enterprise variants alike) and
-// the script tag loading its API both reference "recaptcha" in a URL, which is enough to
-// tell it apart from an ordinary application form without parsing DOM structure for it.
+// hasRecaptchaMarker reports whether pageHTML contains "recaptcha" anywhere at all, a
+// deliberately unscoped substring search rather than one parsed against a specific element
+// (an injected iframe, or the script tag loading reCAPTCHA's API — both reference
+// "recaptcha" in a URL, which is what a real challenge actually leaves behind). Scoping the
+// search to those elements specifically would need DOM parsing this classification path is
+// meant to avoid (see classifyUnscannableForm's doc comment); an ordinary application page
+// mentioning the word incidentally is not a realistic false-positive risk in practice, and
+// either outcome still only ever produces a safe park (see design.md's Risks) — at most a
+// less specific Reason string, never a wrong fill/submit.
 func hasRecaptchaMarker(pageHTML string) bool {
 	return strings.Contains(strings.ToLower(pageHTML), "recaptcha")
 }
