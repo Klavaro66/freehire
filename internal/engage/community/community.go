@@ -88,6 +88,25 @@ type Thread struct {
 	CreatedAt    time.Time
 }
 
+// ThreadWithSubject is a Thread carrying its subject's display name — the read model
+// of the cross-subject feed, where a row must name the subject it hangs off. A thread
+// stores only the subject's slug and no FK to it, so the names are resolved on read.
+//
+// Deliberately NOT fields on Thread: that type is a faithful image of a threads row,
+// and a subject-scoped listing (where the subject is already known from the request)
+// would return it with these always empty. One type meaning two things is how "the
+// field is blank but shouldn't be" gets shipped.
+//
+// SubjectTitle is the vacancy's title or the company's name; SubjectCompany is the
+// employer in both cases, which is also the key the logo proxy resolves by. Both are
+// empty when the subject no longer exists — the load-bearing signal for "unresolved",
+// which a client renders as the stored slug rather than dropping the row.
+type ThreadWithSubject struct {
+	Thread
+	SubjectTitle   string
+	SubjectCompany string
+}
+
 // Reply is one reply in a thread, optionally nested. ParentID is 0 for a top-level
 // reply, or another reply's id when nested under it. AuthorHandle is the persona;
 // IsAI marks a (future) system-authored reply, which has no persona.
@@ -112,6 +131,13 @@ type Cursor struct {
 // IsZero reports whether the cursor is the first-page sentinel.
 func (c Cursor) IsZero() bool { return c.ID == 0 && c.CreatedAt.IsZero() }
 
+// Position is where this row sits in its listing's keyset order — what a caller
+// paging past it needs. ThreadWithSubject inherits it through the embedded Thread.
+func (t Thread) Position() Cursor { return Cursor{CreatedAt: t.CreatedAt, ID: t.ID} }
+
+// Position is where this reply sits in its thread's chronological order.
+func (r Reply) Position() Cursor { return Cursor{CreatedAt: r.CreatedAt, ID: r.ID} }
+
 // CreateThreadInput is a request to open a thread. SubjectSlug is the subject's
 // public slug; the service validates it against SubjectType.
 type CreateThreadInput struct {
@@ -131,6 +157,7 @@ type Repository interface {
 	InsertThread(ctx context.Context, subjectType, subjectRef, title, body string, authorUserID int64) (Thread, error)
 	GetThread(ctx context.Context, id int64) (Thread, error)
 	ListOpenThreads(ctx context.Context, subjectType, subjectRef string, cur Cursor, limit int32) ([]Thread, error)
+	ListRecentOpenThreads(ctx context.Context, cur Cursor, limit int32) ([]ThreadWithSubject, error)
 	CountOpenThreads(ctx context.Context, subjectType, subjectRef string) (int64, error)
 	CloseThread(ctx context.Context, id int64) error
 
