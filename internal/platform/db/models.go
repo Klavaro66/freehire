@@ -1104,6 +1104,7 @@ type UserProfile struct {
 	Specializations     []string           `json:"specializations"`
 	LocationPreferences json.RawMessage    `json:"location_preferences"`
 	ExcludedSkills      []string           `json:"excluded_skills"`
+	Seniorities         []string           `json:"seniorities"`
 }
 
 type UserPushToken struct {
