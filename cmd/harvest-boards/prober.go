@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 	"golang.org/x/net/html"
 )
 
@@ -118,7 +118,7 @@ const greenhouseBoardsHost = "boards.greenhouse.io"
 // discover finds Greenhouse board candidates from the Common Crawl CDX index: every URL
 // Common Crawl has seen under greenhouseBoardsHost, sliced to its company slug.
 func (greenhouseProber) discover(ctx context.Context, c httpClient) ([]string, error) {
-	return commonCrawlCandidates(ctx, c, greenhouseBoardsHost)
+	return commonCrawlCandidates(ctx, c, greenhouseBoardsHost, commonCrawlSlug)
 }
 
 // dedupKey folds a Greenhouse board id to lower case, like Workday's and Ashby's. The boards
@@ -225,7 +225,7 @@ const ashbyBoardsHost = "jobs.ashbyhq.com"
 // discover finds Ashby board candidates from the Common Crawl CDX index: every URL Common
 // Crawl has seen under ashbyBoardsHost, sliced to its company slug.
 func (ashbyProber) discover(ctx context.Context, c httpClient) ([]string, error) {
-	return commonCrawlCandidates(ctx, c, ashbyBoardsHost)
+	return commonCrawlCandidates(ctx, c, ashbyBoardsHost, commonCrawlSlug)
 }
 
 // bamboohrProber probes the BambooHR per-subdomain careers list. A non-empty result is a
@@ -293,10 +293,10 @@ type icimsProber struct{}
 
 // icimsJobLocPattern matches an iCIMS job-posting URL's /jobs/<id>/ segment, the same shape
 // the adapter keys off. It is duplicated here (a small literal) rather than exported from
-// internal/sources, to avoid widening that package's API for a dev tool.
+// internal/ingest/sources, to avoid widening that package's API for a dev tool.
 var icimsJobLocPattern = regexp.MustCompile(`/jobs/\d+/`)
 
-// icimsHost mirrors internal/sources/icims.go: a board containing a dot IS the careers host, and
+// icimsHost mirrors internal/ingest/sources/icims.go: a board containing a dot IS the careers host, and
 // anything else is a bare slug the host is rebuilt from. Probing every candidate as the rebuilt
 // form asks for "careers-<host>.icims.com" whenever the board is a vanity one, which resolves
 // nowhere — so every vanity board would be reported dead instead of probed.
@@ -780,7 +780,11 @@ var probers = map[string]prober{
 	"oracle":          oracleProber{},
 	"jazzhr":          jazzhrProber{},
 	"careerplug":      careerplugProber{},
+	"applitrack":      applitrackProber{},
+	"hiringthing":     hiringthingProber{},
+	"hrmdirect":       hrmdirectProber{},
 	"paycom":          paycomProber{},
+	"paycor":          paycorProber{},
 	"traffit":         traffitProber{},
 	"isolvedhire":     isolvedProber{host: "isolvedhire.com"},
 	"applicantpro":    isolvedProber{host: "applicantpro.com"},
@@ -789,6 +793,9 @@ var probers = map[string]prober{
 	"hireology":       hireologyProber{},
 	"pageup":          pageupProber{},
 	"manatal":         manatalProber{},
+	"ukgready":        ukgreadyProber{},
+	"edjoin":          edjoinProber{},
+	"workstream":      workstreamProber{},
 	"cornerstone":     adapterProber{provider: "cornerstone", newSource: func() sources.Source { return sources.NewCornerstone(sources.NewClient()) }},
 	"taleo":           adapterProber{provider: "taleo", newSource: func() sources.Source { return sources.NewTaleo(sources.NewCookieClient()) }},
 	"neogov":          adapterProber{provider: "neogov", newSource: func() sources.Source { return sources.NewNeogov(sources.NewClient()) }},

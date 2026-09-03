@@ -27,9 +27,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/strelov1/freehire/internal/appevent"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/application/appevent"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {

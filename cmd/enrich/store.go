@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/enrich"
+	"github.com/strelov1/freehire/internal/ai/enrich"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // dbStore adapts the generated queries + connection pool to enrich.Store. It is the
@@ -46,6 +46,10 @@ func (s *dbStore) Claim(ctx context.Context, batch, leaseSeconds int) ([]enrich.
 		}
 	}
 	return out, nil
+}
+
+func (s *dbStore) Reap(ctx context.Context, maxRows int) (int64, error) {
+	return s.q.DeleteIneligibleEnrichmentOutbox(ctx, int32(maxRows))
 }
 
 func (s *dbStore) Job(ctx context.Context, id int64) (enrich.JobInput, error) {

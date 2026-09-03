@@ -12,7 +12,7 @@ snapshot of the base profile, never the tailored document" rule).
 
 ## Problem
 
-Today `ensureAnalysisForRun` (`internal/handler/match_analysis.go:256`, called
+Today `ensureAnalysisForRun` (`internal/api/handler/match_analysis.go:256`, called
 from `PostAssistantAutopilot`) computes the fit analysis **once, before** the
 tailoring agent's turn starts, purely as a precondition — `cv_context` 409s
 without it. Nothing re-checks it, or anything else, **after** the agent's edits
@@ -38,8 +38,8 @@ Two independent mechanisms, one per layer — do not conflate them.
 ### 1. Self-check loop — agent/prompt layer, soft-bounded
 
 The tailoring agent's own tool-calling loop (Tailor/autopilot preset,
-`internal/assistant`) is instructed, in its prompt, to call the existing
-`job_match` tool (`internal/handler/assistant_cv_tools.go:210` — no LLM call,
+`internal/ai/assistant`) is instructed, in its prompt, to call the existing
+`job_match` tool (`internal/api/handler/assistant_cv_tools.go:210` — no LLM call,
 free, recomputes fresh off the CV's own rendered text) after a batch of edits,
 and to keep editing for as long as it judges a closeable `missing_have` or
 `missing_gap` remains. Soft cap: **2–3 iterations**, and the agent may stop
@@ -54,7 +54,7 @@ it lacks is an independent check that an edit *actually reads* as closing one.
 `job_match` is that check — it is the same code that will score the CV for
 real, not the agent's opinion of its own work.
 
-This ships as a prompt change (`internal/assistant/prompt.go` or wherever the
+This ships as a prompt change (`internal/ai/assistant/prompt.go` or wherever the
 Tailor/autopilot preset is defined), not new server code — both tools already
 exist and are already available to this preset.
 
@@ -75,7 +75,7 @@ convention, same "fails open" LLM-spend attribution.
 
 On an LLM failure/timeout during this refresh: keep the previous cached
 analysis rather than blocking or clearing anything — the existing "best-effort
-throughout" rule in `internal/matchanalysis/AGENTS.md` already covers this
+throughout" rule in `internal/candidate/matchanalysis/AGENTS.md` already covers this
 shape of degradation.
 
 ## Consequence: the "snapshot of the base profile" rule is repealed
@@ -116,14 +116,14 @@ not solved by this design.
    — synchronous before responding, or background goroutine like the
    cold-start's parallel fit-analysis compute (per the cold-start-autopilot
    design)? Affects perceived turn-completion latency.
-2. Prompt wording for the self-check loop (`internal/assistant/prompt.go` or
+2. Prompt wording for the self-check loop (`internal/ai/assistant/prompt.go` or
    the Tailor/autopilot preset definition) — needs to reuse `cv_context`'s
    `missing_have`/`missing_gap` vocabulary so the two tools read as one
    language, not two competing signals.
 3. Confirm `refreshAnalysisAfterRun` is unmetered the same way
-   `ensureCachedAnalysis` is (`internal/handler/match_analysis.go:253-255`) and
+   `ensureCachedAnalysis` is (`internal/api/handler/match_analysis.go:253-255`) and
    is covered by the existing test that background entrypoints never resolve a
-   user's LLM credit key (`internal/llmkey` convention, per root AGENTS.md).
+   user's LLM credit key (`internal/ai/llmkey` convention, per root AGENTS.md).
 4. UI copy: new wording for the Job Match tab's fit-analysis panel now that
    it is not a "snapshot" (`MatchAnalysisFull.svelte` / `ArtifactPanel.svelte`).
    Cosmetic, but the current label is actively wrong once this ships.

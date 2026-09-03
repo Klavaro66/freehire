@@ -13,7 +13,7 @@ Two PRs, both **merged and live** (`main` ancestor check passes on prod):
   `openspec/changes/fix-board-retirement-verdict/` (validates; task 2.3 is now done in
   fact but still unchecked in `tasks.md` — worth a small PR to tick it and archive).
 - **#1163 `feat(classify): second non-tech mining wave`**
-  ~60 terms added to `internal/classify/nontech.go` from a `cmd/mine-titles` run.
+  ~60 terms added to `internal/dict/classify/nontech.go` from a `cmd/mine-titles` run.
 
 ### Why #1162 existed
 

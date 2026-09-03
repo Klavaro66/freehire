@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func TestTextfileNameCannotBeOverwrittenByTheRunMetricsFile(t *testing.T) {

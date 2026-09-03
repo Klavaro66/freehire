@@ -21,9 +21,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/strelov1/freehire/internal/classify"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/vocab"
+	"github.com/strelov1/freehire/internal/dict/classify"
+	"github.com/strelov1/freehire/internal/dict/vocab"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 )
 
 // boardPath is the board file the emitted entries are de-duplicated against.

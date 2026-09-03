@@ -62,7 +62,7 @@ already use for this entity, or mint one if users don't already have one.
 
 ## Page content per mode
 
-Source data: `users.resume_structured` (via `internal/resumeextract`) and
+Source data: `users.resume_structured` (via `internal/candidate/resumeextract`) and
 `user_profiles` (specializations, skills, location_preferences) — both already
 populated by existing flows; nothing new to parse or store.
 
@@ -104,4 +104,4 @@ general.
   anonymous → no name/email/phone/links present, most recent company masked).
 - No integration/DB test changes anticipated beyond a new migration for the
   enum column — follows the existing migration conventions in
-  `internal/db/AGENTS.md`.
+  `internal/platform/db/AGENTS.md`.

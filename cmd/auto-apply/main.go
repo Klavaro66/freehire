@@ -11,20 +11,20 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/atsapply"
-	"github.com/strelov1/freehire/internal/autoapply"
-	"github.com/strelov1/freehire/internal/blobstore"
-	"github.com/strelov1/freehire/internal/candidateprofile"
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/cv"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/experience"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/llmkey"
-	"github.com/strelov1/freehire/internal/resume"
-	"github.com/strelov1/freehire/internal/screeninganswers"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ai/llmkey"
+	"github.com/strelov1/freehire/internal/api/atsapply"
+	"github.com/strelov1/freehire/internal/api/candidateprofile"
+	"github.com/strelov1/freehire/internal/application/autoapply"
+	"github.com/strelov1/freehire/internal/candidate/cv"
+	"github.com/strelov1/freehire/internal/candidate/experience"
+	"github.com/strelov1/freehire/internal/candidate/resume"
+	"github.com/strelov1/freehire/internal/ingest/screeninganswers"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/platform/blobstore"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {
@@ -84,11 +84,13 @@ func run() int {
 	// Nil-safe: an unconfigured admin API just means every draft call spends on the
 	// service credential instead, still tagged.
 	llmKeys := llmkey.New(llmkey.Config{
-		BaseURL:      cfg.LLMAdminURL,
-		AdminKey:     cfg.LLMAdminKey,
-		MaxBudget:    cfg.LLMUserMaxBudget,
-		RPMLimit:     cfg.LLMUserRPMLimit,
-		BudgetWindow: cfg.LLMUserBudgetWindow,
+		BaseURL:       cfg.LLMAdminURL,
+		AdminUsername: cfg.LLMAdminUsername,
+		AdminPassword: cfg.LLMAdminPassword,
+		TemplateKey:   cfg.LLMAdminTemplateKey,
+		MaxBudget:     cfg.LLMUserMaxBudget,
+		RPMLimit:      cfg.LLMUserRPMLimit,
+		BudgetWindow:  cfg.LLMUserBudgetWindow,
 	})
 	llmKeyResolver := llmkey.NewResolver(queries, llmKeys)
 	atoms := experience.NewStore(experience.NewQueriesRepository(queries))

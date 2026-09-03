@@ -27,15 +27,15 @@ import (
 	"log"
 	"time"
 
-	"github.com/strelov1/freehire/internal/blobstore"
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/experience"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/pii"
-	"github.com/strelov1/freehire/internal/resume"
-	"github.com/strelov1/freehire/internal/resumeextract"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/candidate/experience"
+	"github.com/strelov1/freehire/internal/candidate/pii"
+	"github.com/strelov1/freehire/internal/candidate/resume"
+	"github.com/strelov1/freehire/internal/candidate/resumeextract"
+	"github.com/strelov1/freehire/internal/platform/blobstore"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // extractTimeout bounds a single structured-extraction LLM call, matching the on-upload

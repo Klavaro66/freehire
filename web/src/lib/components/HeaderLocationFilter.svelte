@@ -20,10 +20,15 @@
     variant = 'jobs',
     store,
     counts = null,
+    inferred = false,
   }: {
     variant?: 'jobs' | 'companies' | 'launcher';
     store?: FacetStore;
     counts?: FacetCounts | null;
+    /** The geography was guessed from the visitor's IP country, not chosen. Said
+     *  out loud, because a visitor who did not pick this scope has no other way to
+     *  tell a small catalogue from a filtered one. */
+    inferred?: boolean;
   } = $props();
 
   let open = $state(false);
@@ -33,10 +38,21 @@
   const summary = $derived(
     store
       ? summarizeScope(store, variant === 'companies' ? COMPANIES_SCOPE : JOBS_SCOPE)
-      : { icon: 'globe' as const, label: 'Location' },
+      : { icons: ['globe' as const], text: 'Location', extra: 0, label: 'Location' },
   );
   const ICONS = { globe: Globe, remote: House, hybrid: Blend, onsite: Building } as const;
-  const TriggerIcon = $derived(ICONS[summary.icon]);
+  // The head geography and its roll-up as one string; either half can be empty (a
+  // format with no geography draws its icon alone, worldwide draws the globe alone).
+  const trailing = $derived(
+    [summary.text, summary.extra > 0 ? `+${summary.extra}` : ''].filter(Boolean).join(' '),
+  );
+
+  // The accessible name carries the whole story, because the visual marking is a
+  // dashed underline and an underline reads to nobody. It also names the way out —
+  // a guessed scope the visitor cannot see themselves out of is worse than none.
+  const triggerLabel = $derived(
+    inferred ? `${summary.label} — guessed from your location, change or clear it here` : summary.label,
+  );
 
   // Facets "Clear all" resets, per mode.
   const CLEAR_PARAMS = {
@@ -104,7 +120,8 @@
     type="button"
     aria-haspopup="menu"
     aria-expanded={open}
-    aria-label={summary.label}
+    aria-label={triggerLabel}
+    title={triggerLabel}
     onclick={(e) => {
       // Stop the toggle's own click from reaching the window outside-handler, which
       // would otherwise immediately re-close the just-opened popover.
@@ -113,8 +130,34 @@
     }}
     class="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
   >
-    <TriggerIcon class="size-4 shrink-0" />
-    <span class="hidden max-w-40 truncate sm:inline">{summary.label}</span>
+    <!-- An avatar-stack of scope glyphs, same trick as CountryFlagStack: each icon laps
+         over the previous one and wears a ring in the box's own background, so the pair
+         reads as two marks rather than one tangle. Earlier icons sit on top, so the
+         cluster reads left-to-right: format first, then geography. The lap is small —
+         2px of a 16px glyph, against the flags' 0.4em — because a line icon is mostly
+         the outline that names it, where a flag is a solid disc that survives being
+         half covered. -->
+    <span class="flex shrink-0 items-center">
+      {#each summary.icons as name, i (name)}
+        {@const Icon = ICONS[name]}
+        <span
+          class={['relative inline-flex rounded-full bg-background ring-2 ring-background', i > 0 && '-ml-0.5']}
+          style:z-index={summary.icons.length - i}
+        >
+          <Icon class="size-4" />
+        </span>
+      {/each}
+    </span>
+    {#if trailing}
+      <!-- A guessed scope wears a dashed underline: the convention for a value the
+           page inferred rather than was told, and quiet enough to sit in a header. -->
+      <span
+        class={[
+          'hidden max-w-40 truncate sm:inline',
+          inferred && 'underline decoration-muted-foreground/40 decoration-dashed underline-offset-4',
+        ]}>{trailing}</span
+      >
+    {/if}
     <ChevronDown class="size-3.5 shrink-0 opacity-60" />
   </button>
 

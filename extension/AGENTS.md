@@ -6,7 +6,7 @@ Guidance for AI agents working in this directory.
 
 A browser extension that puts a job-application **agent in a side panel** — a
 Claude/Gemini-style side bar with access to whatever page the user is on. The
-agent is **freehire's own**, running inside hire's API (`internal/assistant`):
+agent is **freehire's own**, running inside hire's API (`internal/ai/assistant`):
 the panel holds a conversation under the `browse` preset, whose agent can read
 the open page through the browser-tool relay this extension serves.
 

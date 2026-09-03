@@ -5,7 +5,7 @@ The WhatJobs FeedAPI adapter: freehire publishes for this CPC network, and its f
 a keyword-sliced aggregator. The vendor issues one publisher account per country, so the system
 runs one adapter instance per configured market (the US account under the bare provider key
 `whatjobs`, every other market under `whatjobs-<code>` — see `whatjobsMarkets` in
-`internal/sources/whatjobs.go`), each with its own board file and its own credential. The
+`internal/ingest/sources/whatjobs.go`), each with its own board file and its own credential. The
 capability covers the request shape and the vendor's documented-but-broken parameters, keyword
 pagination and its depth ceiling, posting identity derived from the tracked click-through URL,
 and the normalization that discards the feed's placeholder fields. Everything below applies

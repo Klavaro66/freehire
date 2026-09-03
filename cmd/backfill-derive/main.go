@@ -1,11 +1,11 @@
 // Command backfill-derive re-derives, in a single keyset pass over the whole jobs
 // table, every column that ingest computes as a pure function of a row's own raw
 // fields: the deterministic dictionary facets (countries, regions, cities, work_mode,
-// skills, seniority, category, is_tech, and the synthetic enrichment facets
+// skills, seniority, category, is_tech, requires_clearance, and the synthetic enrichment facets
 // posting_language, employment_type, education_level, english_level,
 // experience_years_min — all from jobderive.Derive), the repost-identity
-// role_fingerprint (internal/jobhash), and the public_slug/company_slug
-// (internal/normalize, via jobderive). It replaces the three former one-shots
+// role_fingerprint (internal/job/jobhash), and the public_slug/company_slug
+// (internal/dict/normalize, via jobderive). It replaces the three former one-shots
 // backfill-derive (facets), backfill-role-fingerprint, and reslug with one scan.
 //
 // Ingest fills all of these on every crawl (job.New + cmd/ingest/store.go), so new
@@ -38,13 +38,13 @@
 // getmatch re-supplies the structured facets on its next full crawl.
 //
 // Regions and cities go the same way, and they are the case the sentence above does NOT cover:
-// a moderator- or submission-authored vacancy may STATE them (internal/moderation passes them as
+// a moderator- or submission-authored vacancy may STATE them (internal/ingest/moderation passes them as
 // authoritative structured geography), and this command re-derives both from the free-text
 // location — which for such a row usually yields nothing. Unlike getmatch, a manual job is never
 // crawled again, so nothing restores them.
 //
 // That is deliberate rather than an oversight, and it is not this command's decision to make
-// alone: internal/moderation's own edit path already re-derives every facet from content and
+// alone: internal/ingest/moderation's own edit path already re-derives every facet from content and
 // passes no structured overrides, so ANY moderator edit — a title typo fix — does the same thing.
 // The project treats stored geography as re-derivable. Measured on production 2026-08-02, the
 // blast radius is seven manually-authored rows, all of which still carry regions.
@@ -74,12 +74,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/jobhash"
-	"github.com/strelov1/freehire/internal/normalize"
-	"github.com/strelov1/freehire/internal/pgconv"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/dict/normalize"
+	"github.com/strelov1/freehire/internal/job/jobderive"
+	"github.com/strelov1/freehire/internal/job/jobhash"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/pgconv"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // backfillBatchSize bounds how many jobs are read per keyset page.
@@ -188,12 +188,14 @@ func deriveRow(j db.Job, canon map[string]string) (params db.UpdateJobDerivedPar
 	})
 	experience := pgconv.Int4(d.ExperienceYearsMin)
 	isTech := pgconv.Bool(d.IsTech)
+	requiresClearance := pgconv.Bool(d.RequiresClearance)
 
 	facetsMoved := !slices.Equal(d.Countries, j.Countries) || !slices.Equal(d.Regions, j.Regions) || !slices.Equal(d.Cities, j.Cities) ||
 		d.WorkMode != j.WorkMode || !slices.Equal(d.Skills, j.Skills) ||
 		d.Seniority != j.Seniority ||
 		d.Category != j.Category ||
 		isTech != j.IsTech ||
+		requiresClearance != j.RequiresClearance ||
 		d.PostingLanguage != j.PostingLanguage ||
 		d.EmploymentType != j.EmploymentType ||
 		d.EducationLevel != j.EducationLevel ||
@@ -212,6 +214,7 @@ func deriveRow(j db.Job, canon map[string]string) (params db.UpdateJobDerivedPar
 		Seniority:          d.Seniority,
 		Category:           d.Category,
 		IsTech:             isTech,
+		RequiresClearance:  requiresClearance,
 		PostingLanguage:    d.PostingLanguage,
 		EmploymentType:     d.EmploymentType,
 		EducationLevel:     d.EducationLevel,

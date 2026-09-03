@@ -2,7 +2,7 @@
 // named by its one argument) for the two ways a hand-edited YAML file goes bad without
 // anyone noticing at ingest time: a malformed or unrecognized-field entry, and a
 // case-variant duplicate board that cmd/ingest would otherwise silently collapse
-// (internal/sources.dedupeBoards) with only a log line to show for it.
+// (internal/ingest/sources.dedupeBoards) with only a log line to show for it.
 //
 // It touches no network and no database, so it is meant to run on every PR. On failure it
 // prints one line per bad file — every duplicate board plus, if the file's structural
@@ -21,8 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/telegram"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/ingest/telegram"
 )
 
 // notBoardFiles are files under sources/ that do not hold a CompanyEntry list and carry

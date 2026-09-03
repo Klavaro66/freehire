@@ -8,12 +8,16 @@
   import { markViewed } from '$lib/viewedJobs.svelte';
   import { markSaved, markUnsaved } from '$lib/savedJobs.svelte';
   import { track } from '$lib/analytics';
+  import { foreignContentLang } from '$lib/seo';
+  import type { Display } from '$lib/generated/contracts';
   import type { Job, UserJob } from '$lib/types';
   import { companyLogoUrl } from '$lib/logo';
   import { Badge, Button, Chip, EntityLogo, TabStrip, tabStripId } from '$lib/ui';
   import { formatDate } from '$lib/utils';
+  import AdzunaAttribution from './AdzunaAttribution.svelte';
   import BackerBadge from './BackerBadge.svelte';
   import CountryFlagStack from './CountryFlagStack.svelte';
+  import JobApplyForm, { applyFormWorthShowing } from './JobApplyForm.svelte';
   import JobCompanyPanel from './JobCompanyPanel.svelte';
   import JobDescription from './JobDescription.svelte';
   import JobMatch from './JobMatch.svelte';
@@ -22,13 +26,20 @@
   import RealityBadge from './RealityBadge.svelte';
   import ReferralBlock from './ReferralBlock.svelte';
   import ReportDialog from './ReportDialog.svelte';
-  import SkillIcon from './SkillIcon.svelte';
+  import SkillChip from './SkillChip.svelte';
   import VoteControl from './VoteControl.svelte';
 
   // The job is server-rendered: it arrives as a prop from the route's `load`, so
   // the article's content is in the initial HTML. Only the per-user interactions
   // below hydrate client-side.
-  let { job }: { job: Job } = $props();
+  // `applyForm` is the employer's own screening form when its ATS publishes one —
+  // null for most postings, which is the ordinary case and simply means one fewer tab.
+  let { job, applyForm = null }: { job: Job; applyForm?: Display | null } = $props();
+
+  // Set on the two subtrees below that carry the posting's own words; undefined
+  // (so unset) when it is English. See foreignContentLang for why the document
+  // stays `en` regardless.
+  const contentLang = $derived(foreignContentLang(job));
 
   // The signed-in user's interaction with this job (null when signed out or not
   // yet loaded). `showApplyPrompt` is the post-click "Did you apply?" question.
@@ -67,17 +78,26 @@
   const views = $derived(job.view_count ?? 0);
   const applies = $derived(job.applied_count ?? 0);
 
-  // The content column is tabbed whenever we know the employer, so "who are these
-  // people?" is answerable without leaving the posting. Page state, not a route: the
+  // The content column is tabbed so "who are these people?" and "what will they ask
+  // me?" are answerable without leaving the posting. Page state, not a route: the
   // company copy already has a canonical home at /companies/<slug>, and a second URL
   // serving it would be a thin duplicate we'd then have to keep out of the index.
-  const CONTENT_TABS = [
-    { id: 'description', label: 'Description' },
-    { id: 'company', label: 'Company' },
-  ] as const;
-  type ContentTab = (typeof CONTENT_TABS)[number]['id'];
+  //
+  // Built per job rather than fixed, because neither of the two extra tabs is always
+  // there: a posting can arrive without a company slug, and only a few ATS platforms
+  // publish a form we can read. A tab is offered only when its panel has something in
+  // it — `applyFormWorthShowing` is the same predicate the panel itself renders on, so
+  // the two cannot disagree about whether there is anything to show.
+  type ContentTab = 'description' | 'company' | 'application';
 
   const companySlug = $derived(job.company_slug ?? '');
+  const contentTabs: { id: ContentTab; label: string }[] = $derived([
+    { id: 'description', label: 'Description' },
+    ...(companySlug ? [{ id: 'company' as const, label: 'Company' }] : []),
+    ...(applyFormWorthShowing(applyForm)
+      ? [{ id: 'application' as const, label: 'Application' }]
+      : []),
+  ]);
   let contentTab = $state<ContentTab>('description');
   // Per-instance so a second JobView on one page can't claim the same panel, which
   // would leave both strips' aria-controls pointing at the first one's panel.
@@ -88,6 +108,38 @@
   $effect(() => {
     void job.public_slug;
     contentTab = 'description';
+  });
+
+  // The pinned header. Once the posting's own header has scrolled under the top bar,
+  // a one-line copy of it — company, title, apply — takes its place, so "who is this
+  // for?" and the button stay a glance away through a description that routinely runs
+  // several screens.
+  //
+  // It rides a zero-height sticky rail inside an absolutely-positioned overlay, so the
+  // bar occupies no space in the flow and appearing can never shift the text under it.
+  // The obvious alternative — pinning the real header and collapsing it — cannot say
+  // that: its flow box loses ~90px the instant it pins, jerking the paragraph the
+  // reader is mid-sentence in, and again in reverse on the way back up.
+  const PINNED_HEADER_TOP = 56; // `top-14` on the rail below, and the top bar's own `h-14`.
+  let headerSentinel: HTMLElement | undefined = $state();
+  let headerPinned = $state(false);
+  $effect(() => {
+    const el = headerSentinel;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        // `isIntersecting` alone also reads false while the sentinel is BELOW the fold,
+        // which is where it sits on a short viewport before anything has been scrolled.
+        // The rect settles which edge it left by.
+        headerPinned =
+          !entry.isIntersecting && entry.boundingClientRect.top < PINNED_HEADER_TOP;
+      },
+      { rootMargin: `-${PINNED_HEADER_TOP}px 0px 0px 0px` },
+    );
+    io.observe(el);
+    return () => io.disconnect();
   });
 
   // Funnel view — captured for everyone (unlike the authed-only server record
@@ -244,7 +296,10 @@
     </section>
   {/if}
 
-  <JobDescription html={job.description} />
+  <!-- The Summary above is an LLM synopsis the enrichment prompt pins to English
+       (internal/enrich), so the body is the only part of this snippet that takes
+       the posting's language. -->
+  <JobDescription html={job.description} lang={contentLang} />
 {/snippet}
 
 <!-- Wide layout mirroring /jobs. The company line spans the very top; below it a
@@ -294,7 +349,7 @@
   <header class="flex flex-col gap-3 lg:col-start-2 lg:row-start-2">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div class="flex flex-wrap items-center gap-2.5">
-        <h1 class="text-2xl font-semibold tracking-tight">{job.title}</h1>
+        <h1 class="text-2xl font-semibold tracking-tight" lang={contentLang}>{job.title}</h1>
         {#if applied}
           <Chip variant="brand" class="gap-1.5 border-brand/30 font-semibold">
             <CheckCircle2 class="size-3.5" aria-hidden="true" /> Applied
@@ -365,7 +420,12 @@
   </header>
 
   <aside class="w-full shrink-0 lg:col-start-1 lg:row-span-3 lg:row-start-1">
-    <div class="sticky top-6 flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
+    <!-- `top-20`, not `top-6`: the site header is `sticky top-0 h-14` and opaque, so a
+         card pinned 24px from the viewport spends the whole read with its first 32px —
+         the border, the padding, and the top of the match score — behind it. 80px is
+         the header's 56 plus the same 24 of air the card was asking for. Same offset
+         DocsNav's rail already uses. -->
+    <div class="sticky top-20 flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
       <JobMatch {job} />
 
       {#if salary}
@@ -422,13 +482,11 @@
         <ul class="flex flex-wrap gap-1.5 border-t border-border pt-4 first:border-t-0 first:pt-0">
           {#each job.skills as skill (skill)}
             <li>
-              <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- internal /jobs filter link from filterHref; query-only, no route to resolve -->
-              <a href={filterHref('skills', skill)}>
-                <Badge variant="brand" class="gap-1 transition hover:opacity-80">
-                  <SkillIcon slug={skill} />
-                  {skill}
-                </Badge>
-              </a>
+              <!-- The chip used to print the raw slug, so a posting read "ci-cd" beside a
+                   filter panel reading "CI/CD" — the same skill spelled two ways on one
+                   screen. SkillChip labels it from the dictionary and, for a skill the
+                   glossary has reached, carries the definition too. -->
+              <SkillChip slug={skill} />
             </li>
           {/each}
         </ul>
@@ -442,6 +500,12 @@
               {job.source}
             </Badge>
           </a>
+          {#if job.source === 'adzuna'}
+            <!-- Required by Adzuna's API terms, not a courtesy credit — see the component. It
+                 sits in the provenance row beside the source chip, which is where a reader
+                 already looks to find out where a posting came from. -->
+            <AdzunaAttribution jobUrl={job.url} />
+          {/if}
           {#if job.manually_added}
             <Badge variant="secondary">Manually added</Badge>
           {/if}
@@ -487,7 +551,60 @@
     </div>
   </aside>
 
-  <div class="flex min-w-0 flex-col gap-6 lg:col-start-2 lg:row-start-3">
+  <div class="relative flex min-w-0 flex-col gap-6 lg:col-start-2 lg:row-start-3">
+    <!-- The pinned header (see PINNED_HEADER_TOP). The overlay spans this column, which
+         is what gives the rail inside it something to travel: a `sticky` element is
+         clamped to its containing block, and the column is exactly the stretch the bar
+         should stay pinned over — it releases at the end of the posting, not over the
+         related jobs below. The `bottom-14` inset is the bar's own height: the rail is
+         zero-height, so without it the bar hangs a further ~52px past the end of the
+         overlay and spills over the "See also" strip on the last screen.
+         `pointer-events-none` on the overlay keeps the description selectable through
+         it; the bar itself takes them back.
+         `invisible` rather than a conditional block: keeping the bar mounted lets it
+         fade, and visibility:hidden takes it out of the focus order and the a11y tree
+         while it is away, so the duplicate apply button is not tabbable from the top
+         of the page. -->
+    <div class="pointer-events-none absolute inset-x-0 top-0 bottom-14">
+      <div bind:this={headerSentinel} aria-hidden="true" class="h-px w-full"></div>
+      <div class="sticky top-14 z-20 h-0">
+        <div
+          class={[
+            // Opaque, not frosted: the description slides directly under this and a
+            // translucent bar leaves a blurred ghost of the text inside it, which reads
+            // as a rendering fault rather than as glass. The mobile apply bar below can
+            // afford the frost because nothing scrolls under it at speed.
+            'pointer-events-auto flex items-center gap-3 border-b border-border bg-background py-2.5 transition-opacity duration-150',
+            headerPinned ? 'opacity-100' : 'invisible opacity-0',
+          ]}
+        >
+          <EntityLogo
+            name={job.company || 'Unknown company'}
+            src={companyLogoUrl(job.company) ?? undefined}
+            shape="square"
+            size="sm"
+          />
+          <p class="min-w-0 flex-1 truncate text-sm">
+            {#if job.company_slug}
+              <a
+                href={resolve('/companies/[slug]', { slug: job.company_slug })}
+                class="text-muted-foreground hover:text-foreground hover:underline"
+              >
+                {job.company || 'Unknown company'}
+              </a>
+            {:else}
+              <span class="text-muted-foreground">{job.company || 'Unknown company'}</span>
+            {/if}
+            <span class="px-1 text-muted-foreground" aria-hidden="true">·</span>
+            <span class="font-semibold" lang={contentLang}>{job.title}</span>
+          </p>
+          <!-- Hidden below lg for the same reason as the header's own copy: on mobile the
+               CTA is the sticky bottom bar, and two pinned buttons would fight. -->
+          {@render applyCta('md', 'hidden shrink-0 lg:inline-flex')}
+        </div>
+      </div>
+    </div>
+
     {#if job.closed_at}
       {@const closed = formatDate(job.closed_at)}
       <div class="rounded-md border border-border bg-secondary px-4 py-3 text-sm">
@@ -496,29 +613,36 @@
       </div>
     {/if}
 
-    {#if companySlug}
+    {#if contentTabs.length > 1}
       <TabStrip
-        tabs={CONTENT_TABS}
+        tabs={contentTabs}
         active={contentTab}
         onSelect={(id) => (contentTab = id)}
         label="Job details"
         {panelId}
       />
-      <!-- One panel for both tabs, its contents toggled by class rather than {#if}.
+      <!-- One panel for every tab, its contents toggled by class rather than {#if}.
            Unmounting the inactive one would throw away the company the visitor already
-           waited for, and re-render the description on every switch back. -->
+           waited for, and re-render the description on every switch back. It also keeps
+           every panel in the server-rendered HTML, so a crawler reads what a visitor
+           would have to click for. -->
       <div id={panelId} role="tabpanel" aria-labelledby={tabStripId(panelId, contentTab)}>
         <div class={contentTab === 'description' ? 'flex flex-col gap-6' : 'hidden'}>
           {@render descriptionContent()}
         </div>
-        <div class={contentTab === 'company' ? 'block' : 'hidden'}>
-          {#key companySlug}
-            <JobCompanyPanel
-              slug={companySlug}
-              name={job.company || 'this company'}
-              active={contentTab === 'company'}
-            />
-          {/key}
+        {#if companySlug}
+          <div class={contentTab === 'company' ? 'block' : 'hidden'}>
+            {#key companySlug}
+              <JobCompanyPanel
+                slug={companySlug}
+                name={job.company || 'this company'}
+                active={contentTab === 'company'}
+              />
+            {/key}
+          </div>
+        {/if}
+        <div class={contentTab === 'application' ? 'block' : 'hidden'}>
+          <JobApplyForm form={applyForm} />
         </div>
       </div>
     {:else}

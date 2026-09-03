@@ -1,4 +1,4 @@
-// Command gen-cities regenerates internal/location/cities1000.tsv from the
+// Command gen-cities regenerates internal/dict/location/cities1000.tsv from the
 // GeoNames cities1000 dump (populated places with population >= 1,000; CC-BY 4.0,
 // https://www.geonames.org/).
 //
@@ -41,7 +41,7 @@ import (
 const (
 	dumpURL    = "https://download.geonames.org/export/dump/cities1000.zip"
 	dumpFile   = "cities1000.txt"
-	outputPath = "internal/location/cities1000.tsv"
+	outputPath = "internal/dict/location/cities1000.tsv"
 )
 
 // GeoNames geoname-table column indices (tab-separated).

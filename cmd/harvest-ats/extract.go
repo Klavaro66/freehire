@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/normalize"
+	"github.com/strelov1/freehire/internal/dict/normalize"
 )
 
 // companySite pairs a company name with its website — the input the resolve step

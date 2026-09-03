@@ -9,18 +9,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // metricsQueries is the slice of *db.Queries this worker needs, declared here so the
 // assembly and its error handling are testable against a fake rather than a container.
-// Narrow by intent, matching internal/worker's FullScanQueries.
+// Narrow by intent, matching internal/platform/worker's FullScanQueries.
 type metricsQueries interface {
 	SearchOutboxMetrics(context.Context) (db.SearchOutboxMetricsRow, error)
 	EnrichmentOutboxMetrics(context.Context) (db.EnrichmentOutboxMetricsRow, error)
 	SemanticOutboxMetrics(context.Context) (db.SemanticOutboxMetricsRow, error)
 	BoardHealthMetrics(context.Context) (db.BoardHealthMetricsRow, error)
 	NewestOpenJobCreatedAt(context.Context) (pgtype.Timestamptz, error)
+	ProviderIngestHealth(context.Context) ([]db.ProviderIngestHealthRow, error)
 }
 
 // collect runs one measurement pass. Any query failure aborts the pass: a partial
@@ -50,6 +51,28 @@ func collect(ctx context.Context, q metricsQueries) (snapshot, error) {
 		return snapshot{}, err
 	}
 
+	health, err := q.ProviderIngestHealth(ctx)
+	if err != nil {
+		return snapshot{}, fmt.Errorf("provider ingest health: %w", err)
+	}
+	providers := make([]providerHealth, len(health))
+	for i, r := range health {
+		// An invalid Timestamptz is max() over a provider whose every board has never
+		// succeeded. It stays the zero time here and is dropped by render, because the
+		// alternative — a Unix zero — reads downstream as a provider overdue since 1970.
+		// The board counts below carry that provider instead: they are always present.
+		p := providerHealth{
+			name:    r.Provider,
+			cooled:  r.Cooled,
+			failing: r.Failing,
+			healthy: r.Healthy,
+		}
+		if r.LastSuccessAt.Valid {
+			p.lastSuccess = r.LastSuccessAt.Time
+		}
+		providers[i] = p
+	}
+
 	return snapshot{
 		queues: []queueMetrics{
 			{name: "search_outbox", depth: search.Depth, deadLetters: search.DeadLetters, oldestAgeSeconds: search.OldestAgeSeconds},
@@ -60,6 +83,7 @@ func collect(ctx context.Context, q metricsQueries) (snapshot, error) {
 		failingBoards: boards.Failing,
 		cooledBoards:  boards.Cooled,
 		newestJob:     newestJob,
+		providers:     providers,
 	}, nil
 }
 

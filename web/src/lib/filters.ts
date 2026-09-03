@@ -6,8 +6,10 @@
 import { UrlSyncedState } from './urlSynced.svelte';
 import { saveJobFilters } from './filterStorage';
 import {
+  type ClearanceFilter,
   type FacetState,
   type JobFilters,
+  type JobSort,
   type Sign,
   emptyFacet,
   emptyFilters,
@@ -20,6 +22,7 @@ import {
   facetToggleSign,
   facetAdd,
   facetRemove,
+  filtersWithRole,
 } from './facetModel';
 
 export * from './facetModel';
@@ -58,6 +61,11 @@ export class FilterStore {
     return this.#url.applied;
   }
 
+  /** The filters as they stand in the address bar — build links off this, not `page.url`. */
+  get params(): URLSearchParams {
+    return this.#url.params;
+  }
+
   get active(): number {
     return activeFilterCount(this.#url.value);
   }
@@ -81,9 +89,33 @@ export class FilterStore {
     this.#url.setSoon({ ...this.#url.value, postedWithinDays: n });
   }
 
+  /** The same freshness bound chosen from a select rather than dragged on the modal's
+   *  slider. setNow, not setSoon: a select commits one value, so there are no
+   *  intermediate stops to debounce away, and the list must reorder on the choice —
+   *  the same reasoning as setSort. Both setters write one field, so the slider, this
+   *  select and the filter summary can never disagree about the value. */
+  pickPostedWithinDays(n: number | null) {
+    this.#url.setNow({ ...this.#url.value, postedWithinDays: n });
+  }
+
+  setExperienceYearsMax(n: number | null) {
+    this.#url.setSoon({ ...this.#url.value, experienceYearsMax: n });
+  }
+
   // Discrete inputs (clicked/toggled): apply immediately via setNow.
   setVisa(on: boolean) {
     this.#url.setNow({ ...this.#url.value, visa: on });
+  }
+
+  setClearance(v: ClearanceFilter) {
+    this.#url.setNow({ ...this.#url.value, clearance: v });
+  }
+
+  /** Switch the feed ordering. setNow, not setSoon: this is a discrete choice from a
+   *  select, not a dragged gesture, and it re-orders the whole feed — debouncing it
+   *  would leave the old order on screen with no indication anything is coming. */
+  setSort(sort: JobSort) {
+    this.#url.setNow({ ...this.#url.value, sort });
   }
 
   /** Toggle a facet between match-all (AND) and match-any (OR) of its included values. */
@@ -114,6 +146,14 @@ export class FilterStore {
   /** Add a token to a facet's include set (token inputs); no-op on blank or duplicate. */
   add(param: string, raw: string) {
     this.#setFacet(param, facetAdd(this.facet(param), raw));
+  }
+
+  /** Header role suggestion picked: turn the role on and drop the typed text in one
+   *  discrete write. setNow (not setSoon) is the point — it clears the timer the last
+   *  keystroke's setQuery left pending, so the debounced text cannot land after the
+   *  role and re-narrow the search the suggestion just widened. */
+  applyRole(slug: string) {
+    this.#url.setNow(filtersWithRole(this.#url.value, slug));
   }
 
   /** Remove a value from a facet entirely (both sets). */

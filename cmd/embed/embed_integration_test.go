@@ -23,12 +23,12 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/strelov1/freehire/internal/testdb"
+	"github.com/strelov1/freehire/internal/platform/testdb"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/embed"
-	"github.com/strelov1/freehire/internal/search"
+	"github.com/strelov1/freehire/internal/ai/embed"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 // vectorWidth is the vector width the stub embedder returns — matches the real e5-base

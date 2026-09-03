@@ -119,7 +119,7 @@ under the same conditions the range read uses, and take the employer from the ev
 denormalized slug rather than through the posting — the same rules, so the two reads cannot
 disagree about what an event is or which employer it belongs to.
 
-The rule SHALL live in `internal/apptimeline` beside the range read rather than in an HTTP
+The rule SHALL live in `internal/application/apptimeline` beside the range read rather than in an HTTP
 handler: the in-app assistant calls services directly with the session owner's id and issues no
 HTTP request, and "what happened to this application" is a question it should be able to ask.
 

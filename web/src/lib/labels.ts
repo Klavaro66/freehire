@@ -24,7 +24,7 @@ export function titleCase(value: string): string {
 
 // Region code → display names, one row per vocab.RegionValues entry. `short`
 // is the compact UI label (filter pills, facet rows).
-export const REGIONS: { code: string; short: string }[] = [
+const REGIONS: { code: string; short: string }[] = [
   { code: 'global', short: 'Worldwide' },
   { code: 'north_america', short: 'North America' },
   { code: 'latam', short: 'LATAM' },
@@ -41,6 +41,12 @@ export const REGION_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 export const SENIORITY_LABELS: Record<string, string> = { c_level: 'C-level' };
+
+// The one role-type value (vocab.RoleTypeValues). There is deliberately no second
+// entry: the catalogue can show that a posting IS a management role and cannot show
+// that it is not, so excluding this pill means "no management marker in the title",
+// which must never be labelled "Individual contributor" anywhere.
+export const ROLE_TYPE_LABELS: Record<string, string> = { people_manager: 'People manager' };
 
 // English proficiency levels (vocab.EnglishLevelValues); `none` is the
 // no-requirement sentinel — detail pages filter it out before rendering.
@@ -101,7 +107,17 @@ export const CATEGORY_LABELS: Record<string, string> = {
   blockchain: 'Blockchain',
   architecture: 'Architecture',
   design: 'Design',
+  creative: 'Creative & Media',
   engineering_design: 'Engineering Design',
+  industrial_engineering: 'Industrial Engineering',
+  healthcare: 'Healthcare',
+  skilled_trades: 'Skilled Trades',
+  retail: 'Retail',
+  hospitality: 'Hospitality',
+  logistics: 'Logistics',
+  education: 'Education',
+  personal_services: 'Personal Services',
+  administration: 'Administration',
   product: 'Product',
   project_management: 'Project Management',
   management: 'Management',

@@ -15,36 +15,48 @@
   // where a swipe deck exists (the standalone jobs list). `showDesktopTotal` is false when
   // the desktop layout already surfaces the total elsewhere (the company page's sidebar
   // stat), so the above-list line isn't shown twice; the mobile toolbar total is unaffected.
-  // `sortControl` is an optional leading control (the jobs feed's sort selector) rendered
-  // in the mobile toolbar and beside the desktop total; it shows even when `total` is null
-  // so the control stays reachable while the list is empty or standing in a prompt.
+  // `controls` is an optional slot for the list's own controls — however many the view
+  // passes (the jobs feed's sort select, freshness select and evergreen toggle; the
+  // company catalog's sort select) — rendered in the mobile toolbar and beside the
+  // desktop total. It shows even when `total` is null so the controls stay reachable
+  // while the list is empty or standing in a prompt.
   let {
     total,
     unit,
     onSwipe,
     showDesktopTotal = true,
-    sortControl,
+    controls,
   }: {
     total: number | null;
     unit: string;
     onSwipe?: () => void;
     showDesktopTotal?: boolean;
-    sortControl?: Snippet;
+    controls?: Snippet;
   } = $props();
 </script>
 
 <!-- Mobile inline toolbar: total on the left, controls on the right. The Swipe entry is
      icon-only here (labelled for a11y) so the row stays on one line with the count and the
-     sort control; the word would crowd it out on a narrow phone. -->
-<div class="mb-3 flex items-center gap-2 md:hidden">
+     list controls; the word would crowd it out on a narrow phone — and the jobs list's
+     evergreen toggle drops its word for the same reason.
+
+     `flex-wrap` is the safety net under that: the controls are sized by their content
+     (a long count, a translated label, a fourth control) and a row that runs out of width
+     must break onto a second line rather than clip its rightmost control off-screen. -->
+<div class="mb-3 flex flex-wrap items-center gap-2 md:hidden">
   {#if total !== null}
     <span class="shrink-0 whitespace-nowrap text-sm text-muted-foreground" aria-live="polite">
       <span class="font-semibold tabular-nums text-foreground">{total.toLocaleString()}</span>
       {unit}
     </span>
   {/if}
-  <div class="ml-auto flex items-center gap-2">
-    {@render sortControl?.()}
+  <!-- Wraps too, not just the outer row. Without this the controls are one indivisible
+       block: the row can drop the whole block to a second line but the block itself
+       still overflows, so a longer control (a translated select value, a fourth entry)
+       clips exactly as before. `justify-end` keeps a wrapped line right-aligned under
+       the `ml-auto`. -->
+  <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+    {@render controls?.()}
     {#if onSwipe}
       <button
         type="button"
@@ -59,17 +71,19 @@
   </div>
 </div>
 
-<!-- Desktop: the total (and any sort control) sit top-right above the list (filters
-     live in the sidebar). Renders when there's a total OR a sort control to show, so
-     the control stays visible on an empty/prompt list where the total is null. -->
-{#if showDesktopTotal && (total !== null || sortControl)}
+<!-- Desktop: the total (and any list controls) sit top-right above the list (filters
+     live in the sidebar). The two are gated INDEPENDENTLY: the total on `showDesktopTotal`
+     (a view that renders its own total elsewhere suppresses this one), the controls on
+     their own presence. Gating both on `showDesktopTotal` is what hid the controls
+     entirely on a company page, where the sidebar carries the count. -->
+{#if (showDesktopTotal && total !== null) || controls}
   <div class="mb-3 hidden items-center justify-end gap-3 md:flex">
-    {#if total !== null}
+    {#if showDesktopTotal && total !== null}
       <span class="text-sm text-muted-foreground" aria-live="polite">
         <span class="font-semibold tabular-nums text-foreground">{total.toLocaleString()}</span>
         {unit}
       </span>
     {/if}
-    {@render sortControl?.()}
+    {@render controls?.()}
   </div>
 {/if}

@@ -17,11 +17,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/testdb"
+	"github.com/strelov1/freehire/internal/platform/testdb"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/viewlog"
+	"github.com/strelov1/freehire/internal/application/viewlog"
 )
 
 func startPostgres(t *testing.T) *pgxpool.Pool {

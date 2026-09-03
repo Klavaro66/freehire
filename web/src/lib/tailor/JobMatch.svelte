@@ -1,7 +1,7 @@
 <script lang="ts">
   // How well the CV being edited matches this vacancy — measured on the rendered PDF's text
   // layer, against the vacancy and nothing else. Unlike the match analysis below it in the
-  // same tab, this number moves as the candidate types: it is deterministic, costs no AI credits,
+  // same tab, this number moves as the candidate types: it is deterministic, costs no allowance,
   // and is recomputed after every saved edit.
   //
   // An unavailable score renders nothing at all. A panel that says "score unavailable"
@@ -10,6 +10,7 @@
   import ScoreCategoryRow from './ScoreCategoryRow.svelte';
   import type { CvJobMatch } from '$lib/cv';
   import SkillIcon from '../components/SkillIcon.svelte';
+  import { skillLabel } from '$lib/facets';
 
   let { data }: { data: CvJobMatch | null | undefined } = $props();
 
@@ -72,7 +73,7 @@
             <li
               class="flex items-center gap-1 rounded border border-warning/30 bg-background/60 px-1.5 py-0.5 text-[11px] text-warning-strong"
             >
-              <SkillIcon slug={skill} />{skill}
+              <SkillIcon slug={skill} />{skillLabel(skill)}
             </li>
           {/each}
         </ul>

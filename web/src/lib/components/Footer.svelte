@@ -14,6 +14,11 @@
         { label: 'Jobs', href: resolve('/') },
         { label: 'Companies', href: resolve('/companies') },
         { label: 'Collections', href: resolve('/collections') },
+        { label: 'Jobs by role', href: resolve('/roles') },
+        // The glossary's only link from the app — the chip's reveal opens on
+        // interaction and the sitemap is for crawlers, so this is the one path a
+        // reader browsing the site can follow to it.
+        { label: 'Skills glossary', href: resolve('/skills') },
         { label: 'Recruiters', href: resolve('/recruiters') },
       ],
     },
@@ -38,6 +43,7 @@
         { label: 'Insights', href: resolve('/insights') },
         { label: 'Hiring signal', href: resolve('/insights/companies') },
         { label: 'Trends', href: resolve('/trends') },
+        { label: 'For AI agents', href: resolve('/agents') },
         { label: 'CLI', href: resolve('/cli') },
         { label: 'ChatGPT', href: resolve('/chatgpt') },
         { label: 'API docs', href: resolve('/docs/api') },
@@ -63,7 +69,7 @@
     { provider: 'github', label: 'GitHub', href: 'https://github.com/strelov1/freehire' },
     { provider: 'linkedin', label: 'LinkedIn', href: 'https://linkedin.com/company/freehire-dev/' },
     { provider: 'telegram', label: 'Telegram', href: 'https://t.me/freehiredev' },
-    { provider: 'discord', label: 'Discord', href: 'https://discord.gg/aAXS2rghW' },
+    { provider: 'discord', label: 'Discord', href: 'https://discord.gg/sYnZksswR' },
   ];
 
   // A strip below the four groups rather than a fifth column: the grid is

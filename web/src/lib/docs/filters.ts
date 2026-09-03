@@ -40,9 +40,24 @@ const API_ONLY_FACETS: FilterRow[] = [
   { param: 'salary_period', label: 'Salary period', values: 'year, month, day, hour' },
 ];
 
+// A facet whose value list needs saying more than enumerating. Keyed by param, this
+// replaces the derived `values` text for that row only — the row itself still comes
+// from the FACETS registry, so the facet cannot be documented twice or go missing.
+const VALUES_OVERRIDE: Record<string, string> = {
+  // The one-sided vocabulary. An integrator who reads `role_type_exclude` as a
+  // positive individual-contributor filter is building on a claim the catalogue
+  // cannot support, so the caveat has to ride with the row rather than be inferred.
+  role_type:
+    'people_manager — the title names a people-management role. One value only: carrying nothing means no management marker was found, NOT that the posting is individual-contributor work, so role_type_exclude means "no marker", not "IC"',
+};
+
 /** Every string facet: the SPA-derived rows plus the API-only ones. */
 export const FILTER_FACETS: FilterRow[] = [
-  ...FACETS.map((f) => ({ param: f.param, label: f.label, values: valuesOf(f.options) })),
+  ...FACETS.map((f) => ({
+    param: f.param,
+    label: f.label,
+    values: VALUES_OVERRIDE[f.param] ?? valuesOf(f.options),
+  })),
   ...API_ONLY_FACETS,
 ];
 
@@ -50,6 +65,7 @@ export const FILTER_FACETS: FilterRow[] = [
  *  query_filter.go outside StringFacets, so they are documented by hand. */
 export const FILTER_EXTRAS: FilterRow[] = [
   { param: 'visa_sponsorship', label: 'Visa sponsorship', values: 'true, false' },
+  { param: 'requires_clearance', label: 'Security clearance required', values: 'true, false' },
   {
     param: 'salary_min',
     label: 'Minimum salary',
@@ -64,6 +80,12 @@ export const FILTER_EXTRAS: FilterRow[] = [
     param: 'experience_years_min',
     label: 'Minimum experience',
     values: 'integer — jobs requiring at least this many years',
+  },
+  {
+    param: 'experience_years_max',
+    label: 'Maximum experience',
+    values:
+      'integer — jobs requiring at most this many years, the same figure experience_years_min bounds from below. Use 0 for jobs stating no prior experience is required. Either bound excludes jobs that state no requirement at all',
   },
   {
     param: 'posted_within_days',
@@ -96,4 +118,6 @@ export const RECIPES: Recipe[] = [
   { title: 'Must use both Go and Rust', query: 'skills=go,rust&skills_mode=and' },
   { title: 'Exclude outstaff companies', query: 'company_type_exclude=outstaff' },
   { title: 'At least $100k, with visa sponsorship', query: 'salary_currency=USD&salary_min=100000&visa_sponsorship=true' },
+  { title: 'Excluding jobs that need a security clearance', query: 'requires_clearance=false' },
+  { title: 'Only jobs that need a security clearance', query: 'requires_clearance=true' },
 ];

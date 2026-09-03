@@ -17,13 +17,13 @@ import {
   WORK_MODE_VALUES, SENIORITY_VALUES, CATEGORY_VALUES,
   EMPLOYMENT_TYPE_VALUES, RELOCATION_VALUES, ENGLISH_LEVEL_VALUES,
   COMPANY_TYPE_VALUES, DOMAIN_VALUES, INDUSTRY_VALUES, ROLE_LABELS, ROLE_ALIASES,
-  AI_ARCHETYPE_VALUES, SKILL_LABELS, INDUSTRY_LABELS,
+  AI_ARCHETYPE_VALUES, SKILL_LABELS, INDUSTRY_LABELS, ROLE_TYPE_VALUES,
 } from './generated/contracts';
 import { fuzzyMatch } from './fuzzy';
 import {
   REGION_LABELS, SENIORITY_LABELS, EMPLOYMENT_LABELS, WORK_MODE_LABELS,
   CATEGORY_LABELS, DOMAIN_LABELS, COMPANY_TYPE_LABELS, ENGLISH_LEVEL_LABELS,
-  RELOCATION_LABELS, AI_ARCHETYPE_LABELS, titleCase,
+  RELOCATION_LABELS, AI_ARCHETYPE_LABELS, ROLE_TYPE_LABELS, titleCase,
 } from './labels';
 import { COLLECTIONS } from './collections';
 import { ROLE_RELATED } from './roleRelated';
@@ -49,7 +49,7 @@ export interface FacetOption {
   icon?: string;
 }
 
-export type FacetControl = 'pills' | 'select' | 'tokens' | 'remote';
+type FacetControl = 'pills' | 'select' | 'tokens' | 'remote';
 
 /** One facet's live selection, as FacetSection reads it: the included and excluded
  *  values (a value is in at most one set), plus the include-set match mode. */
@@ -162,7 +162,7 @@ const languageNames = (() => {
   }
 })();
 
-export function languageLabel(code: string): string {
+function languageLabel(code: string): string {
   if (!code) return code;
   try {
     return languageNames?.of(code) ?? code.toUpperCase();
@@ -175,7 +175,7 @@ export function languageLabel(code: string): string {
 // no display name, so title-case the slug for a readable label. Imperfect for
 // acronyms (group-ib → "Group Ib") but consistent with the other facets — a real
 // slug→name lookup would need a per-company fetch, which this facet forgoes.
-export function companyLabel(slug: string): string {
+function companyLabel(slug: string): string {
   return titleCase(slug.replace(/-/g, '_'));
 }
 
@@ -191,8 +191,8 @@ async function companySearch(query: string): Promise<FacetOption[]> {
 
 // Composes one /geo/cities result into a FacetOption: the value stays the bare city
 // name (what a profile's location_preferences already stores), the label adds the
-// country via the same countryLabel() resolver COUNTRY_OPTIONS uses, so two
-// otherwise-identical city names (e.g. two "Springfield"s) read as distinct choices.
+// country via the same countryLabel() resolver COUNTRY_OPTIONS uses, so the country a
+// suggestion came from is at least readable.
 export function cityOption(row: { value: string; country: string }): FacetOption {
   return { value: row.value, label: `${row.value}, ${countryLabel(row.country)}` };
 }
@@ -202,9 +202,22 @@ export function cityOption(row: { value: string; country: string }): FacetOption
 // debounce means this fires at most once per ~250ms of typing, not per keystroke).
 // `country` narrows the base-city search to the already-chosen base country; the
 // relocation-cities search omits it, since that set may span multiple countries.
+//
 export async function searchCities(query: string, country?: string): Promise<FacetOption[]> {
-  const rows = await api.searchCities(query, country);
-  return rows.map(cityOption);
+  return collapseCities(await api.searchCities(query, country));
+}
+
+// One city name is one option. /geo/cities answers per (name, country), so a prefix
+// like "london" or "victoria" comes back several times over — and since a preference
+// stores the bare name, every one of those rows would save the identical value. Listing
+// them separately offered a choice that does not exist, and the repeated value collided
+// in the picker's keyed {#each}, which in Svelte takes down the whole list rather than
+// the duplicate row. The first row per name wins: /geo/cities returns them by
+// descending population, so that is the city a reader means by the name.
+export function collapseCities(rows: { value: string; country: string }[]): FacetOption[] {
+  const byName = new Map<string, FacetOption>();
+  for (const row of rows) if (!byName.has(row.value)) byName.set(row.value, cityOption(row));
+  return [...byName.values()];
 }
 
 // Role facet values are canonical slugs (senior_backend, founding_engineer); the
@@ -232,6 +245,11 @@ export function dynamicLabel(param: string, value: string): string {
   if (param === 'company_slug') return companyLabel(value);
   if (param === 'source') return sourceLabel(value);
   if (param === 'role') return roleLabel(value);
+  // Skills have no static option list, so every surface naming a SELECTED skill — the
+  // filter summary chips above all — arrives here. Without this it fell through to the
+  // raw slug, and one skill was spelled two ways on one screen: "ci-cd" in the summary,
+  // "CI/CD" in the panel beside it.
+  if (param === 'skills') return skillLabel(value);
   return value;
 }
 
@@ -254,7 +272,7 @@ export function dynamicOptions(param: string, dist: Record<string, number>, sele
   const keys = new Set<string>([...Object.keys(dist), ...selected]);
   return [...keys]
     .map((value) => ({ value, label: dynamicLabel(param, value), count: dist[value] ?? 0 }))
-    .toSorted((a, b) => (b.count ?? 0) - (a.count ?? 0) || a.label.localeCompare(b.label));
+    .sort((a, b) => (b.count ?? 0) - (a.count ?? 0) || a.label.localeCompare(b.label));
 }
 
 // Role slugs carry an optional seniority grade prefix (senior_backend); the
@@ -334,7 +352,8 @@ const SOURCE_LABELS: Record<string, string> = {
   bamboohr: 'BambooHR', successfactors: 'SuccessFactors',
   workatastartup: 'Work at a Startup', remoteok: 'RemoteOK', arc: 'Arc',
   jobstash: 'JobStash', globalpayments: 'Global Payments',
-  usajobs: 'USAJobs', whatjobs: 'WhatJobs',
+  usajobs: 'USAJobs', whatjobs: 'WhatJobs', ukgready: 'UKG Ready',
+  edjoin: 'EDJOIN',
 };
 
 /** Display label for a source slug (e.g. smartrecruiters → "SmartRecruiters"),
@@ -377,6 +396,7 @@ export const CATEGORY_OPTIONS: FacetOption[] = CATEGORY;
 // Six fixed values (internal/aiarchetype) — a static select like CATEGORY/DOMAINS,
 // not a dynamic (distribution-driven) control like role/skills.
 const AI_ARCHETYPE: FacetOption[] = options(AI_ARCHETYPE_VALUES, AI_ARCHETYPE_LABELS);
+const ROLE_TYPE: FacetOption[] = options(ROLE_TYPE_VALUES, ROLE_TYPE_LABELS);
 
 // Work-mode and region options, exported for the profile's location preferences editor so
 // it shares the filter panel's vocabulary/order instead of duplicating it.
@@ -489,11 +509,83 @@ const ISO_COUNTRY_CODES = [
   'tr', 'tt', 'tv', 'tw', 'tz', 'ua', 'ug', 'um', 'us', 'uy', 'uz', 'va', 'vc', 've', 'vg', 'vi',
   'vn', 'vu', 'wf', 'ws', 'ye', 'yt', 'za', 'zm', 'zw',
 ];
+/** Turn an English display name into a URL segment: strip diacritics, lowercase, and
+ *  collapse every run of non-alphanumerics into one hyphen. Local to the country
+ *  index — a general slugifier would invite callers whose input is not a name Intl
+ *  produced, and the guarantees below (injective, round-tripping) only hold for that. */
+function slugifyName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/** A country that has earned a URL segment: its ISO code and the slug it resolves by. */
+export interface SlugifiedCountry {
+  code: string;
+  slug: string;
+}
+
+// The bidirectional country↔slug index, built once from ISO_COUNTRY_CODES. The
+// landing routes address a country by its slugified English name ('germany'), never
+// by ISO code — the code is not a phrase anyone searches. Intl gives the forward
+// direction and no reverse one, so the reverse is derived here rather than in a
+// hand-kept table that could disagree with countryLabel.
+//
+// Two codes are refused a slug:
+//   - one countryLabel only ECHOES (it returns the uppercased code when Intl has no
+//     name, e.g. the user-assigned 'xk'); an echo is not a name, and indexing it
+//     would mint a URL out of a two-letter non-word.
+//   - both members of any pair that slugify alike. Handing the slug to whichever
+//     came first in the list would be an arbitrary choice made silently, so the
+//     collision drops the whole group and the ambiguity stays visible as an absence.
+const COUNTRY_SLUGS: { byCode: Map<string, string>; bySlug: Map<string, string>; list: SlugifiedCountry[] } =
+  (() => {
+    const claims = new Map<string, string[]>();
+    for (const code of ISO_COUNTRY_CODES) {
+      const label = countryLabel(code);
+      if (label === code.toUpperCase()) continue;
+      const slug = slugifyName(label);
+      if (!slug) continue;
+      claims.set(slug, [...(claims.get(slug) ?? []), code]);
+    }
+
+    const byCode = new Map<string, string>();
+    const bySlug = new Map<string, string>();
+    const list: SlugifiedCountry[] = [];
+    for (const [slug, codes] of claims) {
+      const [code, ...rest] = codes;
+      if (!code || rest.length > 0) continue;
+      byCode.set(code, slug);
+      bySlug.set(slug, code);
+      list.push({ code, slug });
+    }
+    list.sort((a, b) => a.slug.localeCompare(b.slug));
+    return { byCode, bySlug, list };
+  })();
+
+/** ISO alpha-2 → its URL slug, or undefined when the code earns no slug (see above). */
+export function countrySlug(code: string): string | undefined {
+  return COUNTRY_SLUGS.byCode.get(code.toLowerCase());
+}
+
+/** A URL slug → its ISO alpha-2, or undefined when the slug names no country. */
+export function countryFromSlug(slug: string): string | undefined {
+  return COUNTRY_SLUGS.bySlug.get(slug.toLowerCase());
+}
+
+/** Every country carrying a slug, sorted by slug. The generator's country axis. */
+export function slugifiedCountries(): SlugifiedCountry[] {
+  return COUNTRY_SLUGS.list;
+}
+
 const COUNTRY: FacetOption[] = ISO_COUNTRY_CODES.map((value) => ({
   value,
   label: countryLabel(value),
   flag: value,
-})).toSorted((a, b) => a.label.localeCompare(b.label));
+})).sort((a, b) => a.label.localeCompare(b.label));
 
 // The full ISO country select, exported for the profile's location editor (base +
 // remote/relocation countries) so it reuses the same list/labels as the company facet.
@@ -558,6 +650,7 @@ export const FACETS: FacetDef[] = [
   { param: 'category', label: 'Specialization', control: 'select', options: CATEGORY, excludable: true, placeholder: 'Search specializations' },
   { param: 'ai_archetype', label: 'AI Specialization', control: 'select', options: AI_ARCHETYPE, excludable: true, placeholder: 'Search AI specializations' },
   { param: 'seniority', label: 'Seniority', control: 'pills', options: SENIORITY, excludable: true },
+  { param: 'role_type', label: 'Role type', control: 'pills', options: ROLE_TYPE, excludable: true },
   { param: 'skills', label: 'Skills', control: 'select', dynamic: true, excludable: true, hasAndOr: true, placeholder: 'Search skills', techIcons: true },
   { param: 'domains', label: 'Industry', control: 'select', options: DOMAINS, excludable: true, placeholder: 'Search industries' },
   { param: 'company_type', label: 'Company type', control: 'pills', options: COMPANY_TYPE, excludable: true },

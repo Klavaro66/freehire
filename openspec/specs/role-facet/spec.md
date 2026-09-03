@@ -5,8 +5,8 @@ TBD - created by archiving change add-role-facet. Update Purpose after archive.
 ## Requirements
 ### Requirement: A deterministic dictionary derives a job's roles
 
-The system SHALL provide `internal/roletag`, a curated deterministic dictionary
-(mirroring `internal/classify` and `internal/skilltag`) that derives a job's
+The system SHALL provide `internal/dict/roletag`, a curated deterministic dictionary
+(mirroring `internal/dict/classify` and `internal/dict/skilltag`) that derives a job's
 `roles` — a list of canonical role slugs — from its resolved seniority, resolved
 category, and title. It SHALL emit:
 

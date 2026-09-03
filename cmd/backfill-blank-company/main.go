@@ -24,10 +24,11 @@ import (
 	"flag"
 	"log"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/normalize"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/dict/normalize"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/externalid"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // staticCompanyProviders is the hand-verified allowlist described in the package doc.
@@ -60,7 +61,7 @@ func run() int {
 			if e.Company == "" || e.Board == "" {
 				continue // Validate already guarantees this in production; defensive only
 			}
-			pattern := sources.BoardIDPattern(e.Board)
+			pattern := externalid.BoardPattern(e.Board)
 			boards++
 
 			if *dryRun {

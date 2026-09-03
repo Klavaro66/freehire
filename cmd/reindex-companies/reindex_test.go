@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/search"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 var errTest = errors.New("push boom")

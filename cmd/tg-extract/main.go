@@ -11,12 +11,12 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/linksource"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/telegram"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/linksource"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/ingest/telegram"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {
@@ -73,7 +73,11 @@ func run() int {
 		log.Printf("extract: %v", err)
 		return 1
 	}
-	log.Printf("tg-extract done: processed=%d jobs=%d failed=%d",
-		stats.Processed, stats.Jobs, stats.Failed)
+	// skipped is the mis-extraction count: vacancies the model produced that the domain
+	// refused for having no title or identity. It used to be invisible — the adapter dropped
+	// them and jobs counted them anyway — so a run whose extraction was degrading looked
+	// exactly like a healthy one.
+	log.Printf("tg-extract done: processed=%d jobs=%d skipped=%d failed=%d",
+		stats.Processed, stats.Jobs, stats.Skipped, stats.Failed)
 	return worker.ExitCode(stats.Failed, 0)
 }

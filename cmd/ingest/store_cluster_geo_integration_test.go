@@ -11,11 +11,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/job"
-	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/pipeline"
-	"github.com/strelov1/freehire/internal/testdb"
+	"github.com/strelov1/freehire/internal/ingest/pipeline"
+	"github.com/strelov1/freehire/internal/job/job"
+	"github.com/strelov1/freehire/internal/job/jobderive"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/testdb"
 )
 
 // editedCityPosting is cityPosting with a changed apply URL: a content change the index
@@ -46,7 +46,7 @@ func TestSave_ContentChangeRequeuesTheCanonForSearch(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(pool)
 
-	store := newDBStore(pool, 1, nil, nil, pipeline.HydrationRetryWindow)
+	store := newDBStore(pool, 1, nil, nil, pipeline.HydrationRetryWindow, false)
 
 	// The same role crawled once per city: the first is the canon, the second a repost
 	// that is kept as a row but never queued for the index.

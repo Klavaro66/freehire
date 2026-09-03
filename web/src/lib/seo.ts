@@ -6,7 +6,7 @@ import type { PostMeta } from './blog';
 import { countryLabel } from './facets';
 import { COUNTRY_REGION_MAP } from './generated/contracts';
 import { companyLogoUrl } from './logo';
-import type { Company, Enrichment, Job } from './types';
+import type { Company, Enrichment, Job, JobCard } from './types';
 
 const SITE = 'freehire';
 // Site-level facts reused across the homepage WebSite/Organization schema.
@@ -203,7 +203,7 @@ function applicantRegions(
     : (regions ?? []).flatMap((r) => REGION_COUNTRIES[r] ?? []);
   const named = [
     ...new Set(iso.map(countryName).filter((n): n is string => Boolean(n))),
-  ].toSorted();
+  ].sort();
   if (named.length === 0) return undefined;
   const entries: CountryRef[] = named.map((name) => ({ '@type': 'Country', name }));
   // schema.org reads a lone object and a one-element array alike; emit the object
@@ -303,6 +303,41 @@ function estimatedValidThrough(job: Job): string | undefined {
   return d.toISOString();
 }
 
+// A shape check, deliberately NOT a vocabulary: every ISO 639-1 code passes, so
+// a language new to the catalogue needs no change here.
+//
+// It rejects what is not a language code at all. The enrichment contract
+// promises ISO 639-1 (internal/enrich/enrichment.go) but nothing enforces it —
+// the value arrives as a bare string, written by an LLM — and a tag no consumer
+// can resolve is worse than none, having announced a switch it cannot make.
+// Should a source ever report ISO 639-3 (`fil`) or a regional tag (`pt-BR`),
+// widen the pattern; until one does, both degrade to undefined rather than
+// reaching markup wrong.
+function isoLanguage(raw: string | undefined): string | undefined {
+  const code = raw?.trim().toLowerCase();
+  return code && /^[a-z]{2}$/.test(code) ? code : undefined;
+}
+
+/** The posting's own language, for a `lang` attribute on the subtree that holds
+ *  it — the title and the description body, the only places a posting speaks
+ *  for itself.
+ *
+ *  Deliberately a subtree and not the document. Public pages render English
+ *  chrome by contract (hooks.server.ts pins `<html lang="en">` off `/my/**`)
+ *  and that is accurate — the nav, the metadata rail and every control really
+ *  are English. Only the posting is foreign, so only the posting is relabelled.
+ *
+ *  Undefined for English, for an unknown language, and for a `Card` (which
+ *  carries no enrichment to read) — all three mean "emit no attribute", so a
+ *  caller can hand the result straight to `lang` and let Svelte drop it. An
+ *  empty string would be worse than silence: it asserts "language unknown" and
+ *  overrides what the subtree would otherwise inherit. */
+export function foreignContentLang(job: Job | JobCard): string | undefined {
+  const enrichment = 'enrichment' in job ? job.enrichment : undefined;
+  const code = isoLanguage(enrichment?.posting_language);
+  return code === 'en' ? undefined : code;
+}
+
 /** schema.org JobPosting for a job-detail page, eligible for Google Jobs. A
  *  closed posting sets `validThrough` to its close time so it reads as expired,
  *  not open; an open one gets a rolling estimate (see estimatedValidThrough) so
@@ -390,6 +425,12 @@ export function jobPostingJsonLd(job: Job, origin: string): Record<string, unkno
 
   // skills is the dictionary facet (canonical names), served as Google Text.
   if (job.skills?.length) ld.skills = job.skills.join(', ');
+
+  // Every known language, English included: a JSON-LD node inherits nothing, so
+  // unlike the `lang` attribute there is no default here worth staying silent
+  // about (see foreignContentLang).
+  const inLanguage = isoLanguage(e.posting_language);
+  if (inLanguage) ld.inLanguage = inLanguage;
 
   // A zero minimum (explicit entry-level) carries no SEO signal, so omit it.
   if (e.experience_years_min != null && e.experience_years_min > 0) {
@@ -606,6 +647,31 @@ export function faqPageJsonLd(faqs: FaqItem[]): Record<string, unknown> {
       name: f.question,
       acceptedAnswer: { '@type': 'Answer', text: f.answer },
     })),
+  };
+}
+
+/** schema.org DefinedTerm for one skill's glossary page.
+ *
+ *  The one thing on that page a machine cannot infer from the prose: that the heading
+ *  names a term, that the paragraph under it is that term's definition, and that both
+ *  belong to one glossary rather than being an article that happens to mention a word.
+ *  `@id` is the page itself, so the term and the URL are the same entity. */
+export function definedTermJsonLd(
+  term: { slug: string; label: string; description: string },
+  origin: string,
+): Record<string, unknown> {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'DefinedTerm',
+    '@id': `${origin}/skills/${term.slug}`,
+    name: term.label,
+    description: term.description,
+    termCode: term.slug,
+    inDefinedTermSet: {
+      '@type': 'DefinedTermSet',
+      '@id': `${origin}/skills`,
+      name: 'freehire IT skills glossary',
+    },
   };
 }
 

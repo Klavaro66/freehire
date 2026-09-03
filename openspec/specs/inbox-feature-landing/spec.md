@@ -36,7 +36,7 @@ text without client JavaScript.
 ### Requirement: Copy matches the classifier's behaviour
 
 The page SHALL describe classification and stage advance exactly as
-`internal/mailclassify` implements them, and SHALL NOT claim behaviour the code
+`internal/application/mailclassify` implements them, and SHALL NOT claim behaviour the code
 does not have.
 
 #### Scenario: Status vocabulary matches the code

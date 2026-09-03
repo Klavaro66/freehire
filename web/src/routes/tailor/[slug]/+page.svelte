@@ -121,7 +121,7 @@
 
   // The right context panel's tab, lifted here so the mobile tab bar can drive it (on desktop the
   // panel's own tab bar sets it via the same binding).
-  let artifactTab = $state<'jd' | 'jobmatch' | 'score' | 'history'>('jobmatch');
+  let artifactTab = $state<'jd' | 'jobmatch' | 'score' | 'letter' | 'history'>('jobmatch');
 
   // Mobile-only navigation: below lg the three columns collapse to one, so a single flat tab bar
   // picks which view fills the screen. At lg it's hidden and every column shows at once as before.
@@ -129,7 +129,7 @@
   // syncs the matching column's own selector (mobile → column) so the wide layout shows the same
   // content once revealed. The reverse (a desktop tab change updating mobileView) is not wired —
   // switching a column tab then narrowing across lg resets the mobile view to that tab's default.
-  type MobileView = 'chat' | 'editor' | 'experience' | 'settings' | 'preview' | 'templates' | 'jd' | 'jobmatch' | 'score' | 'history';
+  type MobileView = 'chat' | 'editor' | 'experience' | 'settings' | 'preview' | 'templates' | 'jd' | 'jobmatch' | 'score' | 'letter' | 'history';
   const mobileTabs: [MobileView, string][] = [
     ['chat', 'Chat'],
     ['editor', 'Editor'],
@@ -139,6 +139,7 @@
     ['preview', 'Preview'],
     ['jobmatch', 'Job Match'],
     ['score', 'Score'],
+    ['letter', 'Cover letter'],
     ['history', 'History'],
     ['jd', 'Job'],
   ];
@@ -293,8 +294,9 @@
         // Bootstrap: reach the tailored CV for this vacancy (the backend returns the existing
         // one when there is one) and the conversation bound to it.
         // Only the bootstrap is tracked as a run: it is the path that mints a tailored
-        // CV and spends credits. Re-opening an existing one (startTailorSession above)
-        // costs nothing and would inflate the count on every revisit.
+        // CV and spends one of the day's sessions. Re-opening an existing one
+        // (startTailorSession above) costs nothing and would inflate the count on every
+        // revisit.
         track('tailor_run', { slug });
         const [j, tailor] = await Promise.all([api.getJob(slug), api.tailorCv(slug)]);
         job = j;
@@ -303,12 +305,16 @@
       finishReady();
     } catch (e) {
       if (e instanceof ApiError && e.status === 402) {
-        // Out of AI credits: surface the message plus when the monthly grant renews.
-        const resetsAt = typeof e.body?.resets_at === 'string' ? e.body.resets_at : null;
-        const renews = resetsAt
-          ? ` They renew ${new Date(resetsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.`
+        // Today's allowance is spent: surface what ran out plus when it starts over. The
+        // instant comes from the refusal itself rather than being computed here — the
+        // server owns when the day rolls, and a second opinion about it would be wrong
+        // for anybody whose clock disagrees.
+        const at = e.body?.allowance as { resets_at?: unknown } | undefined;
+        const resetsAt = typeof at?.resets_at === 'string' ? at.resets_at : null;
+        const more = resetsAt
+          ? ` More at ${new Date(resetsAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.`
           : '';
-        errorMsg = `${e.message}${renews}`;
+        errorMsg = `${e.message}${more}`;
       } else {
         errorMsg = e instanceof ApiError ? e.message : 'Could not open the tailoring workspace.';
       }
@@ -790,8 +796,9 @@
         onResetFromResume={resetFromResume}
         resetBusy={resetLocked}
         {resetError}
+        {cvId}
         bind:tab={artifactTab}
-        mobileVisible={mobileView === 'jd' || mobileView === 'jobmatch' || mobileView === 'score' || mobileView === 'history'}
+        mobileVisible={mobileView === 'jd' || mobileView === 'jobmatch' || mobileView === 'score' || mobileView === 'letter' || mobileView === 'history'}
       />
     </div>
   {/if}

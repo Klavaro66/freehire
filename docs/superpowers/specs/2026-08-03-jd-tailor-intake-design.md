@@ -6,7 +6,7 @@ Today the only way to tailor a CV is to start from an existing `jobs` row on
 freehire (`/tailor/[slug]`, entered from a vacancy's match page). There is no
 way to tailor against a job posted elsewhere on the web, or against raw JD
 text the user has in hand. `TailorCV` and `GetCVJobMatch`
-(`internal/handler/cv_tailor.go`, `internal/handler/cv_job_match.go`) are both
+(`internal/api/handler/cv_tailor.go`, `internal/api/handler/cv_job_match.go`) are both
 hard-keyed to a real `jobs.id` looked up by slug — no code path runs
 match-analysis or tailoring off ad hoc text.
 
@@ -51,7 +51,7 @@ Resolution branches:
 | Input | Resolution | Outcome |
 |---|---|---|
 | `job_slug` | none — already a real job | used as-is |
-| `url`, **recognized ATS** (host-scoped `linksource` adapter or board coverage via `internal/atsboard`) | reuse the existing single-link resolution machinery already used by the board-contribution flow (`internal/linkimport`/`internal/linksource`) → normal `pipeline.UpsertJob` | **public** `jobs` row: normal enrichment queue, normal Meilisearch indexing, becomes part of the catalog |
+| `url`, **recognized ATS** (host-scoped `linksource` adapter or board coverage via `internal/ingest/atsboard`) | reuse the existing single-link resolution machinery already used by the board-contribution flow (`internal/ingest/linkimport`/`internal/ingest/linksource`) → normal `pipeline.UpsertJob` | **public** `jobs` row: normal enrichment queue, normal Meilisearch indexing, becomes part of the catalog |
 | `url`, **unrecognized** (falls through to the generic JSON-LD scrape / `GenericSource`, or the fetch itself fails) | take whatever the generic scrape yielded; if fetch/parse fails entirely, return 422 | **private** `jobs` row (see below) |
 | `text` | none — used directly | **private** `jobs` row (see below) |
 
@@ -90,7 +90,7 @@ For rows created via the private path:
 ## E. Derive/enrichment scope
 
 Private rows do **not** get enqueued onto `enrichment_outbox` — no LLM
-enrichment. The pure, DB-free `jobderive.Derive` (`internal/jobderive`) runs
+enrichment. The pure, DB-free `jobderive.Derive` (`internal/job/jobderive`) runs
 synchronously at creation time to populate skills/facets from the
 title/company/description fields provided, which is what match-analysis
 needs. This avoids spending LLM budget and a background queue on

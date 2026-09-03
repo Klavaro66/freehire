@@ -6,8 +6,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/auth/mobileauth"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/identity/auth/mobileauth"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() { worker.Main(run) }

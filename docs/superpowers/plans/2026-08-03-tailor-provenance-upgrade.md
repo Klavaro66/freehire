@@ -9,7 +9,7 @@ call, instead of being permanently stuck at `can_write_cv: false`.
 **Architecture:** One SQL change (`ON CONFLICT DO NOTHING` → a conditional `DO UPDATE`
 that only fires when the existing row is `agent_inferred` and the new call isn't),
 regenerated through sqlc. No Go code changes — `Store.AddAtom`
-(`internal/experience/store.go:178-194`) already returns success on any row and
+(`internal/candidate/experience/store.go:178-194`) already returns success on any row and
 `ErrAlreadyBanked` on `pgx.ErrNoRows`; that logic is correct for both the old and new
 SQL behavior unchanged.
 
@@ -17,9 +17,9 @@ SQL behavior unchanged.
 
 ## Global Constraints
 
-- Never hand-edit `internal/db/*.go` — it is generated. Edit
-  `internal/db/queries/*.sql`, run `make sqlc`, commit the regenerated file
-  (`internal/db/AGENTS.md`).
+- Never hand-edit `internal/platform/db/*.go` — it is generated. Edit
+  `internal/platform/db/queries/*.sql`, run `make sqlc`, commit the regenerated file
+  (`internal/platform/db/AGENTS.md`).
 - This is a query change, not a schema change — no new migration file.
 - Run `go vet -tags=integration ./...` before pushing (compiles every
   `//go:build integration` file across the module; `go test ./...` alone does
@@ -35,25 +35,25 @@ SQL behavior unchanged.
 ### Task 1: Upgrade-on-conflict for `InsertExperienceAtomIfNew`
 
 **Files:**
-- Modify: `internal/db/queries/experience.sql:84-93` (`InsertExperienceAtomIfNew`)
-- Regenerate (via `make sqlc`, do not hand-edit): `internal/db/experience.sql.go`
-- Test: `internal/db/experience_integration_test.go` (add new test functions after
+- Modify: `internal/platform/db/queries/experience.sql:84-93` (`InsertExperienceAtomIfNew`)
+- Regenerate (via `make sqlc`, do not hand-edit): `internal/platform/db/experience.sql.go`
+- Test: `internal/platform/db/experience_integration_test.go` (add new test functions after
   `TestExperienceAtomClaimKeyIsUniquePerOwner`, which ends at line 75)
 
 **Interfaces:**
 - Consumes: `q.InsertExperienceAtomIfNew(ctx, InsertExperienceAtomIfNewParams{...})
-  (ExperienceAtom, error)` — unchanged signature, from `internal/db/experience.sql.go`.
+  (ExperienceAtom, error)` — unchanged signature, from `internal/platform/db/experience.sql.go`.
   `InsertExperienceAtomIfNewParams` fields used: `UserID int64`, `EmploymentID
   *uuid.UUID`, `Claim string`, `ClaimKey string`, `Context string`, `Metrics
   []string`, `Skills []string`, `Provenance string`, `SourceRef string`.
 - Produces: nothing new is consumed by other tasks — this is the terminal fix. The
-  existing `Store.AddAtom` (`internal/experience/store.go`) and every assistant tool
-  built on it (`internal/handler/assistant_experience_tools.go`) start working
+  existing `Store.AddAtom` (`internal/candidate/experience/store.go`) and every assistant tool
+  built on it (`internal/api/handler/assistant_experience_tools.go`) start working
   correctly against this query with zero changes on their side.
 
 - [ ] **Step 1: Write the failing integration tests**
 
-Add these three tests to `internal/db/experience_integration_test.go`, right after
+Add these three tests to `internal/platform/db/experience_integration_test.go`, right after
 `TestExperienceAtomClaimKeyIsUniquePerOwner` (after its closing `}` on line 75):
 
 ```go
@@ -175,7 +175,7 @@ func TestExperienceAtomClaimKeyStaysUnconfirmedAcrossRepeatedAgentInferred(t *te
 
 - [ ] **Step 2: Run the new tests to verify they fail**
 
-Run: `go test -tags=integration ./internal/db/ -run TestExperienceAtomClaimKeyUpgradesFromAgentInferred -v`
+Run: `go test -tags=integration ./internal/platform/db/ -run TestExperienceAtomClaimKeyUpgradesFromAgentInferred -v`
 
 Expected: FAIL — under the current `ON CONFLICT DO NOTHING`, the "upgrade insert"
 call returns `pgx.ErrNoRows` instead of succeeding, so the test fails at `t.Fatalf("upgrade insert = %v, want success...")`.
@@ -183,12 +183,12 @@ call returns `pgx.ErrNoRows` instead of succeeding, so the test fails at `t.Fata
 (`TestExperienceAtomClaimKeyNeverDowngradesFromConfirmed` and
 `TestExperienceAtomClaimKeyStaysUnconfirmedAcrossRepeatedAgentInferred` already pass
 under the current query — they lock in behavior the fix must not break. Confirm this
-with `go test -tags=integration ./internal/db/ -run TestExperienceAtomClaimKey -v`
+with `go test -tags=integration ./internal/platform/db/ -run TestExperienceAtomClaimKey -v`
 before touching the SQL, so a later regression is unambiguous.)
 
 - [ ] **Step 3: Edit the SQL query**
 
-In `internal/db/queries/experience.sql`, replace the `InsertExperienceAtomIfNew`
+In `internal/platform/db/queries/experience.sql`, replace the `InsertExperienceAtomIfNew`
 query (lines 84-93) with:
 
 ```sql
@@ -219,13 +219,13 @@ RETURNING id, user_id, employment_id, claim, claim_key, context, metrics, skills
 
 Run: `make sqlc`
 
-This runs sqlc via Docker and rewrites `internal/db/experience.sql.go`. Confirm the
+This runs sqlc via Docker and rewrites `internal/platform/db/experience.sql.go`. Confirm the
 diff touches only the `InsertExperienceAtomIfNew` function body/SQL constant — no
 other query in `experience.sql` should change.
 
 - [ ] **Step 5: Run all three tests to verify they pass**
 
-Run: `go test -tags=integration ./internal/db/ -run TestExperienceAtomClaimKey -v`
+Run: `go test -tags=integration ./internal/platform/db/ -run TestExperienceAtomClaimKey -v`
 
 Expected: PASS for all of:
 - `TestExperienceAtomClaimKeyIsUniquePerOwner` (pre-existing, must still pass unchanged)
@@ -243,14 +243,14 @@ go vet ./...
 go test ./...
 ```
 Expected: all four succeed with no output beyond normal build/test noise. The last
-two confirm `internal/experience/store_test.go`'s fake-repo-based tests
+two confirm `internal/candidate/experience/store_test.go`'s fake-repo-based tests
 (`TestStoreAddAtomReportsAnAlreadyBankedClaim` etc.) are unaffected — they exercise
 `Store.AddAtom`'s Go logic against an in-memory fake that never changes, per the
-comment at `internal/experience/store_test.go:17-21`.
+comment at `internal/candidate/experience/store_test.go:17-21`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/db/queries/experience.sql internal/db/experience.sql.go internal/db/experience_integration_test.go
+git add internal/platform/db/queries/experience.sql internal/platform/db/experience.sql.go internal/platform/db/experience_integration_test.go
 git commit -m "fix(experience): upgrade agent_inferred provenance on conflict instead of discarding it"
 ```

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { dynamicLabel, FACETS } from '$lib/facets';
   import { type FilterStore, savedSearchQuery } from '$lib/filters';
-  import { freshnessLabel } from '$lib/filterControls';
+  import { experienceLabel, freshnessLabel } from '$lib/filterControls';
   import FilterSummaryShell, { type SummaryChip, type SummaryGroup } from './FilterSummaryShell.svelte';
   import SaveSearchAlert from './SaveSearchAlert.svelte';
+  import AiFilterButton from './AiFilterButton.svelte';
 
   // The job filters sidebar: a summary of the *applied* filters as chips grouped by
   // facet, over the reusable FilterSummaryShell. Removing a chip edits the live store
@@ -35,8 +36,8 @@
       const st = f.facets[param];
       if (!st) return [];
       return [
-        ...st.include.map((v) => ({ text: valueLabel(param, v), exclude: false, remove: () => store.remove(param, v), slug: withIcon ? v : undefined })),
-        ...st.exclude.map((v) => ({ text: valueLabel(param, v), exclude: true, remove: () => store.remove(param, v), slug: withIcon ? v : undefined })),
+        ...st.include.map((v) => ({ key: `${param}:${v}`, text: valueLabel(param, v), exclude: false, remove: () => store.remove(param, v), slug: withIcon ? v : undefined })),
+        ...st.exclude.map((v) => ({ key: `${param}:${v}`, text: valueLabel(param, v), exclude: true, remove: () => store.remove(param, v), slug: withIcon ? v : undefined })),
       ];
     };
     const facetGroup = (param: string, label: string, withIcon = false) => {
@@ -46,14 +47,19 @@
 
     // The text query (from the header search on the standalone list) as a removable
     // chip, so the sidebar shows what you searched, not just the facet filters.
-    push('Search', f.q.trim() ? [{ text: f.q, exclude: false, remove: () => store.setQuery('') }] : []);
+    push('Search', f.q.trim() ? [{ key: 'q', text: f.q, exclude: false, remove: () => store.setQuery('') }] : []);
 
     facetGroup('category', 'Specialization');
+    // Role had no group here at all: it counted towards the badge but drew no chip, so
+    // the only way to lift it was Reset all. Latent while the facet lived inside the
+    // filter modal; the header's role suggestions put it one click from the search box.
+    facetGroup('role', 'Role');
     facetGroup('ai_archetype', 'AI Specialization');
     // Location: regions + countries + cities under one heading.
     push('Location', [...facetChips('regions'), ...facetChips('countries'), ...facetChips('cities')]);
 
     facetGroup('seniority', 'Seniority');
+    facetGroup('role_type', 'Role type');
     facetGroup('work_mode', 'Work format');
     facetGroup('skills', 'Skills', true);
     facetGroup('domains', 'Industry');
@@ -67,17 +73,32 @@
 
     // Salary: currency + minimum.
     const salary: SummaryChip[] = facetChips('salary_currency');
-    if (f.salaryMin != null) salary.push({ text: `${f.salaryMin.toLocaleString('en-US')}+`, exclude: false, remove: () => store.setSalaryMin(null) });
+    if (f.salaryMin != null) salary.push({ key: 'salary_min', text: `${f.salaryMin.toLocaleString('en-US')}+`, exclude: false, remove: () => store.setSalaryMin(null) });
     push('Salary', salary);
 
-    if (f.visa) push('Visa', [{ text: 'Sponsorship', exclude: false, remove: () => store.setVisa(false) }]);
-    if (f.postedWithinDays != null) push('Posted', [{ text: freshnessLabel(f.postedWithinDays), exclude: false, remove: () => store.setPostedWithinDays(null) }]);
+    if (f.visa) push('Visa', [{ key: 'visa', text: 'Sponsorship', exclude: false, remove: () => store.setVisa(false) }]);
+    if (f.clearance !== 'any')
+      push('Clearance', [
+        {
+          key: 'clearance',
+          text: f.clearance === 'hide' ? 'Hidden' : 'Required only',
+          exclude: false,
+          remove: () => store.setClearance('any'),
+        },
+      ]);
+    if (f.postedWithinDays != null) push('Posted', [{ key: 'posted_within_days', text: freshnessLabel(f.postedWithinDays), exclude: false, remove: () => store.setPostedWithinDays(null) }]);
+    // `!= null`, not truthiness: a zero bound is the entry-level filter, and hiding
+    // its chip would leave the narrowest experience filter with no way to remove it.
+    if (f.experienceYearsMax != null) push('Experience', [{ key: 'experience_years_max', text: experienceLabel(f.experienceYearsMax), exclude: false, remove: () => store.setExperienceYearsMax(null) }]);
 
     return out;
   });
 </script>
 
 <FilterSummaryShell {groups} active={store.active} onReset={() => store.clear()} {onOpen} {description}>
+  {#snippet beforeButton()}
+    <AiFilterButton {store} />
+  {/snippet}
   {#snippet afterButton()}
     {#if canSave}
       <SaveSearchAlert query={current} variant="full" alerts="manage" />

@@ -12,11 +12,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/job"
-	"github.com/strelov1/freehire/internal/jobderive"
-	"github.com/strelov1/freehire/internal/pipeline"
-	"github.com/strelov1/freehire/internal/testdb"
+	"github.com/strelov1/freehire/internal/ingest/pipeline"
+	"github.com/strelov1/freehire/internal/job/job"
+	"github.com/strelov1/freehire/internal/job/jobderive"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/testdb"
 )
 
 // cityPosting builds one city's copy of a single vacancy: the title and description —
@@ -57,7 +57,7 @@ func TestSave_CollapsesPerCityCopiesOfOneRole(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(pool)
 
-	store := newDBStore(pool, 1, nil, nil, pipeline.HydrationRetryWindow)
+	store := newDBStore(pool, 1, nil, nil, pipeline.HydrationRetryWindow, false)
 
 	if err := store.Save(ctx, cityPosting("248544000257794970", "Querétaro, Mexico")); err != nil {
 		t.Fatalf("save the first city: %v", err)

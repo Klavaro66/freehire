@@ -44,11 +44,15 @@ export const STATIC_PATHS = [
   '/open',
   '/trends',
   '/docs/api',
+  '/agents',
   '/cli',
   '/chatgpt',
   '/contribute',
   '/status',
   '/privacy',
+  // The role×country hub. Its category and pair pages are gated on live counts, so
+  // they ride in their own per-category sub-sitemaps rather than here.
+  '/roles',
 ];
 
 /** The curated collection landing pages (`/collections/:slug`), one per collection.
@@ -68,7 +72,7 @@ export function collectionPaths(): string[] {
  *  its own schedule. The index carries the newest post's date, since that is
  *  exactly when its content last changed. */
 export function blogPaths(posts: { slug: string; date: string }[]): PathEntry[] {
-  const newest = posts.map((post) => post.date).toSorted().at(-1);
+  const newest = posts.map((post) => post.date).sort().at(-1);
   return [
     { path: '/blog', lastmod: newest },
     ...posts.map((post) => ({ path: `/blog/${post.slug}`, lastmod: post.date })),
@@ -84,6 +88,36 @@ export function insightsPaths(categories: string[]): string[] {
     paths.push(`/insights/salary/${c}`, `/insights/skills/${c}`, `/insights/roles/${c}`);
   }
   return paths;
+}
+
+/** Sitemap paths for one category's landings: its country table plus a page per
+ *  country that clears the gate. Takes the already-gated countries (from
+ *  `publishedCountries`) so it stays pure — a thin pair is never listed, matching
+ *  what the route serves for one (404).
+ *
+ *  Split per category on purpose: the whole product is ~2,200 URLs, which fits one
+ *  file, but building it in one would cost one facet call per category in a single
+ *  request. One sub-sitemap per category costs one call each, and the index can name
+ *  all 37 without reading anything. */
+export function roleLandingPaths(categorySlug: string, countrySlugs: string[]): string[] {
+  return [
+    `/roles/${categorySlug}`,
+    ...countrySlugs.map((country) => `/roles/${categorySlug}/${country}`),
+  ];
+}
+
+/** Sitemap paths for the skill glossary: the index plus one page per skill that has a
+ *  description.
+ *
+ *  It takes the described slugs rather than the whole canonical vocabulary because the
+ *  route 404s on a skill with no entry — listing all of them would point a crawler at
+ *  pages that do not exist, and a sitemap full of 404s is worse than a short one. The
+ *  caller reads the set from the same catalog the route does, so the two cannot drift.
+ *
+ *  One file, unlike the role landings: the whole glossary is under a thousand URLs and
+ *  costs no read at all to enumerate, so there is nothing to shard away from. */
+export function skillGlossaryPaths(describedSlugs: readonly string[]): string[] {
+  return ['/skills', ...describedSlugs.map((slug) => `/skills/${slug}`)];
 }
 
 /** A sitemap path with the date its content last changed, before an origin is

@@ -15,9 +15,9 @@ profile" rule.
 
 **Architecture:** Two independent, additive changes around the existing
 `PostAssistantAutopilot` handler and the Tailor preset's system prompt. No new tools, no
-DB schema change. `internal/matchanalysis`'s three-stage chain itself is untouched.
+DB schema change. `internal/candidate/matchanalysis`'s three-stage chain itself is untouched.
 
-**Tech Stack:** Go (Fiber v2, sqlc-generated `db.Queries`), the existing `internal/assistant`
+**Tech Stack:** Go (Fiber v2, sqlc-generated `db.Queries`), the existing `internal/ai/assistant`
 tool-calling runner, Svelte 5 for the one copy change.
 
 ## Global Constraints
@@ -30,15 +30,15 @@ tool-calling runner, Svelte 5 for the one copy change.
   `context.Context`, never the request's `*fiber.Ctx` — the fiber ctx is released the
   moment the handler returns, before the stream's writer goroutine runs (see the existing
   comments on `cacheAnalysis` and `StreamMatchAnalysis` in
-  `internal/handler/match_analysis*.go`).
+  `internal/api/handler/match_analysis*.go`).
 - English only in code/comments/commits (root `AGENTS.md`).
 - Run `go vet -tags=integration ./...` before considering this plan done — a changed
   handler signature only shows up there, not in plain `go build`/`go test ./...`.
 - The design doc's open question about "coverage by the background-entrypoint llmkey
-  test" does not apply here and needs no action: `internal/llmkey/scope_test.go` only
-  fails a build whose `cmd/*` binary imports `internal/llmkey` directly (background
+  test" does not apply here and needs no action: `internal/ai/llmkey/scope_test.go` only
+  fails a build whose `cmd/*` binary imports `internal/ai/llmkey` directly (background
   workers must use the service credential, never a user's). `prepareAutopilotRun` lives in
-  `internal/handler` (the `cmd/server` binary) and already resolves the user's own
+  `internal/api/handler` (the `cmd/server` binary) and already resolves the user's own
   credential the same way `ensureCachedAnalysis`/`runAnalysis` do today — "unmetered"
   here means it must never call `credits.Debit`, which Task 2's implementation simply
   never does.
@@ -51,7 +51,7 @@ Pure refactor, no behavior change — a prerequisite for Task 2, which needs to 
 fit-chain `Input` once and reuse it after the fiber ctx is gone.
 
 **Files:**
-- Modify: `internal/handler/match_analysis.go:229-245` (`runAnalysis`)
+- Modify: `internal/api/handler/match_analysis.go:229-245` (`runAnalysis`)
 
 **Interfaces:**
 - Produces: `func (h *matchHandlers) buildAnalysisInput(c *fiber.Ctx, job db.Job, userID int64, profile userprofile.Profile, blockers []hardconstraint.Blocker) matchanalysis.Input` — Task 2 calls this directly.
@@ -114,14 +114,14 @@ func (h *matchHandlers) runAnalysis(c *fiber.Ctx, userID int64, job db.Job, prof
 
 - [ ] **Step 2: Confirm no regression**
 
-Run: `go test -tags=integration ./internal/handler/ -run TestMatchAnalysisEndpoints -v`
+Run: `go test -tags=integration ./internal/api/handler/ -run TestMatchAnalysisEndpoints -v`
 Expected: PASS (behavior-preserving extraction; this test already exercises `runAnalysis`
 through `PostMatchAnalysis`).
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add internal/handler/match_analysis.go
+git add internal/api/handler/match_analysis.go
 git commit -m "refactor(matchanalysis): extract buildAnalysisInput from runAnalysis"
 ```
 
@@ -134,9 +134,9 @@ fill-if-empty pre-run behavior and (b) hands back a function that unconditionall
 recomputes and overwrites the cached analysis once the autopilot turn ends.
 
 **Files:**
-- Modify: `internal/handler/match_analysis.go` (add `prepareAutopilotRun`, near `ensureCachedAnalysis`)
-- Modify: `internal/handler/assistant.go:744-781` (`PostAssistantAutopilot`, replace `ensureAnalysisForRun`)
-- Test: `internal/handler/assistant_autopilot_integration_test.go`
+- Modify: `internal/api/handler/match_analysis.go` (add `prepareAutopilotRun`, near `ensureCachedAnalysis`)
+- Modify: `internal/api/handler/assistant.go:744-781` (`PostAssistantAutopilot`, replace `ensureAnalysisForRun`)
+- Test: `internal/api/handler/assistant_autopilot_integration_test.go`
 
 **Interfaces:**
 - Consumes: `buildAnalysisInput` (Task 1), `runAnalysis`'s existing helpers (`h.userProfile.Get`, `h.jobBlockers`, `h.cvUploadedAt`, `h.matchAnalysis.As`, `h.llm.bind`, `h.cacheAnalysis`), `ensureCachedAnalysis` (unchanged).
@@ -147,7 +147,7 @@ recomputes and overwrites the cached analysis once the autopilot turn ends.
 This test's current premise (`fitM.n != 0` after a run means failure) is exactly what
 this task repeals — a cached analysis must now ALWAYS be recomputed at the end of a run.
 Replace the whole `TestAutopilotReusesAnExistingCachedAnalysis` function in
-`internal/handler/assistant_autopilot_integration_test.go` with:
+`internal/api/handler/assistant_autopilot_integration_test.go` with:
 
 ```go
 // TestAutopilotRefreshesAnalysisAfterEveryRun: the fit analysis is no longer a frozen
@@ -227,7 +227,7 @@ func TestAutopilotRefreshesAnalysisAfterEveryRun(t *testing.T) {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `go test -tags=integration ./internal/handler/ -run TestAutopilotRefreshesAnalysisAfterEveryRun -v`
+Run: `go test -tags=integration ./internal/api/handler/ -run TestAutopilotRefreshesAnalysisAfterEveryRun -v`
 Expected: FAIL — `fitM.n` is `0` (today's `ensureAnalysisForRun` skips the LLM call
 entirely because a row is already cached; there is no post-run step at all).
 
@@ -243,10 +243,10 @@ at the end of the function:
 	}
 ```
 
-Run: `go test -tags=integration ./internal/handler/ -run TestAutopilotComputesAnalysisWhenMissing -v`
+Run: `go test -tags=integration ./internal/api/handler/ -run TestAutopilotComputesAnalysisWhenMissing -v`
 Expected: FAIL — currently `fitM.n` is `3` (only the pre-run compute happens).
 
-- [ ] **Step 4: Add `prepareAutopilotRun` to `internal/handler/match_analysis.go`**
+- [ ] **Step 4: Add `prepareAutopilotRun` to `internal/api/handler/match_analysis.go`**
 
 Add right after `ensureCachedAnalysis` (after line 276):
 
@@ -287,7 +287,7 @@ func (h *matchHandlers) prepareAutopilotRun(c *fiber.Ctx, userID int64, job db.J
 }
 ```
 
-- [ ] **Step 5: Replace `ensureAnalysisForRun` and rewire `PostAssistantAutopilot` in `internal/handler/assistant.go`**
+- [ ] **Step 5: Replace `ensureAnalysisForRun` and rewire `PostAssistantAutopilot` in `internal/api/handler/assistant.go`**
 
 Replace the `ensureAnalysisForRun` method (lines 763-781) with:
 
@@ -336,12 +336,12 @@ path now supplies its own `start` closure to `streamSSE` so it can run code afte
 
 - [ ] **Step 6: Run both tests to verify they pass**
 
-Run: `go test -tags=integration ./internal/handler/ -run 'TestAutopilotRefreshesAnalysisAfterEveryRun|TestAutopilotComputesAnalysisWhenMissing' -v`
+Run: `go test -tags=integration ./internal/api/handler/ -run 'TestAutopilotRefreshesAnalysisAfterEveryRun|TestAutopilotComputesAnalysisWhenMissing' -v`
 Expected: PASS on both.
 
 - [ ] **Step 7: Run the full autopilot integration suite for regressions**
 
-Run: `go test -tags=integration ./internal/handler/ -run TestAutopilot -v`
+Run: `go test -tags=integration ./internal/api/handler/ -run TestAutopilot -v`
 Expected: PASS on all (`TestAutopilotRunsOnATailoringSessionAndSnapshotsFirst`,
 `TestAutopilotIsRefusedOnANonTailoringSession`, `TestAutopilotOnAForeignSessionIsNotFound`,
 `TestAnAutopilotRunSearchesEditsAndReports`, `TestARunThatNeverReportsStillLeavesOne`).
@@ -354,7 +354,7 @@ Expected: clean.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add internal/handler/match_analysis.go internal/handler/assistant.go internal/handler/assistant_autopilot_integration_test.go
+git add internal/api/handler/match_analysis.go internal/api/handler/assistant.go internal/api/handler/assistant_autopilot_integration_test.go
 git commit -m "feat(matchanalysis): refresh the cached fit analysis after every autopilot run"
 ```
 
@@ -366,18 +366,18 @@ Instructs the tailoring agent to call the existing, already-wired `job_match` to
 finishing an unattended run, and to keep editing while something closeable remains.
 
 **Files:**
-- Modify: `internal/assistant/prompt.go:152-162` (`tailorPrompt`'s `UNATTENDED RUNS` section)
-- Test: `internal/assistant/prompt_test.go`
+- Modify: `internal/ai/assistant/prompt.go:152-162` (`tailorPrompt`'s `UNATTENDED RUNS` section)
+- Test: `internal/ai/assistant/prompt_test.go`
 
 **Interfaces:**
-- Consumes: nothing new — `job_match` (`internal/handler/assistant_cv_tools.go:210`) and
+- Consumes: nothing new — `job_match` (`internal/api/handler/assistant_cv_tools.go:210`) and
   `cv_context`'s `missing_have`/`missing_gap` vocabulary already exist and are already
   registered for the Tailor preset.
 - Produces: nothing new — this is a prompt-content-only change.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `internal/assistant/prompt_test.go`:
+Add to `internal/ai/assistant/prompt_test.go`:
 
 ```go
 // TestTailorPromptSelfChecksWithJobMatchBeforeReporting: an unattended run must verify its
@@ -406,13 +406,13 @@ func TestTailorPromptSelfChecksWithJobMatchBeforeReporting(t *testing.T) {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `go test ./internal/assistant/ -run TestTailorPromptSelfChecksWithJobMatchBeforeReporting -v`
+Run: `go test ./internal/ai/assistant/ -run TestTailorPromptSelfChecksWithJobMatchBeforeReporting -v`
 Expected: FAIL — `missing_have`/`missing_gap` do not appear inside the `UNATTENDED RUNS`
 section today (only in the earlier, attended-mode part of the prompt).
 
 - [ ] **Step 3: Add the self-check bullet**
 
-In `internal/assistant/prompt.go`, inside the `UNATTENDED RUNS` block, insert a new bullet
+In `internal/ai/assistant/prompt.go`, inside the `UNATTENDED RUNS` block, insert a new bullet
 between the existing "Ask NOTHING while you are running." bullet and the "Finish by
 calling `tailor_report` ONCE..." bullet (i.e., between what are today lines 157 and 158):
 
@@ -426,19 +426,19 @@ calling `tailor_report` ONCE..." bullet (i.e., between what are today lines 157 
 
 - [ ] **Step 4: Run it to verify it passes**
 
-Run: `go test ./internal/assistant/ -run TestTailorPromptSelfChecksWithJobMatchBeforeReporting -v`
+Run: `go test ./internal/ai/assistant/ -run TestTailorPromptSelfChecksWithJobMatchBeforeReporting -v`
 Expected: PASS
 
 - [ ] **Step 5: Run the full assistant package test suite**
 
-Run: `go test ./internal/assistant/...`
+Run: `go test ./internal/ai/assistant/...`
 Expected: PASS (confirms `TestTailorPromptDescribesTheUnattendedRun` and every other
 prompt test still holds with the new bullet present).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add internal/assistant/prompt.go internal/assistant/prompt_test.go
+git add internal/ai/assistant/prompt.go internal/ai/assistant/prompt_test.go
 git commit -m "feat(assistant): have the tailoring autopilot verify edits with job_match before reporting"
 ```
 
@@ -480,7 +480,7 @@ cached analysis itself, every run (see
 ## Impact
 
 - Affected spec: `tailor-workspace`
-- Affected code: `internal/handler/match_analysis.go`, `internal/handler/assistant.go`,
+- Affected code: `internal/api/handler/match_analysis.go`, `internal/api/handler/assistant.go`,
   `web/src/lib/tailor/ArtifactPanel.svelte` (implemented in this plan's Tasks 1, 2, 5)
 ```
 

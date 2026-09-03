@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // How many sources a group spans separates a real catalogue-wide role from one

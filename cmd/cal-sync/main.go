@@ -16,11 +16,11 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/calsync"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/gmailsync"
-	"github.com/strelov1/freehire/internal/tokencrypt"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/application/calsync"
+	"github.com/strelov1/freehire/internal/application/gmailsync"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/tokencrypt"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() { worker.Main(run) }

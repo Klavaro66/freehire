@@ -2,7 +2,7 @@
 
 ## Context
 
-`SuppressAggregatorDuplicatesForCompany` (`internal/db/queries/jobs.sql:562`) suppresses an
+`SuppressAggregatorDuplicatesForCompany` (`internal/platform/db/queries/jobs.sql:562`) suppresses an
 open aggregator posting under its canonical first-party ATS twin — same company, equal
 normalized title, compatible country (shipped in `aggregator-ats-dedup`, see
 `openspec/changes/archive/2026-07-12-aggregator-ats-dedup/design.md`). Both the `ats` and
@@ -16,9 +16,9 @@ Found while investigating a reported duplicate
 byte-identical description, arrived via `arbeitnow` (aggregator, raw company name
 `"Cfoinsights"`) and `greenhouse` (ATS, raw company name `"CFO Insights"`). The stored
 `company_slug` is computed as `normalize.Slug(company)`
-(`internal/jobderive/jobderive.go:156`), which is plain transliteration + collapsing runs of
+(`internal/job/jobderive/jobderive.go:156`), which is plain transliteration + collapsing runs of
 non-alphanumeric characters to a hyphen — it deliberately does not strip legal suffixes
-(documented in `internal/normalize/slug.go:21`, "a noted future refinement"). The two raw
+(documented in `internal/dict/normalize/slug.go:21`, "a noted future refinement"). The two raw
 names slugify to `"cfoinsights"` and `"cfo-insights"` respectively. Because the suppression
 pass requires **exact** `company_slug` equality, and it is scoped one exact slug at a time,
 the aggregator copy is never compared against its ATS twin — not a lag-window issue (see
@@ -28,7 +28,7 @@ reindex runs.
 This is scoped narrowly to the word-separator class of spelling variance (the one observed).
 Legal-suffix variance (`"Cfoinsights Inc"` vs `"Cfoinsights"`) is a separate, already-noted
 gap in `normalize.Slug`'s own doc comment, and `normalize.CompanyKey` (added for the harvest
-own-ATS-board-discovery feature, PR #1413, `internal/normalize/company.go`) already exists to
+own-ATS-board-discovery feature, PR #1413, `internal/dict/normalize/company.go`) already exists to
 close it — but is deliberately **not** pulled into this fix, to avoid scope creep on an
 incident that doesn't demonstrate the legal-suffix case.
 
@@ -153,7 +153,7 @@ guard, re-evaluated every run).
 
 ## Testing Plan
 
-- Extend `internal/db/aggregator_dedup_integration_test.go` (`-tags=integration`) with a case:
+- Extend `internal/platform/db/aggregator_dedup_integration_test.go` (`-tags=integration`) with a case:
   an aggregator row (`company_slug = "cfoinsights"`) and an ATS row
   (`company_slug = "cfo-insights"`), equal normalized title, expect the aggregator row's
   `duplicate_of` to resolve to the ATS row's id.

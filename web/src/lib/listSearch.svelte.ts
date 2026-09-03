@@ -23,6 +23,27 @@ export interface ListSearchTarget {
     store: FacetStore;
     counts(): FacetCounts | null;
     variant: 'jobs' | 'companies';
+    /** Whether the current geography was guessed from the visitor's IP country
+     *  rather than chosen. A getter, like `counts`, so the trigger stops saying it
+     *  the moment the visitor edits the scope. Absent on surfaces that never guess,
+     *  which read as "chosen" — the honest default, since they were. */
+    inferred?(): boolean;
+  };
+
+  /** Role suggestions under the header's search input, present only on jobs-backed
+   *  lists — roles are a jobs facet, so the companies list publishes nothing here and
+   *  the header renders no dropdown there without knowing which page it is on. Same
+   *  opt-in shape as `filterScope` above.
+   *
+   *  `counts` is a getter so the distribution stays reactive across the bridge, and it
+   *  is the role distribution measured WITHOUT the text query: scoped by `q` it would
+   *  lag the typing by one debounce, and the numbers beside the suggestions would
+   *  answer "jobs matching what you typed AND this role" rather than "jobs in this
+   *  role". `active` is the roles already applied, which are not offered again. */
+  readonly roleSuggest?: {
+    counts(): FacetCounts | null;
+    active(): readonly string[];
+    apply(slug: string): void;
   };
 
   /** Opens the page's own filter modal, and reports its active-filter count, so the

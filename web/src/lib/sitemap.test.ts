@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { SITEMAP_CHUNK, STATIC_PATHS, collectionPaths, blogPaths } from './sitemap';
+import {
+  SITEMAP_CHUNK,
+  STATIC_PATHS,
+  collectionPaths,
+  blogPaths,
+  roleLandingPaths,
+  skillGlossaryPaths,
+} from './sitemap';
 
 describe('sitemap static paths', () => {
   it('includes the collections hub and the for-companies page', () => {
@@ -10,7 +17,17 @@ describe('sitemap static paths', () => {
   // Indexable pages that the job feed does not link to, so nothing but the sitemap
   // would lead a crawler to them.
   it('includes the data and API surfaces', () => {
-    for (const path of ['/open', '/trends', '/docs/api', '/contribute', '/status', '/privacy']) {
+    for (const path of [
+      '/open',
+      '/trends',
+      '/docs/api',
+      '/agents',
+      '/cli',
+      '/chatgpt',
+      '/contribute',
+      '/status',
+      '/privacy',
+    ]) {
       expect(STATIC_PATHS).toContain(path);
     }
   });
@@ -29,6 +46,28 @@ describe('sitemap static paths', () => {
   // sitemap tells crawlers to index the address that no longer serves the page.
   it('drops the moved referrals URL', () => {
     expect(STATIC_PATHS).not.toContain('/referrals');
+  });
+});
+
+describe('roleLandingPaths', () => {
+  it('lists the category table and one page per country given', () => {
+    expect(roleLandingPaths('backend', ['germany', 'poland'])).toEqual([
+      '/roles/backend',
+      '/roles/backend/germany',
+      '/roles/backend/poland',
+    ]);
+  });
+
+  it('takes the countries already gated, so a thin pair is never listed', () => {
+    // The gate lives in publishedCountries; this builder is handed its output and
+    // adds nothing of its own, which is what keeps the sitemap and the route (404)
+    // reading off one rule instead of two.
+    expect(roleLandingPaths('backend', [])).toEqual(['/roles/backend']);
+  });
+
+  it('lists the hub itself among the static paths, not here', () => {
+    expect(STATIC_PATHS).toContain('/roles');
+    expect(roleLandingPaths('backend', ['germany'])).not.toContain('/roles');
   });
 });
 
@@ -77,5 +116,22 @@ describe('SITEMAP_CHUNK', () => {
   it('stays well under the sitemap protocol cap', () => {
     expect(SITEMAP_CHUNK).toBe(10000);
     expect(SITEMAP_CHUNK).toBeLessThanOrEqual(50000 / 4);
+  });
+});
+
+describe('skillGlossaryPaths', () => {
+  it('lists the index and one page per described skill', () => {
+    expect(skillGlossaryPaths(['dbt', 'kubernetes'])).toEqual([
+      '/skills',
+      '/skills/dbt',
+      '/skills/kubernetes',
+    ]);
+  });
+
+  // The route 404s on a skill with no description, so listing every canonical would
+  // point a crawler at pages that do not exist. It takes the described set for exactly
+  // that reason — the caller reads it from the same catalog the route does.
+  it('lists nothing but the index when nothing is described', () => {
+    expect(skillGlossaryPaths([])).toEqual(['/skills']);
   });
 });

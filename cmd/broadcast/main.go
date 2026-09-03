@@ -1,9 +1,9 @@
 // Command broadcast sends one campaign to the whole audience: one letter, once,
 // on a date someone picked.
 //
-//	./broadcast -campaign ph-heads-up -dry-run   # how many would receive it
-//	./broadcast -campaign ph-heads-up            # send one capped batch
-//	./broadcast -campaign ph-heads-up -to me@example.com   # send only to me
+//	./broadcast -campaign hiring-season-september -dry-run   # how many would receive it
+//	./broadcast -campaign hiring-season-september            # send one capped batch
+//	./broadcast -campaign hiring-season-september -to me@example.com   # send only to me
 //
 // It is not a timer worker in the usual sense. It is scheduled once, for the day of
 // the announcement, and then it is done — which is also why it refuses to guess:
@@ -19,10 +19,10 @@ import (
 	"log"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/broadcast"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/emailnotify"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/engage/broadcast"
+	"github.com/strelov1/freehire/internal/engage/emailnotify"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 var (

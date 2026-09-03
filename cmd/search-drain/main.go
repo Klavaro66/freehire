@@ -19,11 +19,11 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/searchdrain"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
+	"github.com/strelov1/freehire/internal/search/search"
+	"github.com/strelov1/freehire/internal/search/searchdrain"
 )
 
 func main() {
@@ -48,10 +48,11 @@ func run() int {
 
 	dcfg := config.LoadSearchDrain()
 	client := search.NewClient(cfg.MeiliURL, cfg.MeiliKey)
+	q := db.New(pool)
 
 	runner := searchdrain.Runner{
 		Store:   newDBStore(pool),
-		Indexer: searchIndexer{client: client, q: db.New(pool)},
+		Indexer: searchIndexer{client: client, q: q},
 	}
 
 	opt := searchdrain.RunOptions{

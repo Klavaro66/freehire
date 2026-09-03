@@ -9,10 +9,10 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/enrich"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ai/enrich"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() {
@@ -61,7 +61,7 @@ func run() int {
 		return 1
 	}
 
-	log.Printf("enrichment done: enriched=%d failed=%d dead_lettered=%d",
-		stats.Enriched, stats.Failed, stats.DeadLettered)
+	log.Printf("enrichment done: enriched=%d failed=%d dead_lettered=%d reaped=%d",
+		stats.Enriched, stats.Failed, stats.DeadLettered, stats.Reaped)
 	return worker.ExitCode(stats.Failed, stats.DeadLettered)
 }

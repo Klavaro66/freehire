@@ -144,7 +144,7 @@ migration breaks autofill when a user opens a form rather than when the project 
 ### Requirement: The autofill profile also carries the candidate's screening answers
 
 The autofill profile block SHALL, in addition to the identity contact fields, carry the
-candidate's own screening answers (`internal/screeninganswers`): `authorized_countries`,
+candidate's own screening answers (`internal/ingest/screeninganswers`): `authorized_countries`,
 `visa_sponsorship_needed`, `desired_salary`, `notice_period`, `willing_to_relocate` and
 `age_18_or_older`. A field the candidate has not stated SHALL be empty rather than guessed,
 on the same terms as an unstated identity field.
@@ -217,7 +217,7 @@ authorized to work in (a list question), which the previous requirement covers.
 `POST /api/v1/me/autofill/run` SHALL refuse a request that authenticated by the
 website's session cookie or by an API key, even though both otherwise pass this
 route's ordinary auth gate. It attaches to the caller's browser-tool channel
-(`internal/browsertools.Hub`, keyed by user id, not session id) and WRITES into
+(`internal/ai/browsertools.Hub`, keyed by user id, not session id) and WRITES into
 whatever form the browser currently attached to that channel is showing — unlike a
 read, there is no safe degraded behavior, so a request that did not authenticate with
 the extension's own Bearer session JWT is refused outright rather than run against a

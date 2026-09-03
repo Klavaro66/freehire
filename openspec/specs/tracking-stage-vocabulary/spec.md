@@ -8,7 +8,7 @@ three competing vocabularies (8 stages, 4 board columns, 7 pipeline buckets) ont
 ### Requirement: One owner for the stage vocabulary, its labels and its groups
 
 The system SHALL define the application-stage vocabulary, the human label of each stage, and
-the group each stage belongs to in exactly one place — `internal/userjob` — beside the tables
+the group each stage belongs to in exactly one place — `internal/application/userjob` — beside the tables
 that already key on that vocabulary (`activeRank`, `terminalStages`, `silenceThresholds`). No
 other package, and no frontend module, SHALL hold its own copy of the stage labels or of the
 stage→group mapping.
@@ -48,7 +48,7 @@ chip at runtime.
 
 #### Scenario: A label added in Go reaches the SPA
 
-- **WHEN** a stage label is changed in `internal/userjob` and the contracts are regenerated
+- **WHEN** a stage label is changed in `internal/application/userjob` and the contracts are regenerated
 - **THEN** every SPA surface renders the new label without a second edit
 
 #### Scenario: An uncovered stage is a type error

@@ -19,6 +19,14 @@
   });
 
   const count = $derived(githubStars.count);
+
+  // Empty until the number lands, and rendered either way. The box has to be there
+  // from the first paint: the store reads its localStorage cache in `onMount`, so the
+  // count is always a frame late, and it cannot be earlier — rendering a cached number
+  // the server did not render is a hydration mismatch. Without a held box the badge
+  // widens on arrival, which pushes the header's right-hand group and drags the
+  // `flex-1` search box between them sideways, on every page load.
+  const label = $derived(count != null ? formatStars(count) : '');
 </script>
 
 <!-- eslint-disable svelte/no-navigation-without-resolve -- external GitHub URL, not an internal route -->
@@ -38,10 +46,10 @@
   <ProviderIcon provider="github" />
   {#if variant === 'row'}
     <span>GitHub</span>
-    {#if count != null}
-      <span class="ml-auto tabular-nums text-xs">{formatStars(count)}</span>
-    {/if}
-  {:else if count != null}
-    <span class="tabular-nums">{formatStars(count)}</span>
+    <span class="ml-auto tabular-nums text-xs">{label}</span>
+  {:else}
+    <!-- `min-w-8` holds four tabular digits, which the repo will not outgrow soon; the
+         next shape after that is "10.9k", one character wider. -->
+    <span class="min-w-8 text-right tabular-nums">{label}</span>
   {/if}
 </a>

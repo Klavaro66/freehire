@@ -16,23 +16,27 @@ import { categoryLabel } from './labels';
 export type RailSection = 'SAVED' | 'ROLE' | 'PAY & BENEFITS' | 'REQUIREMENTS & ELIGIBILITY' | 'FILTERS';
 
 /** Display order of the specialization section headings. */
-export const CATEGORY_GROUP_ORDER = [
+const CATEGORY_GROUP_ORDER = [
   'Engineering',
   'Data & AI',
   'Quality & Security',
-  'Design',
+  'Design & Creative',
   'Product & Management',
   'Go-to-market & Support',
   'People',
   'Business & Legal',
+  // The consumer industries a broad multi-industry crawl carries in. None of the
+  // groups above fits a nurse or a line cook, and a category with no group is
+  // generated into the contracts but unreachable in the picker.
+  'Consumer & Services',
   'Other',
 ] as const;
 
-export type CategoryGroup = (typeof CATEGORY_GROUP_ORDER)[number];
+type CategoryGroup = (typeof CATEGORY_GROUP_ORDER)[number];
 
 /** Each category → its section. Keyed by the full Category union: a missing key
  *  fails the type-check, keeping the grouping exhaustive as the vocabulary grows. */
-export const CATEGORY_GROUP: Record<Category, CategoryGroup> = {
+const CATEGORY_GROUP: Record<Category, CategoryGroup> = {
   software_engineering: 'Engineering',
   backend: 'Engineering',
   frontend: 'Engineering',
@@ -52,8 +56,20 @@ export const CATEGORY_GROUP: Record<Category, CategoryGroup> = {
   ai_engineering: 'Data & AI',
   qa: 'Quality & Security',
   security: 'Quality & Security',
-  design: 'Design',
-  engineering_design: 'Design',
+  design: 'Design & Creative',
+  creative: 'Design & Creative',
+  engineering_design: 'Design & Creative',
+  // Not a craft in the design sense — it sits with the engineering disciplines, since
+  // that is where a plant or process engineer looks first.
+  industrial_engineering: 'Engineering',
+  healthcare: 'Consumer & Services',
+  skilled_trades: 'Consumer & Services',
+  retail: 'Consumer & Services',
+  hospitality: 'Consumer & Services',
+  logistics: 'Consumer & Services',
+  education: 'Consumer & Services',
+  personal_services: 'Consumer & Services',
+  administration: 'Consumer & Services',
   product: 'Product & Management',
   project_management: 'Product & Management',
   management: 'Product & Management',
@@ -73,7 +89,7 @@ export const CATEGORY_GROUP: Record<Category, CategoryGroup> = {
   other: 'Other',
 };
 
-export interface CategorySectionOption {
+interface CategorySectionOption {
   value: Category;
   label: string;
 }
@@ -103,7 +119,7 @@ export const CATEGORY_GROUPS: CategorySection[] = CATEGORY_GROUP_ORDER.map((name
 
 export const RAIL_SECTIONS: RailSection[] = ['ROLE', 'PAY & BENEFITS', 'REQUIREMENTS & ELIGIBILITY'];
 
-export type RailKind =
+type RailKind =
   | 'facet'
   | 'category'
   | 'location'
@@ -113,6 +129,7 @@ export type RailKind =
   | 'language'
   | 'relocation'
   | 'posted'
+  | 'experience'
   // The job modal's "My filters" (saved searches) tab — renders SavedSearches, not a facet control.
   | 'saved';
 
@@ -150,12 +167,27 @@ export const COMPANY_RAIL_GROUPS: CompanyRailGroup[] = [
 
 export const RAIL: RailEntry[] = [
   // One "Role" pane holds the whole "what role" concept: the role picker
-  // (natural/named/composite roles), the seniority pills, the specialization
-  // chips, and the AI Specialization facet — four controls, one tab. They overlap
-  // by design (role=senior is also reachable via the seniority pill); the picker is
-  // the natural-language entry, the pills/chips/AI-specialization the browse-by-axis
-  // entry.
+  // (natural/named/composite roles), the specialization chips, and the AI
+  // Specialization facet. The picker is the natural-language entry, the chips and
+  // AI-specialization the browse-by-axis entry.
+  //
+  // Seniority used to sit here too, because a role slug can carry a grade prefix
+  // (`senior_backend`) and the two read as one thought. It moved to Experience: a
+  // grade states how much experience a posting wants, which is the question that
+  // pane answers, and it sits there next to the years ceiling that qualifies it.
+  // The two params stay independent, as they already were.
   { key: 'category', label: 'Role', section: 'ROLE', kind: 'category' },
+  { key: 'experience', label: 'Experience', section: 'ROLE', kind: 'experience' },
+  // How old a posting is, and whether it looks permanently open, both describe the
+  // POSTING rather than anything asked of the candidate — so neither belongs under
+  // REQUIREMENTS & ELIGIBILITY, where `posted` sat as the rail's last row. They sit
+  // beside Experience, the other "how does this posting stand relative to me" question.
+  //
+  // `reality` had no rail entry at all until this: declared in FACETS, filterable on the
+  // index, and reachable only by hand-editing the URL. filterSections.test.ts now asserts
+  // the cover so the next facet cannot go the same way.
+  { key: 'posted', label: 'Posted', section: 'ROLE', kind: 'posted' },
+  { key: 'reality', label: 'Posting reality', section: 'ROLE', kind: 'facet', facetParam: 'reality' },
   { key: 'location', label: 'Location', section: 'ROLE', kind: 'location' },
   { key: 'work', label: 'Work & employment', section: 'ROLE', kind: 'work' },
   { key: 'skills', label: 'Skills', section: 'ROLE', kind: 'facet', facetParam: 'skills' },
@@ -164,5 +196,4 @@ export const RAIL: RailEntry[] = [
   { key: 'salary', label: 'Salary', section: 'PAY & BENEFITS', kind: 'salary' },
   { key: 'language', label: 'Language', section: 'REQUIREMENTS & ELIGIBILITY', kind: 'language' },
   { key: 'relocation', label: 'Relocation', section: 'REQUIREMENTS & ELIGIBILITY', kind: 'relocation' },
-  { key: 'posted', label: 'Posted', section: 'REQUIREMENTS & ELIGIBILITY', kind: 'posted' },
 ];

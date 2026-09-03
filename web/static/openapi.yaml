@@ -167,7 +167,9 @@ paths:
         - $ref: "#/components/parameters/Skills"
         - $ref: "#/components/parameters/SkillsMode"
         - $ref: "#/components/parameters/IsTech"
+        - $ref: "#/components/parameters/RequiresClearance"
         - $ref: "#/components/parameters/AIArchetype"
+        - $ref: "#/components/parameters/RoleType"
         - $ref: "#/components/parameters/Collections"
         - $ref: "#/components/parameters/Reality"
         - $ref: "#/components/parameters/Source"
@@ -186,10 +188,12 @@ paths:
         - $ref: "#/components/parameters/SalaryMin"
         - $ref: "#/components/parameters/SalaryMax"
         - $ref: "#/components/parameters/ExperienceYearsMin"
+        - $ref: "#/components/parameters/ExperienceYearsMax"
         - $ref: "#/components/parameters/PostedWithinDays"
         - $ref: "#/components/parameters/RegionsExclude"
         - $ref: "#/components/parameters/CountriesExclude"
         - $ref: "#/components/parameters/WorkModeExclude"
+        - $ref: "#/components/parameters/RoleTypeExclude"
         - $ref: "#/components/parameters/SkillsExclude"
         - $ref: "#/components/parameters/SourceExclude"
         - $ref: "#/components/parameters/CompanySlugExclude"
@@ -234,7 +238,9 @@ paths:
         - $ref: "#/components/parameters/Skills"
         - $ref: "#/components/parameters/SkillsMode"
         - $ref: "#/components/parameters/IsTech"
+        - $ref: "#/components/parameters/RequiresClearance"
         - $ref: "#/components/parameters/AIArchetype"
+        - $ref: "#/components/parameters/RoleType"
         - $ref: "#/components/parameters/Collections"
         - $ref: "#/components/parameters/Reality"
         - $ref: "#/components/parameters/Source"
@@ -253,10 +259,12 @@ paths:
         - $ref: "#/components/parameters/SalaryMin"
         - $ref: "#/components/parameters/SalaryMax"
         - $ref: "#/components/parameters/ExperienceYearsMin"
+        - $ref: "#/components/parameters/ExperienceYearsMax"
         - $ref: "#/components/parameters/PostedWithinDays"
         - $ref: "#/components/parameters/RegionsExclude"
         - $ref: "#/components/parameters/CountriesExclude"
         - $ref: "#/components/parameters/WorkModeExclude"
+        - $ref: "#/components/parameters/RoleTypeExclude"
         - $ref: "#/components/parameters/SkillsExclude"
         - $ref: "#/components/parameters/SourceExclude"
         - $ref: "#/components/parameters/CompanySlugExclude"
@@ -314,7 +322,9 @@ paths:
         - $ref: "#/components/parameters/Skills"
         - $ref: "#/components/parameters/SkillsMode"
         - $ref: "#/components/parameters/IsTech"
+        - $ref: "#/components/parameters/RequiresClearance"
         - $ref: "#/components/parameters/AIArchetype"
+        - $ref: "#/components/parameters/RoleType"
         - $ref: "#/components/parameters/Collections"
         - $ref: "#/components/parameters/Reality"
         - $ref: "#/components/parameters/Source"
@@ -333,6 +343,7 @@ paths:
         - $ref: "#/components/parameters/SalaryMin"
         - $ref: "#/components/parameters/SalaryMax"
         - $ref: "#/components/parameters/ExperienceYearsMin"
+        - $ref: "#/components/parameters/ExperienceYearsMax"
         - $ref: "#/components/parameters/PostedWithinDays"
       responses:
         "200":
@@ -883,6 +894,23 @@ components:
         `and` requires a posting to carry EVERY listed skill instead of any of
         them. The same `<facet>_mode=and` switch works on any non-geography
         facet.
+    RequiresClearance:
+      name: requires_clearance
+      in: query
+      schema:
+        type: boolean
+      description: |
+        Whether the posting states a government security-clearance requirement
+        (UK SC/DV/BPSS, US Secret/TS-SCI/polygraph, AU baseline/NV1), derived
+        deterministically from the description.
+
+        `false` returns every posting NOT marked as requiring one — including the
+        vast majority, where the description says nothing about clearance. It is
+        the "hide the jobs I cannot be hired into" filter, not an assertion that
+        those postings promise no clearance is needed.
+
+        `true` returns only the marked postings, for a cleared candidate seeking
+        exactly that work. Omitting the parameter filters nothing.
     IsTech:
       name: is_tech
       in: query
@@ -915,6 +943,29 @@ components:
             - fullstack_ai_engineer
             - devops_infra_engineer
       description: AI skill-signature archetype, derived from the posting's skill set.
+    RoleType:
+      name: role_type
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: array
+        items:
+          type: string
+          enum:
+            - people_manager
+      description: |
+        Whether the posting names a people-management role, resolved from its title.
+
+        The vocabulary holds ONE value on purpose. A posting carrying
+        `people_manager` is a management role; a posting carrying **nothing** means
+        no management marker was found in the title — it does **not** mean the
+        posting is an individual-contributor role. That side is not detectable from
+        a title and this API does not claim it.
+
+        So `role_type_exclude=people_manager` returns "postings with no management
+        marker", which is a wider and weaker set than "individual-contributor
+        postings". Do not present it to users as the latter.
     Collections:
       name: collections
       in: query
@@ -1161,7 +1212,23 @@ components:
       in: query
       schema:
         type: integer
-      description: Lower bound on the years of experience the posting asks for.
+      description: >-
+        Lower bound on the years of experience the posting asks for. Pairs with
+        `experience_years_max` as a closed range over that one figure. A posting
+        that states no experience requirement carries no figure and is therefore
+        excluded by either bound.
+    ExperienceYearsMax:
+      name: experience_years_max
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+      description: >-
+        Upper bound on the years of experience the posting asks for — the most you
+        are willing to be asked for. It bounds the same figure `experience_years_min`
+        bounds from below, not a second field. `experience_years_max=0` selects the
+        postings that state no prior experience is required. Like `experience_years_min`,
+        it excludes postings that state no requirement at all.
     PostedWithinDays:
       name: posted_within_days
       in: query
@@ -1199,6 +1266,24 @@ components:
         items:
           type: string
       description: Work formats to exclude, e.g. `onsite`.
+    RoleTypeExclude:
+      name: role_type_exclude
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: array
+        items:
+          type: string
+          enum:
+            - people_manager
+      description: >-
+        Role types to exclude. Declared explicitly, unlike most `_exclude` twins,
+        because with a one-value vocabulary the exclusion is the primary way to use
+        this facet: `role_type_exclude=people_manager` returns the postings whose
+        title carries no management marker. That is a wider and weaker set than
+        "individual-contributor postings" — it also holds every management role the
+        title dictionary missed — so do not present it to users as the latter.
     SkillsExclude:
       name: skills_exclude
       in: query
@@ -1303,6 +1388,13 @@ components:
             - tech
             - non_tech
           description: Absent when unknown.
+        requires_clearance:
+          type: boolean
+          description: |
+            Present and `true` only when the posting states a government
+            security-clearance requirement. Absent otherwise — there is no
+            `false`, because "no requirement was detected" is not the same claim
+            as "this posting needs no clearance".
         posted_at:
           type: string
           format: date-time

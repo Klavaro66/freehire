@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/collections"
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/job/collections"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // plan matches each collection's candidates against existing companies and emits a

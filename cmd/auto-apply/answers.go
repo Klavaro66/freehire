@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 
-	"github.com/strelov1/freehire/internal/autoapply"
-	"github.com/strelov1/freehire/internal/candidateprofile"
+	"github.com/strelov1/freehire/internal/api/candidateprofile"
+	"github.com/strelov1/freehire/internal/application/autoapply"
 )
 
 // assemblerAnswerSource adapts *candidateprofile.Assembler to autoapply.AnswerSource. The

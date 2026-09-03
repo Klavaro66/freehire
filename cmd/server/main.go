@@ -13,26 +13,26 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
-	appleauth "github.com/strelov1/freehire/internal/auth/apple"
-	"github.com/strelov1/freehire/internal/auth/oauth"
-	"github.com/strelov1/freehire/internal/blobstore"
-	"github.com/strelov1/freehire/internal/cache"
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/credits"
-	"github.com/strelov1/freehire/internal/cv"
-	"github.com/strelov1/freehire/internal/database"
-	"github.com/strelov1/freehire/internal/gmailsync"
-	"github.com/strelov1/freehire/internal/handler"
-	"github.com/strelov1/freehire/internal/llm"
-	"github.com/strelov1/freehire/internal/llmkey"
-	"github.com/strelov1/freehire/internal/matchanalysis"
-	"github.com/strelov1/freehire/internal/observability"
-	"github.com/strelov1/freehire/internal/pii"
-	"github.com/strelov1/freehire/internal/ratelimit"
-	"github.com/strelov1/freehire/internal/realtime"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/speech"
-	"github.com/strelov1/freehire/internal/tokencrypt"
+	"github.com/strelov1/freehire/internal/ai/llmkey"
+	"github.com/strelov1/freehire/internal/ai/plan"
+	"github.com/strelov1/freehire/internal/ai/speech"
+	"github.com/strelov1/freehire/internal/api/handler"
+	"github.com/strelov1/freehire/internal/api/ratelimit"
+	"github.com/strelov1/freehire/internal/api/realtime"
+	"github.com/strelov1/freehire/internal/application/gmailsync"
+	"github.com/strelov1/freehire/internal/candidate/cv"
+	"github.com/strelov1/freehire/internal/candidate/matchanalysis"
+	"github.com/strelov1/freehire/internal/candidate/pii"
+	appleauth "github.com/strelov1/freehire/internal/identity/auth/apple"
+	"github.com/strelov1/freehire/internal/identity/auth/oauth"
+	"github.com/strelov1/freehire/internal/platform/blobstore"
+	"github.com/strelov1/freehire/internal/platform/cache"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/database"
+	"github.com/strelov1/freehire/internal/platform/llm"
+	"github.com/strelov1/freehire/internal/platform/observability"
+	"github.com/strelov1/freehire/internal/platform/tokencrypt"
+	"github.com/strelov1/freehire/internal/search/search"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -79,7 +79,7 @@ func main() {
 	defer pool.Close()
 
 	// Redis is a required dependency, like Postgres — it backs the shared rate
-	// limiter (internal/ratelimit) with no in-memory fallback mode. A malformed
+	// limiter (internal/api/ratelimit) with no in-memory fallback mode. A malformed
 	// REDIS_URL is fatal at startup rather than degrading rate limiting silently.
 	redisOpts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
@@ -109,8 +109,11 @@ func main() {
 		// résumés up front so users get a clear message instead of a raw 413. Seam: if the
 		// broad ceiling ever matters, add a Content-Length guard middleware on the non-upload
 		// routes rather than lowering this.
-		BodyLimit:    8 * 1024 * 1024,
-		ErrorHandler: handler.RenderError,
+		BodyLimit: 8 * 1024 * 1024,
+		// Wrapped so an error-derived response is counted with the status actually sent:
+		// Fiber renders errors here, after the middleware chain has unwound, so the counter
+		// in observability.HTTPMetrics cannot see them.
+		ErrorHandler: observability.CountErrors(handler.RenderError),
 		// The app sits behind the in-network nginx proxy (web/nginx.conf). Key c.IP()
 		// (and thus the rate limiter) on X-Real-IP, which nginx OVERWRITES with the real
 		// peer — a single value the client cannot spoof. X-Forwarded-For is deliberately
@@ -120,11 +123,16 @@ func main() {
 		// (the nginx container); a direct public caller is not trusted.
 		ProxyHeader:             "X-Real-IP", // Fiber has no constant for this header
 		EnableTrustedProxyCheck: true,
-		// Shared with internal/ratelimit, which does not count a peer we trust to
+		// Shared with internal/api/ratelimit, which does not count a peer we trust to
 		// assert someone else's address — chiefly our own SSR, which reaches the
 		// API over loopback. One definition so the two cannot disagree.
 		TrustedProxies: ratelimit.TrustedCIDRs,
 	})
+
+	// Counting responses sits OUTSIDE recover.New on purpose: recover converts a panic into a
+	// 500 further in, so only a middleware the response passes through on its way back out
+	// records the status the client actually got.
+	app.Use(observability.HTTPMetrics())
 
 	// The recover middleware marks each unwound panic via c.Locals so RenderError
 	// won't double-report it: the sentryfiber middleware below already captures the
@@ -196,6 +204,18 @@ func main() {
 	}
 	defer assistantFlush()
 
+	// The AI filter runs on its own model too, for the opposite reason to the
+	// assistant's: the task is trivial — sort one sentence into named fields — but a
+	// person is watching a spinner while it happens, so latency is the whole quality
+	// bar. Measured against this gateway on the real prompt and schema, a small fast
+	// model answers in ~2.3s where the shared one takes ~4s and spikes, at the same
+	// accuracy. Unset falls back to LLM_MODEL.
+	intentLLM, intentFlush, err := llm.NewClient(cfg.Settings(cmp.Or(cfg.SearchIntentModel, cfg.Model)), "search-intent")
+	if err != nil {
+		log.Fatalf("llm (search intent): %v", err)
+	}
+	defer intentFlush()
+
 	// Dictation runs on the same gateway and the same key as the two clients above —
 	// an OpenAI-compatible endpoint serves /chat/completions and /audio/transcriptions
 	// alike — so there is nothing extra to configure and nothing extra to fail. Nil
@@ -213,14 +233,16 @@ func main() {
 	// account's model calls are spent under. Nil when unconfigured, and that is an
 	// ordinary deployment rather than a degraded one: every call then goes out on
 	// LLM_API_KEY exactly as it did before this existed. It is deliberately a separate
-	// endpoint and credential from inference — administration is served at the gateway
-	// root, and the key that mints keys has no business on a chat request.
+	// endpoint and credential from inference — administration is served under /api, and
+	// the administrator that mints keys has no business on a chat request.
 	llmKeys := llmkey.New(llmkey.Config{
-		BaseURL:      cfg.LLMAdminURL,
-		AdminKey:     cfg.LLMAdminKey,
-		MaxBudget:    cfg.LLMUserMaxBudget,
-		RPMLimit:     cfg.LLMUserRPMLimit,
-		BudgetWindow: cfg.LLMUserBudgetWindow,
+		BaseURL:       cfg.LLMAdminURL,
+		AdminUsername: cfg.LLMAdminUsername,
+		AdminPassword: cfg.LLMAdminPassword,
+		TemplateKey:   cfg.LLMAdminTemplateKey,
+		MaxBudget:     cfg.LLMUserMaxBudget,
+		RPMLimit:      cfg.LLMUserRPMLimit,
+		BudgetWindow:  cfg.LLMUserBudgetWindow,
 	})
 
 	// OAuth sign-in is optional: only providers with full credentials are
@@ -248,7 +270,7 @@ func main() {
 
 	// PII detector for de-identifying CV text before it reaches the LLM. Nil when
 	// PII_FILTER_URL is unset, which fails the CV→LLM paths closed (no analysis) rather
-	// than leaking PII (see internal/pii, internal/matchanalysis, internal/resumeextract).
+	// than leaking PII (see internal/candidate/pii, internal/candidate/matchanalysis, internal/candidate/resumeextract).
 	var piiDetector pii.Detector
 	if cfg.PIIFilterURL != "" {
 		piiDetector = pii.NewHTTPDetector(cfg.PIIFilterURL, nil)
@@ -256,7 +278,7 @@ func main() {
 
 	// Credits metering config, loaded alongside the other optional dependencies rather
 	// than inline in the handler registration.
-	creditsConfig := credits.Config(config.LoadCredits())
+	planConfig := plan.ConfigFromEnv()
 
 	handler.Register(app, handler.Config{
 		Pool:                        pool,
@@ -283,6 +305,7 @@ func main() {
 		TracerLinkSalt:              cfg.TracerLinkSalt,
 		LLM:                         llmClient,
 		AssistantLLM:                assistantLLM,
+		SearchIntentLLM:             intentLLM,
 		AssistantMaxSteps:           cfg.AssistantMaxSteps,
 		AssistantMaxPrompt:          cfg.AssistantMaxPrompt,
 		LLMKeys:                     llmKeys,
@@ -300,7 +323,7 @@ func main() {
 		DiscordPublicKey:     cfg.DiscordPublicKey,
 		DiscordGuildID:       cfg.DiscordGuildID,
 
-		Credits: creditsConfig,
+		Plan: planConfig,
 
 		AWSRegion:       cfg.AWSRegion,
 		NotifyEmailFrom: cfg.NotifyEmailFrom,

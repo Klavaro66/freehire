@@ -43,8 +43,8 @@ schema.
 
 The system SHALL let a caller constrain a schema field to a controlled vocabulary by
 an explicit override supplied where the schema is built, keeping the vocabularies in
-`internal/vocab` as their single definition. A struct tag SHALL NOT be used to carry
-enum values, so a contract package never restates a list `internal/vocab` owns.
+`internal/dict/vocab` as their single definition. A struct tag SHALL NOT be used to carry
+enum values, so a contract package never restates a list `internal/dict/vocab` owns.
 
 #### Scenario: An enum field is constrained to its vocabulary
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 type fakeJobStore struct {

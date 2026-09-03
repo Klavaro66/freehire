@@ -6,7 +6,7 @@ A real production tailoring session (`assistant_sessions` id
 `bf58de6a-a83b-4056-aa7e-16e3a908a70a`) got stuck asking the candidate to
 "confirm in your own words" 16 times and never recovered — the last message
 in the transcript is still the same refusal. Root cause, traced through
-`internal/experience/store.go` and `internal/db/queries/experience.sql`:
+`internal/candidate/experience/store.go` and `internal/platform/db/queries/experience.sql`:
 
 `InsertAtomIfNew` dedups on `(user_id, claim_key)` with `ON CONFLICT DO
 NOTHING`. Once a claim is first banked with provenance `agent_inferred` (the
@@ -33,9 +33,9 @@ explicitly out of scope here — separate design pass later.
 
 ## A. Provenance upgrade on conflict
 
-**File:** `internal/db/queries/experience.sql` (`InsertExperienceAtomIfNew`),
-regenerated into `internal/db/experience.sql.go`; caller
-`internal/experience/store.go:178-194` (`Store.AddAtom`).
+**File:** `internal/platform/db/queries/experience.sql` (`InsertExperienceAtomIfNew`),
+regenerated into `internal/platform/db/experience.sql.go`; caller
+`internal/candidate/experience/store.go:178-194` (`Store.AddAtom`).
 
 Change the insert's conflict clause from `DO NOTHING` to a conditional
 upgrade:
@@ -83,7 +83,7 @@ confirms an already-`stated_in_chat` atom is never downgraded by a later
 ## B. Confirm via button, not free text
 
 **New tool, `tailor` preset only:** `request_confirmation`, added alongside
-`assistantCVTools` in `internal/handler/assistant_cv_tools.go` (registered
+`assistantCVTools` in `internal/api/handler/assistant_cv_tools.go` (registered
 under the same `preset == assistant.PresetTailor` gate in
 `assistant_tools.go:359`).
 
@@ -93,7 +93,7 @@ Args: { claim: string, question: string }
 Run: no side effect — returns {"status": "awaiting_candidate_response"}
 ```
 
-`tailorPrompt` (`internal/assistant/prompt.go`) step 2 changes from "ASK them
+`tailorPrompt` (`internal/ai/assistant/prompt.go`) step 2 changes from "ASK them
 (...)" free text to: call `request_confirmation` with the exact claim text
 and a short question, instead of writing the ask as prose. The model still
 composes the claim text itself (unchanged); what changes is how it puts the
@@ -133,13 +133,13 @@ beyond registering the tool correctly.
 
 Deleted, not flagged off:
 
-- `internal/assistant/followups.go`, `internal/assistant/followups_test.go`
-- `internal/handler/assistant_followups.go`,
+- `internal/ai/assistant/followups.go`, `internal/ai/assistant/followups_test.go`
+- `internal/api/handler/assistant_followups.go`,
   `assistant_followups_test.go`, `assistant_followups_integration_test.go`
-- Route registration in `internal/handler/assistant.go:148`
+- Route registration in `internal/api/handler/assistant.go:148`
 - The route-list assertion in
-  `internal/handler/assistant_integration_test.go:235`
-- The billing tag `tagFollowUps` in `internal/handler/user_llm.go:18` (check
+  `internal/api/handler/assistant_integration_test.go:235`
+- The billing tag `tagFollowUps` in `internal/api/handler/user_llm.go:18` (check
   no other reference needs it before deleting)
 - Frontend: `web/src/lib/assistant/followups.ts` +
   `followups.test.ts`, the `suggestFollowUps` call in
@@ -147,7 +147,7 @@ Deleted, not flagged off:
   `AssistantChat.svelte` (state `followUps`, `askForFollowUps`, the reset
   points, the chip-rendering block)
 
-Not touched: `internal/handler/followup.go` / `internal/followup` — a
+Not touched: `internal/api/handler/followup.go` / `internal/application/followup` — a
 same-named but unrelated feature (application follow-up email drafts).
 
 **Testing:** existing test suite should simply have fewer tests after

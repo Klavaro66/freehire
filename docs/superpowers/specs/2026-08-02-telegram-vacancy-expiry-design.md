@@ -129,7 +129,7 @@ column exists to enable.
 
 ## Testing
 
-- Integration test (`internal/db`, build tag `integration`): a `telegram` row older than the
+- Integration test (`internal/platform/db`, build tag `integration`): a `telegram` row older than the
   window closes with `closed_reason = 'expired'`; one inside the window does not; a row from
   a probeable source is untouched whatever its age.
 - Boundary test on the window itself — a row exactly at the cutoff.

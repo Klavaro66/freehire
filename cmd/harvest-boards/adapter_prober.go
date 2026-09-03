@@ -5,14 +5,14 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 )
 
 // proberFor resolves the prober for a provider: the bespoke one when probers names it, else
 // the provider's own source adapter run as a probe.
 //
 // The fallback exists because the two lists drift. probers is hand-maintained and names ~35
-// platforms; internal/sources carries close to a hundred adapters, and a platform missing from
+// platforms; internal/ingest/sources carries close to a hundred adapters, and a platform missing from
 // the first is not a platform we cannot crawl — it is one whose boards nobody can propose. That
 // gap is what stranded 485 detected boards across 13 platforms in the August 2026 harvest. A
 // bespoke prober is still worth writing (one cheap request instead of a full crawl, and on ~10

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/strelov1/freehire/internal/normalize"
+	"github.com/strelov1/freehire/internal/dict/normalize"
 )
 
 // The two ways a company slug can be a duplicate of another, recorded on every alias so a

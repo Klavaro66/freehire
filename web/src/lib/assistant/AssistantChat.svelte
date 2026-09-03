@@ -11,11 +11,14 @@
   } from '$lib/assistant/api';
   import VoiceCall from '$lib/assistant/VoiceCall.svelte';
   import { canUseVoiceCall } from '$lib/assistant/voiceCall';
+  import { AUDIO_ENABLED } from '$lib/assistant/audioAvailability';
   import { track } from '$lib/analytics';
   import {
     openRehearsal,
     retryTurn,
     sendTurn,
+    extendSession,
+    TurnRefused,
     startAutopilot,
     StreamInterrupted,
     type Turn,
@@ -114,6 +117,12 @@
 
   let phase = $state<Phase>('loading');
   let error = $state<string | null>(null);
+  // A ceiling refusal is not a dead end: the session can be continued by spending another
+  // of the day's tailoring sessions. Held apart from `error` because it needs an action
+  // beside it, and because a plain error message would tell the candidate to give up on
+  // work they can carry on with right now.
+  let refusal = $state<TurnRefused | null>(null);
+  let extending = $state(false);
   // Distinct from `error`: the URL names a conversation that is not the caller's to
   // open — deleted, someone else's, or a tailoring chat that belongs to a CV. It is
   // a dead link, not a failure, so it gets an explanation and a way out.
@@ -161,6 +170,8 @@
   // not keep offering a call that can only fail. `voiceSupported` starts false and is
   // decided after mount, the same reasoning VoiceInput.svelte's `supported` gives:
   // reading navigator during SSR would disagree with the client on the first paint.
+  // It also carries AUDIO_ENABLED, which is false while the gateway migration leaves
+  // the Realtime route unproven — see audioAvailability.ts.
   let voiceCallOpen = $state(false);
   let voiceModeOff = $state(false);
   let voiceSupported = $state(false);
@@ -681,9 +692,39 @@
         endTurn();
         return;
       }
+      if (err instanceof TurnRefused && err.canExtend) {
+        // The turn never started, so the message was never recorded — give it back to the
+        // composer rather than losing it while the candidate decides whether to continue.
+        draft = draft.trim() === '' && start.kind === 'message' ? start.text : draft;
+        refusal = err;
+        endTurn();
+        return;
+      }
       error = err instanceof Error ? err.message : 'Could not send the message.';
       chat = reduceTurnEvent(chat, { type: 'result', stop_reason: 'error', is_error: true });
       endTurn();
+    }
+  }
+
+  /** Spend another of today's tailoring sessions so this conversation can carry on.
+   *
+   *  It does not re-send the message: the draft was handed back when the turn was refused,
+   *  so the candidate sends it themselves and can change their mind first. Extending is
+   *  idempotent on the server, so a double click costs one session rather than two. */
+  async function continueSession() {
+    const stopped = refusal;
+    if (!stopped || extending) return;
+    extending = true;
+    try {
+      await extendSession(stopped.sessionId);
+      refusal = null;
+    } catch (err) {
+      // Refused again means the day's tailoring allowance is gone too, and that IS a wall
+      // until tomorrow — so it becomes an ordinary error rather than another offer.
+      refusal = null;
+      error = err instanceof Error ? err.message : 'Could not continue this session.';
+    } finally {
+      extending = false;
     }
   }
 
@@ -721,10 +762,12 @@
 
   onMount(() => {
     void boot();
-    voiceSupported = canUseVoiceCall({
-      mediaDevices: navigator.mediaDevices,
-      RTCPeerConnection: typeof RTCPeerConnection === 'undefined' ? undefined : RTCPeerConnection,
-    });
+    voiceSupported =
+      AUDIO_ENABLED &&
+      canUseVoiceCall({
+        mediaDevices: navigator.mediaDevices,
+        RTCPeerConnection: typeof RTCPeerConnection === 'undefined' ? undefined : RTCPeerConnection,
+      });
     document.addEventListener('visibilitychange', catchUpOnReturn);
     return () => {
       document.removeEventListener('visibilitychange', catchUpOnReturn);
@@ -743,6 +786,30 @@
   >
     <AlertTriangle class="mt-0.5 size-4 shrink-0" />
     <span>{error}</span>
+  </div>
+{/if}
+{#if refusal}
+  <div
+    class="m-3 mb-0 flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-sm"
+    role="status"
+  >
+    <AlertTriangle class="mt-0.5 size-4 shrink-0 text-warning-strong" />
+    <div class="flex min-w-0 flex-1 flex-col gap-1">
+      <span>{refusal.message}</span>
+      {#if refusal.ceiling > 0}
+        <span class="text-xs text-muted-foreground">
+          {refusal.turns} of {refusal.ceiling} messages used in this session.
+        </span>
+      {/if}
+    </div>
+    <button
+      type="button"
+      class="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-60"
+      onclick={continueSession}
+      disabled={extending}
+    >
+      {extending ? 'Continuing…' : 'Continue — uses another session'}
+    </button>
   </div>
 {/if}
 {#if bulletCapAlert}

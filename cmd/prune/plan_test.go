@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // A batch dominated by one board is the signature of a broken board title rather than a

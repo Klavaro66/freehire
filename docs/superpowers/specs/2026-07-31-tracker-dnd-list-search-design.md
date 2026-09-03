@@ -61,9 +61,9 @@ pins the cause on the element under the pointer.
 
 ### 1. Writes addressed by the row the listing served
 
-`TrackedJob.ID` is not one thing. `internal/jobtracking/repository.go:209` sets
+`TrackedJob.ID` is not one thing. `internal/application/jobtracking/repository.go:209` sets
 it to the posting's public slug for an ordinary row;
-`internal/jobtracking/repository.go:243` sets it to `"a" + applications.id` for
+`internal/application/jobtracking/repository.go:243` sets it to `"a" + applications.id` for
 an application whose posting `cmd/prune` removed. The board sends that value to
 `api.trackJob`, which is `PATCH /api/v1/jobs/:slug/track` — so a posting-less
 application's stage change 404s and the card reverts.
@@ -82,7 +82,7 @@ handlers resolve it. A malformed id answers 404 with the body a missing one
 produces — the same rule the opaque-id swap set for CVs.
 
 Its own namespace rather than `/me/tracking/:id`, because
-`internal/handler/gmail.go:101` already mounts `GET /me/tracking/:slug` addressed
+`internal/api/handler/gmail.go:101` already mounts `GET /me/tracking/:slug` addressed
 by a posting slug. One path segment meaning different things depending on the
 method is a trap for the next reader.
 

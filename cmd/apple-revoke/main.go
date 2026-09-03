@@ -6,9 +6,9 @@ import (
 	"context"
 	"log"
 
-	appleauth "github.com/strelov1/freehire/internal/auth/apple"
-	"github.com/strelov1/freehire/internal/auth/applejobs"
-	"github.com/strelov1/freehire/internal/worker"
+	appleauth "github.com/strelov1/freehire/internal/identity/auth/apple"
+	"github.com/strelov1/freehire/internal/identity/auth/applejobs"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() { worker.Main(run) }

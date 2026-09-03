@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/handler"
+	"github.com/strelov1/freehire/internal/api/handler"
+	"github.com/strelov1/freehire/internal/platform/config"
 )
 
 // TestEveryConfigFieldTheHandlerAlsoNamesIsWiredThrough guards a whole class of silent failure:

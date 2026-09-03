@@ -6,13 +6,13 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/strelov1/freehire/internal/cache"
-	"github.com/strelov1/freehire/internal/catalogstats"
-	"github.com/strelov1/freehire/internal/telegram"
+	"github.com/strelov1/freehire/internal/ingest/catalogstats"
+	"github.com/strelov1/freehire/internal/ingest/telegram"
+	"github.com/strelov1/freehire/internal/platform/cache"
 )
 
 // publishSnapshot measures the catalogue and publishes the figures every public surface
-// quotes (internal/catalogstats).
+// quotes (internal/ingest/catalogstats).
 //
 // It lives in this worker because the exact counts are a full catalogue scan and this
 // worker is already scanning jobs for the rollups — one more aggregate on a run that is

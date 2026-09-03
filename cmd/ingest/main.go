@@ -27,13 +27,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/enrich"
-	"github.com/strelov1/freehire/internal/pipeline"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ai/enrich"
+	"github.com/strelov1/freehire/internal/ingest/pipeline"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // staleAfter is the DEFAULT grace window before an unseen job is closed. An adapter that
@@ -45,19 +43,6 @@ const staleAfter = sources.DefaultSweepGrace
 
 func main() {
 	worker.Main(run)
-}
-
-// coverageLookup wires the aggregator ingest-time coverage gate's Meili-backed port when
-// search is configured, and nil otherwise — the same "MeiliKey empty ⇒ disabled" convention
-// cmd/server's searchClient wiring already uses. A nil port makes the gate a no-op (write
-// everything, exactly as before this change), never a hard failure: an ingest run must not
-// fail over search being unreachable/unconfigured, since it never needed Meili before. No
-// embed options are wired — the coverage lookup is a plain facet query, not embedding.
-func coverageLookup(cfg config.Settings) pipeline.CoverageLookup {
-	if cfg.MeiliKey == "" {
-		return nil
-	}
-	return search.NewClient(cfg.MeiliURL, cfg.MeiliKey)
 }
 
 func run() int {
@@ -138,8 +123,16 @@ func run() int {
 		log.Printf("ingest: hydration retry window widened to %v — body-less rows will be re-fetched",
 			hydrationWindow)
 	}
+	refetchAll, err := refetchAllFor(os.Getenv("INGEST_REFETCH_ALL"))
+	if err != nil {
+		log.Printf("config: %v", err)
+		return 1
+	}
+	if refetchAll {
+		log.Printf("ingest: INGEST_REFETCH_ALL — every listed posting is treated as new, so stored rows are re-written, not just refreshed")
+	}
 
-	ctx, cfg, pool, cleanup, err := worker.Bootstrap(context.Background())
+	ctx, _, pool, cleanup, err := worker.Bootstrap(context.Background())
 	if err != nil {
 		log.Printf("database: %v", err)
 		return 1
@@ -152,12 +145,16 @@ func run() int {
 	// tally records which of the two writes each persisted posting took, so the run says how far
 	// the cheap path actually reached rather than leaving it to be assumed (see writeTally).
 	tally := newWriteTally()
-	store := newDBStore(pool, enrich.Version, crawled, tally, hydrationWindow)
+	store := newDBStore(pool, enrich.Version, crawled, tally, hydrationWindow, refetchAll)
 	runner := pipeline.Runner{
 		Registry:    registry,
 		Store:       store,
 		BoardHealth: newBoardHealth(pool),
-		Coverage:    coverageLookup(cfg),
+		// The coverage gate reads the same pool: last_seen_at decides the answer, and no
+		// index can hold it (see coverage.go). It was Meili-backed and gated on MeiliKey;
+		// every production ingest unit already carried that key, so the gate is on for the
+		// same runs as before — only a local run without search configured gains it.
+		Coverage: newCoverage(pool),
 		// Same object as Store: the alias registry is a read the store's pool already
 		// serves, and the pipeline asks for it once per board run.
 		Aliases: store,
@@ -314,6 +311,29 @@ func hydrationRetryWindowFor(env string) (time.Duration, error) {
 		return 0, fmt.Errorf("HYDRATION_RETRY_DAYS must be a positive number of days, got %q", env)
 	}
 	return time.Duration(days) * 24 * time.Hour, nil
+}
+
+// refetchAllFor resolves INGEST_REFETCH_ALL, the repair switch that empties the seen-set so a
+// crawl re-WRITES the provider's stored rows instead of only refreshing their liveness (see
+// dbStore.ExistingExternalIDs). It is what carries an adapter fix to the postings ingested before
+// it: the ordinary crawl never rewrites them, and re-deriving from the database cannot recover a
+// field the adapter read wrong, because what the database stored is the wrong reading.
+//
+// Set it by hand for one run and expect the crawl to cost one detail request per stored posting.
+// Nothing is lost if a detail request fails — UpsertJob keeps the stored description when the
+// incoming one is empty — so a run that hits its systemd timeout can simply be repeated.
+//
+// Anything other than the two accepted spellings is an error rather than a quiet false: this is a
+// hand-set one-off, where an ordinary crawl would look exactly like a repair that found nothing.
+func refetchAllFor(env string) (bool, error) {
+	switch env {
+	case "":
+		return false, nil
+	case "1", "true":
+		return true, nil
+	default:
+		return false, fmt.Errorf("INGEST_REFETCH_ALL must be 1 or true when set, got %q", env)
+	}
 }
 
 // sweepProvider closes one provider's unseen jobs: the bulk UPDATE (CloseUnseenJobs or

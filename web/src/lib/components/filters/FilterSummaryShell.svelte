@@ -1,5 +1,11 @@
 <script module lang="ts">
   export interface SummaryChip {
+    /** Identity for the keyed `{#each}`, unique by construction — `param:value` for a
+     *  facet value, a literal for the one-off chips (Search, Salary, Visa…). NOT the
+     *  label: two different values can share one, and since the skills facet started
+     *  labelling from the dictionary, `nextjs` and `next.js` both read "Next.js" — a
+     *  duplicate key, which Svelte answers by tearing down the whole block. */
+    key: string;
     text: string;
     /** Excluded value — rendered in the destructive (struck-through) style. */
     exclude: boolean;
@@ -32,6 +38,7 @@
     onOpen,
     description,
     afterButton,
+    beforeButton,
   }: {
     groups: SummaryGroup[];
     active: number;
@@ -43,6 +50,11 @@
     /** Optional content under the All-filters button — the job summary uses it for the
      *  "Save filter" affordance; the company summary omits it. */
     afterButton?: Snippet;
+    /** Optional content ABOVE the All-filters button — the job summary uses it for the
+     *  "Describe with AI" entry point. Above rather than below because it is a way to
+     *  FILL the filters, so it reads before the controls that refine them; the company
+     *  summary omits it, since the interpretation speaks the job filter's vocabulary. */
+    beforeButton?: Snippet;
   } = $props();
 </script>
 
@@ -58,6 +70,8 @@
       <p class="text-xs text-muted-foreground">{description}</p>
     {/if}
   </div>
+
+  {@render beforeButton?.()}
 
   <button
     type="button"
@@ -92,7 +106,7 @@
           </button>
         </div>
         <div class="flex flex-wrap gap-1.5">
-          {#each g.chips as c (c.text)}
+          {#each g.chips as c (c.key)}
             <span
               class={[
                 'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium',

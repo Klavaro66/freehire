@@ -72,7 +72,7 @@
 
   // Widening the catalogue, and the moderator queue behind it.
   const contribute = [
-    { cmd: 'contribute <url>', desc: "Hand freehire a job link; a board we don't track yet earns a credit." },
+    { cmd: 'contribute <url>', desc: "Hand freehire a job link; a board we don't track yet gets added and crawled." },
     { cmd: 'contributions', desc: "The boards you've contributed and their state." },
     { cmd: 'submissions', desc: 'Jobs you submitted; the review queue with pending/approve/reject (moderator).' },
     { cmd: 'jobs add | edit <slug>', desc: 'Create or edit a job posting (moderator).' },
@@ -128,6 +128,14 @@
             Source ↗
           </Button>
         </div>
+
+        <p class="reveal mt-5 text-sm leading-relaxed text-muted-foreground" style="--d:300ms">
+          Not on the terminal? <a
+            href={resolve('/agents')}
+            class="font-medium text-foreground underline-offset-4 hover:underline"
+            >Every way to connect an agent</a
+          > — MCP hosts, ChatGPT, and your own client.
+        </p>
       </div>
 
       <figure

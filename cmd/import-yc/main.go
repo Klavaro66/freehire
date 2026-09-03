@@ -1,14 +1,14 @@
 // Command import-yc is a run-once host worker that enriches companies from the
 // yc-oss directory (yc-oss.github.io/api/companies/all.json — the same source the
 // yc collection tag uses, but here we read the full record). Each entry is mapped
-// (internal/ycdir) and upserted by normalized-name slug: an existing company has
+// (internal/job/ycdir) and upserted by normalized-name slug: an existing company has
 // its YC-owned columns and the curated yc_batch/yc_status facets refreshed, and an
 // unmatched entry is inserted as a reference row (is_reference=true) so we hold the
 // full YC directory. Idempotent.
 //
 // Three columns this worker writes are shared with other sources and are therefore
 // merged, not replaced — tagline fills only a blank, company_info merges key-wise,
-// and industries union. Industries also pass through internal/industrytag, so the
+// and industries union. Industries also pass through internal/dict/industrytag, so the
 // directory cannot add a second spelling of an industry we already name.
 //
 //	import-yc            # needs DATABASE_URL; YC_DATASET_URL overrides the source
@@ -27,10 +27,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/industrytag"
-	"github.com/strelov1/freehire/internal/worker"
-	"github.com/strelov1/freehire/internal/ycdir"
+	"github.com/strelov1/freehire/internal/dict/industrytag"
+	"github.com/strelov1/freehire/internal/job/ycdir"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 const (

@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only, at the workflow level so it covers every job here and every job added later —
+# the other workflows already declare this, and CI was the one that did not. Nothing in it
+# writes to the repository: it builds, tests and reports. A job that ever needs to write
+# should say so itself, which is the point of putting the floor here.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -104,6 +111,253 @@ jobs:
           path: coverage/*.out
           if-no-files-found: ignore
 
+  # The three artefacts this repository hands to someone else, none of which any other job
+  # reads: a shell script the site serves to be piped into sh, the images that get deployed,
+  # and the API description integrations are built against. A mistake in any of them is
+  # discovered by whoever is on the receiving end.
+  artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # This job runs a downloaded container image and an npx package over the
+          # checkout. Neither needs the token, and leaving it in .git/config hands it to
+          # both.
+          persist-credentials: false
+
+      # web/static/install.sh is served at https://freehire.me/install.sh and documented as
+      # `curl -fsSL … | sh`, so a mistake in it runs on someone else's machine, as them.
+      # web/docker-entrypoint.sh is what starts the site. shellcheck ships on the runner.
+      #
+      # The list comes from git rather than being written out here: a script added next year
+      # is covered the day it is committed, not the day someone remembers this job exists.
+      - name: Check shell scripts
+        run: |
+          mapfile -t scripts < <(git ls-files '*.sh')
+          if [ ${#scripts[@]} -eq 0 ]; then
+            echo "No shell scripts tracked — this job has lost its subject."
+            exit 1
+          fi
+          printf 'Checking %d script(s):\n' "${#scripts[@]}"
+          printf '  %s\n' "${scripts[@]}"
+          shellcheck "${scripts[@]}"
+
+      # Read .hadolint.yaml for which two rules are ignored and why; a finding that is wrong
+      # for one line carries its argument inline instead.
+      - name: Lint the Dockerfiles
+        run: |
+          mapfile -t files < <(git ls-files 'Dockerfile' '*/Dockerfile')
+          printf '  %s\n' "${files[@]}"
+          for f in "${files[@]}"; do
+            docker run --rm -i -v "$PWD/.hadolint.yaml:/.hadolint.yaml:ro" \
+              hadolint/hadolint:v2.15.1-alpine hadolint --config /.hadolint.yaml - < "$f"
+          done
+
+      # `minimal` is the OpenAPI specification itself, not Redocly's style opinions. The
+      # question this gate asks is "can a client generator read this", and the answer stops
+      # being yes on a mistyped $ref or a schema that does not parse — neither of which
+      # anything else here would notice, since the file is served as a static asset.
+      - name: Validate the OpenAPI description
+        run: npx --yes @redocly/cli@2.49.0 lint web/static/openapi.yaml --extends=minimal
+
+  # Every relative Markdown link, because this repository navigates by document and a
+  # rename breaks one silently. Needs no dependencies — git and node — so it is its own
+  # job rather than a step tacked onto one that installs a package tree.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check documentation links
+        run: node scripts/check-doc-links.mjs
+
+  # The workflows themselves. Nothing has ever read them except GitHub, at the moment it
+  # runs one — so an unknown runner label, a mistyped `needs:` or a broken expression is
+  # discovered by a job failing, and a job that only runs on a tag or a schedule is
+  # discovered late. actionlint also runs shellcheck over every `run:` block, which is the
+  # half that found real things here: an unquoted `find` result passed to grep, and an `ls`
+  # parsed for a path in the extension's store-upload step.
+  #
+  # `go install` at a pinned version rather than a downloaded release: the Go module proxy
+  # verifies the checksum against the transparency log on its own, so the pin is the whole
+  # supply-chain story — no second digest to keep in step with the version.
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      # No path argument: actionlint finds .github/workflows itself, so a NEW workflow is
+      # covered the moment it exists rather than when someone remembers to list it.
+      - name: Lint the workflows
+        run: actionlint
+
+  # Dead files, unused dependencies and unresolved binaries across the three JS packages.
+  # Read knip.config.js for where the gate's line is drawn and why exports sit outside it.
+  #
+  # CI ONLY, NOT A PRE-COMMIT HOOK, and not because of the four seconds. knip needs the
+  # dependencies of BOTH web and design-system installed to resolve anything, and a fresh
+  # worktree routinely has neither — so as a hook it would fail for a reason that has
+  # nothing to do with the commit, which is the fastest way to teach people --no-verify.
+  # What it catches is cumulative rather than urgent: a file that stopped being imported,
+  # a dependency nobody removed. That can wait for the pull request.
+  dead-code:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install root tooling
+        run: pnpm install --frozen-lockfile
+
+      # design-system before web: web resolves it through a `link:` symlink, and pnpm does
+      # not install a linked package's own dependencies for its consumer.
+      - name: Install design-system dependencies
+        run: pnpm --dir design-system install --frozen-lockfile
+
+      - name: Install web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      # npm, not pnpm — extension/ is the one JS package in this repository managed by npm.
+      - name: Install extension dependencies
+        run: npm --prefix extension ci
+
+      - name: Check for dead code and unused dependencies
+        run: pnpm check:dead
+
+  # internal/platform/db is generated and committed. Nothing compared the two until now,
+  # so a query edited without `make sqlc` shipped the old Go and every job stayed green —
+  # the same class of gap the design-system `check:dist` step exists for.
+  #
+  # `make sqlc` rather than a pinned action, because the Makefile already holds the
+  # version (SQLC_VERSION) and it is the one developers run. Two pins would be two
+  # answers to the same question, and the drift between them would look exactly like
+  # stale generated code.
+  sqlc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Regenerate
+        run: make sqlc
+
+      # The bare `git status --porcelain` is correct HERE and would be wrong in the
+      # pre-commit hook: a fresh clone has an empty index, so "differs from HEAD" and
+      # "is unstaged" have the same answer. See lefthook.yml for the other half.
+      - name: Assert the generated code matches the queries
+        run: |
+          if [ -n "$(git status --porcelain -- internal/platform/db)" ]; then
+            git status --porcelain -- internal/platform/db
+            git --no-pager diff -- internal/platform/db
+            echo
+            echo 'internal/platform/db is stale. Run "make sqlc" and commit the result.'
+            exit 1
+          fi
+          echo 'Generated code matches internal/platform/db/queries.'
+
+  # web/src/lib/generated is the same shape of gap the job above closes, and it was
+  # already open: contracts.ts had drifted 114 skill labels behind the dictionary,
+  # because a skill added to internal/dict never made anyone re-run the generator.
+  #
+  # That drift was invisible and nearly harmless — the SPA title-cases a label it cannot
+  # find, so a stale file rendered the same string anyway. skillDescriptions.ts has no
+  # such fallback: a description the file has not caught up with means no tooltip and no
+  # glossary page, which reads as the feature being broken rather than the file being
+  # old. One more generated file with a silent failure mode is what makes this a job.
+  #
+  # `go run ./cmd/gen-contracts` needs no toolchain of its own — tygo is a library here,
+  # not a binary — so unlike sqlc there is no version to pin in two places.
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Regenerate
+        run: go run ./cmd/gen-contracts
+
+      - name: Assert the generated contracts match the Go vocabularies
+        run: |
+          if [ -n "$(git status --porcelain -- web/src/lib/generated)" ]; then
+            git status --porcelain -- web/src/lib/generated
+            git --no-pager diff -- web/src/lib/generated
+            echo
+            echo 'web/src/lib/generated is stale. Run "make gen-contracts" and commit the result.'
+            exit 1
+          fi
+          echo 'Generated contracts match the Go vocabularies.'
+
+  # Lints only the migrations this pull request ADDS. The applied history carries 1322
+  # findings and is never going to be fixed — "never edit an applied migration" is the
+  # rule this repository runs on, and rewriting one is a worse hazard than any finding.
+  # A migration file genuinely never changes after it lands, which makes this a far
+  # cleaner ratchet than the line-based one the Go lint uses: no baseline file to drift.
+  #
+  # Read .squawk.toml for why the invocation is split in two passes.
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The script asks git which migrations are new since the merge base, so the
+          # base commit has to be reachable. A shallow clone would make every migration
+          # look either new or absent, and neither is a useful answer — which is why the
+          # script fails on an unresolvable base rather than reporting an empty list.
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The step prints how many files it examined. On a branch with no migration that
+      # is zero, which is the honest answer — and visible, rather than a green tick over
+      # a check that found nothing to do.
+      - name: Lint new migrations
+        run: pnpm check:sql
+
   design-system:
     runs-on: ubuntu-latest
     defaults:
@@ -176,12 +430,11 @@ jobs:
       # catches a Tailwind entry that vanished entirely.
       - name: Assert Storybook emitted the primitives' utilities
         run: |
-          css=$(find storybook-static/assets -name '*.css')
-          if [ -z "$css" ]; then
+          if [ -z "$(find storybook-static/assets -name '*.css' -print -quit)" ]; then
             echo "No stylesheet in storybook-static/assets."
             exit 1
           fi
-          if ! grep -qF '.animate-pulse' $css; then
+          if ! grep -rqF '.animate-pulse' --include='*.css' storybook-static/assets; then
             echo "Storybook CSS carries no utility from design-system/src/*.svelte."
             echo "The preview lost its Tailwind entry or theme.css's @source scan."
             exit 1

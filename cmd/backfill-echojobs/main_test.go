@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobhash"
+	"github.com/strelov1/freehire/internal/job/jobhash"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // fakeStore serves one keyset page of echojobs rows and records every description update.

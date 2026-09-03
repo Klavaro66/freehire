@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // fakeQueries answers each query from a canned value, so collect's assembly and error
@@ -20,6 +20,7 @@ type fakeQueries struct {
 	semantic  db.SemanticOutboxMetricsRow
 	boards    db.BoardHealthMetricsRow
 	newest    pgtype.Timestamptz
+	health    []db.ProviderIngestHealthRow
 	newestErr error
 	searchErr error
 }
@@ -44,6 +45,10 @@ func (f fakeQueries) NewestOpenJobCreatedAt(context.Context) (pgtype.Timestamptz
 	return f.newest, f.newestErr
 }
 
+func (f fakeQueries) ProviderIngestHealth(context.Context) ([]db.ProviderIngestHealthRow, error) {
+	return f.health, nil
+}
+
 func populatedQueries() fakeQueries {
 	return fakeQueries{
 		search:   db.SearchOutboxMetricsRow{Depth: 3, DeadLetters: 2, OldestAgeSeconds: 21600.5},
@@ -51,6 +56,45 @@ func populatedQueries() fakeQueries {
 		semantic: db.SemanticOutboxMetricsRow{Depth: 0, DeadLetters: 0, OldestAgeSeconds: 0},
 		boards:   db.BoardHealthMetricsRow{Healthy: 74894, Failing: 7002, Cooled: 1882},
 		newest:   pgtype.Timestamptz{Time: time.Unix(1786821346, 0), Valid: true},
+		health: []db.ProviderIngestHealthRow{
+			{
+				Provider:      "greenhouse",
+				LastSuccessAt: pgtype.Timestamptz{Time: time.Unix(1786821000, 0), Valid: true},
+				Healthy:       9312, Failing: 604, Cooled: 71,
+			},
+			// The shape that started this: no success ever, so no timestamp — and one
+			// failing board, which is the only thing left that can name it.
+			{Provider: "gulftalent", LastSuccessAt: pgtype.Timestamptz{}, Failing: 1},
+		},
+	}
+}
+
+// A provider whose boards have never succeeded answers with a NULL max(), and that NULL
+// must survive collection as "no measurement" rather than collapsing to the zero instant
+// — render turns the two into an absent sample and a 1970 timestamp respectively, and
+// only one of those is honest.
+func TestCollectKeepsNeverSucceededProviderDistinctFromZero(t *testing.T) {
+	snap, err := collect(context.Background(), populatedQueries())
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(snap.providers) != 2 {
+		t.Fatalf("providers = %d, want 2", len(snap.providers))
+	}
+	if got := snap.providers[0]; got.name != "greenhouse" || !got.lastSuccess.Equal(time.Unix(1786821000, 0)) {
+		t.Errorf("first provider = %+v, want greenhouse at 1786821000", got)
+	}
+	if got := snap.providers[1]; got.name != "gulftalent" || !got.lastSuccess.IsZero() {
+		t.Errorf("second provider = %+v, want gulftalent with no measurement", got)
+	}
+	// The board counts are what that provider is left with once the timestamp drops out,
+	// so they must arrive alongside the NULL rather than be lost with it.
+	if got := snap.providers[1]; got.failing != 1 || got.healthy != 0 || got.cooled != 0 {
+		t.Errorf("gulftalent boards = %d healthy/%d failing/%d cooled, want 0/1/0",
+			got.healthy, got.failing, got.cooled)
+	}
+	if got := snap.providers[0]; got.healthy != 9312 || got.failing != 604 || got.cooled != 71 {
+		t.Errorf("greenhouse boards = %d/%d/%d, want 9312/604/71", got.healthy, got.failing, got.cooled)
 	}
 }
 

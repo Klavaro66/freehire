@@ -376,8 +376,8 @@ export const GROUPS: Group[] = [
     intro:
       'Personalized signals computed against the caller’s profile or stored CV. ' +
       'All accept the session cookie or an API key. The skill-match endpoint is ' +
-      'deterministic (no LLM); the match-analysis endpoints run the LLM chain and cost AI ' +
-      'credits. All take the same facet filter params as search where they narrow a ' +
+      'deterministic (no LLM); the match-analysis endpoints run the LLM chain and draw on ' +
+      'your daily allowance. All take the same facet filter params as search where they narrow a ' +
       'market or candidate set.',
     endpoints: [
       {
@@ -411,8 +411,8 @@ export const GROUPS: Group[] = [
         description:
           'Returns the cached analysis, flagged `stale` when your CV or the job ' +
           'changed since it was computed, or a null analysis when none is cached. ' +
-          '`has_cv` is false when you have no stored CV. `credits` reports your AI-points ' +
-          'balance and when it resets.',
+          '`has_cv` is false when you have no stored CV. `allowance` reports how much of ' +
+          'today you have used against what the day allows, and when it resets.',
         pathParams: [{ name: 'slug', type: 'string', required: true, description: 'The job `public_slug`.' }],
         curl: `curl "${BASE_URL}/jobs/<slug>/match-analysis" -H "Authorization: Bearer $FREEHIRE_API_KEY"`,
         responseExample: `{
@@ -428,7 +428,7 @@ export const GROUPS: Group[] = [
       "gaps": ["..."],
       "recommendation": "..."
     },
-    "credits": { "remaining": 17, "resets_at": "2026-08-01T00:00:00Z" }
+    "allowance": { "feature": "match", "used": 1, "limit": 3, "unlimited": false, "enforced": false, "resets_at": "2026-09-01T00:00:00Z" }
   }
 }`,
       },
@@ -439,8 +439,8 @@ export const GROUPS: Group[] = [
         summary: 'Run the three-stage AI match analysis and cache it.',
         description:
           'Runs the match prompt-chain over your stored CV and the job, caches the ' +
-          'result, and returns it fresh (no `credits` on this response). Analysing a new ' +
-          'job costs one AI credit; if you have none left it is a `402`, and recomputing ' +
+          'result, and returns it fresh (no `allowance` on this response). Analysing a new ' +
+          'job draws on your daily analysis allowance; with none left it is a `402`, and recomputing ' +
           'an already-analyzed job is free. `has_cv` is false when no CV is stored; a ' +
           'failing or unconfigured LLM returns a null analysis (200).',
         pathParams: [{ name: 'slug', type: 'string', required: true, description: 'The job `public_slug`.' }],
@@ -1220,7 +1220,7 @@ ${BASE_URL}/auth/extension/connect?redirect_uri=https://<extension-id>.chromiuma
         description:
           'Newest first, closed jobs included (with `closed: true`). Each item carries the ' +
           'overall score and verdict; `stale` marks an analysis whose CV, job, or model has ' +
-          'changed since. `meta.credits` reports your AI-points balance. Never runs the LLM.',
+          'changed since. `meta.allowance` reports where you stand on the day’s analyses. Never runs the LLM.',
         curl: `curl "${BASE_URL}/me/tracking/analyses" -H "Authorization: Bearer $FREEHIRE_API_KEY"`,
         responseExample: `{
   "data": [
@@ -1235,21 +1235,31 @@ ${BASE_URL}/auth/extension/connect?redirect_uri=https://<extension-id>.chromiuma
       "stale": false
     }
   ],
-  "meta": { "credits": { "remaining": 17, "resets_at": "2026-08-01T00:00:00Z" } }
+  "meta": { "allowance": { "feature": "match", "used": 1, "limit": 3, "unlimited": false, "enforced": false, "resets_at": "2026-09-01T00:00:00Z" } }
 }`,
       },
       {
         method: 'GET',
-        path: '/me/credits',
+        path: '/me/plan',
         auth: 'cookie-or-key',
-        summary: 'Your current AI-credits balance.',
+        summary: 'Your plan and what it allows today.',
         description:
-          'The points left this month (`remaining`) and when the monthly grant renews ' +
-          '(`resets_at`). AI credits are spent on the match analysis (1) and CV tailoring (3), ' +
-          'topped up by the monthly grant and by accepted board contributions. Never runs the LLM.',
-        curl: `curl "${BASE_URL}/me/credits" -H "Authorization: Bearer $FREEHIRE_API_KEY"`,
+          'Which plan you are on and, for every metered AI feature, how much of today you ' +
+          'have used against what the day allows. Every plan offers every feature; what ' +
+          'differs is the daily amount, and it resets at `resets_at`. A pro caller reads as ' +
+          '`unlimited` rather than as a number. `enforced` says whether that ceiling turns ' +
+          'anybody away yet — while it is `false` a spent allowance is counted and the ' +
+          'action still runs, so do not refuse on `used >= limit` alone. Never runs the LLM.',
+        curl: `curl "${BASE_URL}/me/plan" -H "Authorization: Bearer $FREEHIRE_API_KEY"`,
         responseExample: `{
-  "data": { "remaining": 17, "resets_at": "2026-08-01T00:00:00Z" }
+  "data": {
+    "plan": "free",
+    "resets_at": "2026-09-01T00:00:00Z",
+    "allowances": [
+      { "feature": "tailor", "used": 1, "limit": 2, "unlimited": false, "enforced": false, "resets_at": "2026-09-01T00:00:00Z" },
+      { "feature": "match", "used": 0, "limit": 3, "unlimited": false, "enforced": false, "resets_at": "2026-09-01T00:00:00Z" }
+    ]
+  }
 }`,
       },
       {
@@ -1526,6 +1536,30 @@ data: {"type":"result","stop_reason":"completed"}
       },
       {
         method: 'POST',
+        path: '/assistant/sessions/{id}/extend',
+        auth: 'cookie-or-key',
+        summary: 'Buy a CV editing session another ceiling’s worth of turns.',
+        description:
+          'A CV editing session is bounded by a turn ceiling as well as by the daily session ' +
+          'allowance, and a turn past the ceiling is a `402` naming the session. This spends ' +
+          'another of the day’s CV editing sessions to raise it (no body), and is idempotent ' +
+          'under a double click — two calls in flight buy one ceiling, not two. `409` on any ' +
+          'preset other than a CV editing session: a chat is bounded by the daily assistant ' +
+          'allowance, and a day cannot be topped up. `402` when there is no session left to ' +
+          'spend, with the same body every refusal carries.',
+        pathParams: [{ name: 'id', type: 'string (UUID)', required: true, description: 'The session id.' }],
+        curl: `curl -X POST "${BASE_URL}/assistant/sessions/<id>/extend" -H "Authorization: Bearer $FREEHIRE_API_KEY"`,
+        responseExample: `{
+  "data": {
+    "turns": 15,
+    "ceiling": 30,
+    "unlimited": false,
+    "allowance": { "feature": "tailor", "used": 2, "limit": 2, "unlimited": false, "enforced": false, "resets_at": "2026-09-01T00:00:00Z" }
+  }
+}`,
+      },
+      {
+        method: 'POST',
         path: '/assistant/sessions/{id}/voice-token',
         auth: 'cookie-or-key',
         summary: 'Mint a short-lived credential for a hands-free voice call.',
@@ -1605,7 +1639,7 @@ data: {"type":"result","stop_reason":"completed"}
         summary: 'Parse a job URL into a draft submission for review before posting.',
         description:
           'Uses the same ATS-recognition registry as `/jobs/resolve`, but ' +
-          'writes nothing — no job, no submission, no credit. An unrecognized ' +
+          'writes nothing — no job, no submission, no allowance spent. An unrecognized ' +
           'URL returns an empty object rather than an error. Rate-limited ' +
           '(shares the outbound-fetch budget).',
         body: [{ name: 'url', type: 'string', required: true, description: 'The job posting URL to parse.' }],
@@ -2414,10 +2448,10 @@ data: {"type":"result","stop_reason":"completed"}
     ],
   },
   {
-    title: 'Account, credits & extension',
+    title: 'Account, plan & extension',
     intro:
       'The rest of the account surface: the password, deleting the account, the ' +
-      'AI-credit ledger, and the two endpoints the browser extension runs on. ' +
+      'plan and what it allows today, and the two endpoints the browser extension runs on. ' +
       'Password and deletion are session-only — an API key must not be able to ' +
       'change or destroy the credential it would outlive.',
     endpoints: [
@@ -2446,30 +2480,26 @@ data: {"type":"result","stop_reason":"completed"}
       },
       {
         method: 'GET',
-        path: '/me/credits/history',
+        path: '/me/plan/history',
         auth: 'cookie-or-key',
-        summary: 'Your AI-credit ledger, newest first.',
-        description: 'Each debit is labelled with what it bought — the job a match analysis was run on, the vacancy a CV was tailored for — rather than an opaque reference.',
-        query: [
-          { name: 'limit', type: 'integer', description: 'Page size.' },
-          { name: 'offset', type: 'integer', description: 'Page offset.' },
-        ],
-        curl: `curl "${BASE_URL}/me/credits/history" -H "Authorization: Bearer fhk_…"`,
-        responseExample: `{ "data": [ { "delta": -1, "reason": "match_analysis", "label": "Senior Backend Engineer at Acme", "created_at": "2026-07-28T09:00:00Z" } ] }`,
+        summary: 'What you spent your allowances on, newest first.',
+        description: 'Each entry is labelled with what it bought — the job an analysis was run on, the vacancy a CV editing session was opened for — rather than an opaque reference. A `release` entry is one that was given back because the work produced nothing.',
+        curl: `curl "${BASE_URL}/me/plan/history" -H "Authorization: Bearer fhk_…"`,
+        responseExample: `{ "data": [ { "feature": "match", "day": "2026-08-31", "kind": "consume", "label": "Job analysis", "subtitle": "Senior Backend Engineer at Acme", "created_at": "2026-08-31T09:00:00Z" } ] }`,
       },
       {
         method: 'GET',
         path: '/me/usage',
         auth: 'cookie-or-key',
-        summary: 'Your AI request activity this billing period.',
+        summary: 'Your AI request activity today.',
         description:
           'Counts and token usage, not cost — the gateway’s dollar figure is a ' +
-          'list price against a mixed upstream pool, not what you pay; your ' +
-          'price is credits, reported by `/me/credits`. Never fails for a reason ' +
-          'you could act on: no usage yet, or an unreachable gateway, both ' +
-          'answer 200 with zeroes.',
+          'list price against a mixed upstream pool, not what you pay; what you ' +
+          'spend is a plan allowance, reported by `/me/plan` over this same day. ' +
+          'Never fails for a reason you could act on: no usage yet, or an ' +
+          'unreachable gateway, both answer 200 with zeroes.',
         curl: `curl "${BASE_URL}/me/usage" -H "Authorization: Bearer $FREEHIRE_API_KEY"`,
-        responseExample: `{ "data": { "requests": 42, "failed": 1, "tokens": 118000, "period": "2026-08", "resets_at": "2026-09-01T00:00:00Z" } }`,
+        responseExample: `{ "data": { "requests": 42, "failed": 1, "tokens": 118000, "period": "2026-08-31", "resets_at": "2026-09-01T00:00:00Z" } }`,
       },
       {
         method: 'GET',
@@ -2514,7 +2544,7 @@ data: {"type":"result","stop_reason":"completed"}
           'The same deterministic skill coverage as `GET /jobs/{slug}/match`, but ' +
           'for a page that need not be in the catalogue — this is what lets the ' +
           'extension show a match on any job page. A caller with no profile is a 404. ' +
-          'No LLM, no credits.',
+          'No LLM, and it draws on no allowance.',
         body: [
           { name: 'title', type: 'string', required: true, description: 'The posting title.' },
           { name: 'text', type: 'string', required: true, description: 'The scraped posting text.' },

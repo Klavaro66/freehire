@@ -1,7 +1,8 @@
 // Reactive company-catalog filters mirrored into the URL. The pure model (types,
 // serialization, mutators) lives in companyFacetModel.ts (unit-testable, $app-free);
-// this module owns only the reactive UrlSyncedState wrapper. Re-exports the model's
-// public surface so existing `$lib/companyFilters` importers are unchanged.
+// this module owns only the reactive UrlSyncedState wrapper. It re-exports the part of the
+// model that is still reached through this path; the rest of the model's callers import it
+// directly, so a name is re-exported here only while something actually asks for it here.
 
 import { type FacetSelection, type FacetStore } from './facets';
 import {
@@ -10,7 +11,6 @@ import {
   clearCompanyFacet,
   companyFiltersFromParams,
   companyFiltersToParams,
-  DEFAULT_COMPANY_SORT,
   emptyCompanyFilters,
   removeCompanyFacet,
   toggleCompanyFacet,
@@ -20,11 +20,8 @@ import {
 import { UrlSyncedState } from './urlSynced.svelte';
 
 export {
-  activeCompanyFilterCount,
   companyFiltersFromParams,
   companyFiltersToParams,
-  DEFAULT_COMPANY_SORT,
-  emptyCompanyFilters,
   type CompanyFilters,
   type CompanySortField,
 };
@@ -51,6 +48,11 @@ export class CompanyFilterStore implements FacetStore {
   /** Debounced filters — drive the list reload off this. */
   get applied(): CompanyFilters {
     return this.#url.applied;
+  }
+
+  /** The filters as they stand in the address bar — build links off this, not `page.url`. */
+  get params(): URLSearchParams {
+    return this.#url.params;
   }
 
   get active(): number {

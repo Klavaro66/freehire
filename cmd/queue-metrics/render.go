@@ -15,6 +15,21 @@ type queueMetrics struct {
 	oldestAgeSeconds float64
 }
 
+// providerHealth is one ingest provider's state: when its most recent board crawl
+// succeeded, and how its boards currently split across the three health states.
+//
+// lastSuccess is the zero time when no board of that provider has ever succeeded, which
+// render publishes as an absent sample rather than as a 1970 timestamp. The board counts
+// carry the signal that absence throws away — they exist for every provider, so a provider
+// that has never succeeded is still measurable as one with no healthy boards.
+type providerHealth struct {
+	name        string
+	lastSuccess time.Time
+	cooled      int64
+	failing     int64
+	healthy     int64
+}
+
 // snapshot is everything one collection pass measured. newestJob is the zero time when
 // the catalogue holds no open job at all, which render treats as "publish nothing"
 // rather than as a 1970 timestamp.
@@ -24,6 +39,7 @@ type snapshot struct {
 	failingBoards int64
 	cooledBoards  int64
 	newestJob     time.Time
+	providers     []providerHealth
 }
 
 // render turns a snapshot into the Prometheus text exposition format.
@@ -46,15 +62,8 @@ func render(s snapshot) string {
 		func(q queueMetrics) string { return fmt.Sprintf("%.3f", q.oldestAgeSeconds) }, s.queues)
 
 	writeHeader(&b, "freehire_boards_total", "Ingest boards by health state.")
-	for _, state := range []struct {
-		name  string
-		count int64
-	}{
-		{"healthy", s.healthyBoards},
-		{"failing", s.failingBoards},
-		{"cooled", s.cooledBoards},
-	} {
-		fmt.Fprintf(&b, "freehire_boards_total{state=%q} %d\n", state.name, state.count)
+	for _, st := range boardStates(s.healthyBoards, s.failingBoards, s.cooledBoards) {
+		fmt.Fprintf(&b, "freehire_boards_total{state=%q} %d\n", st.name, st.count)
 	}
 
 	// A zero timestamp would be read as 1970, i.e. a catalogue infinitely overdue for
@@ -66,7 +75,74 @@ func render(s snapshot) string {
 		fmt.Fprintf(&b, "freehire_catalogue_newest_job_timestamp_seconds %d\n", s.newestJob.Unix())
 	}
 
+	// Per-provider freshness: the signal the catalogue-wide gauge above cannot give. That
+	// one stays young while any provider produces, so a provider that stopped is invisible
+	// in it — which is how a 13-day proxy outage went unnoticed until someone looked by
+	// hand. A provider with no measurement is omitted rather than zeroed, and the whole
+	// family is omitted when none has one, on the same reasoning as newestJob.
+	measured := make([]providerHealth, 0, len(s.providers))
+	for _, p := range s.providers {
+		if !p.lastSuccess.IsZero() {
+			measured = append(measured, p)
+		}
+	}
+	if len(measured) > 0 {
+		writeHeader(&b, "freehire_provider_last_success_timestamp_seconds",
+			"Unix time an ingest provider's most recent board crawl succeeded.")
+		for _, p := range measured {
+			fmt.Fprintf(&b, "freehire_provider_last_success_timestamp_seconds{provider=%q} %d\n",
+				p.name, p.lastSuccess.Unix())
+		}
+	}
+
+	// Per-provider board states: the companion the timestamp above needs, because omitting
+	// the never-succeeded case is exactly what hid gulftalent. It sat at 19,828 postings
+	// unrefreshed since 2026-07-07 with its systemd timer disabled — no crawl, so no
+	// success, so no timestamp sample, so nothing for an alert to be late about. These
+	// counts exist for every provider board_health knows, so `healthy == 0` names it.
+	//
+	// Published as raw counts under one state label rather than as a baked-in "is this
+	// provider down" boolean: the fleet runs a few percent failing boards as background, so
+	// what separates a broken provider from a normal one is the RATIO, and which ratio
+	// deserves a page belongs in the alert rule, not here. Same three mutually exclusive
+	// states as freehire_boards_total, so summing these by state reproduces it.
+	if len(s.providers) > 0 {
+		writeHeader(&b, "freehire_provider_boards", "Ingest boards by health state, per provider.")
+		for _, p := range s.providers {
+			for _, st := range boardStates(p.healthy, p.failing, p.cooled) {
+				fmt.Fprintf(&b, "freehire_provider_boards{provider=%q,state=%q} %d\n",
+					p.name, st.name, st.count)
+			}
+		}
+	}
+
 	return b.String()
+}
+
+// boardState pairs one of the three mutually exclusive board health states with how many
+// boards are in it.
+type boardState struct {
+	name  string
+	count int64
+}
+
+// boardStates returns those three in the order both board families publish them.
+//
+// Two families carry these labels — freehire_boards_total fleet-wide and
+// freehire_provider_boards per provider — and a dashboard that stacks one against the
+// other only reads correctly while they agree on the names and the order. Spelled twice
+// they can drift apart without failing to compile, and the drift shows up as a graph that
+// quietly disagrees with itself, so the vocabulary lives here once.
+//
+// The precedence behind the counts (cooled over failing, so the three sum to the fleet
+// rather than double-counting) is BoardHealthMetrics' in queries/metrics.sql; this only
+// fixes how they are named and ordered.
+func boardStates(healthy, failing, cooled int64) [3]boardState {
+	return [3]boardState{
+		{"healthy", healthy},
+		{"failing", failing},
+		{"cooled", cooled},
+	}
 }
 
 // writeFamily emits one metric family: its HELP and TYPE lines, then one sample per

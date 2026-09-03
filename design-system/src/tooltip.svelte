@@ -16,6 +16,8 @@
 
   let visible = $state(false);
   let triggerEl: HTMLElement | undefined = $state();
+  // The floating content, so a tap can be told apart from a tap on the trigger.
+  let contentEl: HTMLElement | undefined = $state();
 
   // The floating content sits outside the wrapper's own layout box (it's
   // `position: absolute`, offset by the `positions` margin below), so the pointer
@@ -63,6 +65,46 @@
     if (e.key === 'Escape') hide();
   }
 
+  // A touch pointer never hovers and rarely focuses, so without this the tooltip
+  // is unreachable on a phone — mouse and keyboard readers get the content and
+  // touch readers get nothing at all. Tap toggles instead.
+  //
+  // Only touch. A mouse and a pen both hover, so hover has already opened the
+  // tooltip and toggling here would shut it under the pointer aiming at it —
+  // "not a mouse" would have caught the pen by accident.
+  //
+  // A tap inside the tooltip's OWN content is ignored for a sharper version of
+  // the same reason. The content is a descendant of this wrapper, so it reaches
+  // this handler — and closing there unmounts the link before the click that
+  // follows the pointerdown can land on it, so the tap does nothing at all.
+  function toggleOnTouch(e: PointerEvent) {
+    if (e.pointerType !== 'touch') return;
+    if (contentEl?.contains(e.target as Node)) return;
+    if (visible) hide();
+    else show();
+  }
+
+  // The touch half of "dismissible": there is no pointer to move away, so the
+  // next tap elsewhere is what closes it.
+  //
+  // The `contains` guard carries two things. It stops the opening tap from also
+  // being the closing one (Svelte attaches this listener after the current event
+  // finishes, so that should not happen anyway — the guard costs a line and does
+  // not depend on that ordering holding). And because the floating content is a
+  // DESCENDANT of triggerEl, it is also what keeps a tap on a link inside the
+  // tooltip from dismissing the tooltip out from under the click that follows.
+  function dismissOutside(e: PointerEvent) {
+    if (!triggerEl?.contains(e.target as Node)) hide();
+  }
+
+  // Tab out of the trigger lands on whatever the content holds — it is next in DOM
+  // order and rendered while visible. A bare hide() ran first, removing that element
+  // mid-focus, so focus fell to <body> and focusin never re-opened: a keyboard reader
+  // could read the description and never reach the link inside it.
+  function hideOnFocusOut(e: FocusEvent) {
+    if (!triggerEl?.contains(e.relatedTarget as Node)) hide();
+  }
+
   function hide() {
     clearTimeout(hideTimer);
     visible = false;
@@ -79,7 +121,10 @@
   };
 </script>
 
-<svelte:window onkeydown={visible ? dismiss : undefined} />
+<svelte:window
+  onkeydown={visible ? dismiss : undefined}
+  onpointerdown={visible ? dismissOutside : undefined}
+/>
 
 <!-- The pointer handlers sit on the wrapper, not the trigger: the trigger is the
      consumer's snippet, and the wrapper has to enclose the tooltip so moving the
@@ -92,7 +137,8 @@
   onmouseenter={show}
   onmouseleave={scheduleHide}
   onfocusin={show}
-  onfocusout={hide}
+  onfocusout={hideOnFocusOut}
+  onpointerdown={toggleOnTouch}
 >
   {@render children()}
   {#if visible}
@@ -108,6 +154,7 @@
          content's own max-content width instead, still capped by max-w-xs. -->
     <span
       id={tooltipId}
+      bind:this={contentEl}
       role="tooltip"
       class={cn(
         'absolute z-popover w-max max-w-xs rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md',

@@ -21,16 +21,125 @@ export type Sign = 'off' | 'include' | 'exclude';
  *  shape `FacetSection` reads — one canonical type so the two can't drift. */
 export type FacetState = FacetSelection;
 
+/** The clearance control's three states. `any` writes no param at all, so the default
+ *  listing is untouched. */
+export type ClearanceFilter = 'any' | 'hide' | 'only';
+
 export interface JobFilters {
   q: string;
   /** Facet state keyed by the facet's query param (see FACETS). */
   facets: Record<string, FacetState>;
   visa: boolean;
+  /** What to do about postings that state a government security-clearance requirement
+   *  (UK SC/DV, US Secret/TS-SCI, AU NV1). Three states rather than a boolean because
+   *  the facet answers two different people: someone who cannot hold a clearance wants
+   *  these gone, someone who holds one wants nothing else.
+   *
+   *  Serialized as `requires_clearance`, whose value names the FACET while this names
+   *  the INTENT — so `hide` writes `false` and `only` writes `true`. An unrecognised
+   *  value in a hand-edited link reads as `any` rather than leaving the control in a
+   *  state it cannot render. */
+  clearance: ClearanceFilter;
   salaryMin: number | null;
   /** Freshness: keep only jobs posted within the last N days (null = any age).
    *  Serialized as `posted_within_days`; the backend turns it into a posted_ts
    *  range filter relative to request time. */
   postedWithinDays: number | null;
+  /** Keep only jobs asking for at most this many years of experience (null = any).
+   *  `0` is a real bound — the jobs stating no prior experience is required — so
+   *  every read of this field must test for null, never for falsiness. */
+  experienceYearsMax: number | null;
+  /** Feed ordering, or `null` for "the caller has not chosen one".
+   *
+   *  `relevance` is the engine's own ranking, `newest` is freshest first, `match` ranks
+   *  by how well a vacancy's skills overlap the signed-in caller's profile. The server
+   *  degrades `match` to its default for anyone it cannot serve it to — anonymous, no
+   *  profile, no skills — so this is never gated client-side beyond hiding the option.
+   *
+   *  The `null` matters because the DEFAULT depends on `q` (see defaultSortFor) while
+   *  `q` changes under the ordering's feet. Storing the resolved default instead would
+   *  make "the browse feed defaulted to newest" indistinguishable from "the caller
+   *  asked for newest", so typing into the search box would carry `sort=posted_at`
+   *  into a text search and date-order it — the exact outcome design.md rejects. Read
+   *  this through effectiveSort, never directly. */
+  sort: JobSort | null;
+}
+
+/** The feed's ordering vocabulary. Deliberately short: this is not a general sort
+ *  control (the API also accepts created_at and the salary bounds), it is the two
+ *  orderings the endpoint defaults between plus the profile-match feed. */
+export type JobSort = 'relevance' | 'newest' | 'match';
+
+/** The ordering the endpoint applies when a request carries no `sort` at all:
+ *  relevance under query text, posting date without it (see `searchSort` in
+ *  internal/api/handler/search.go). The client mirrors it rather than restating it,
+ *  so "the default" and "what the server does with no param" cannot drift — which is
+ *  also why serializing the default means writing nothing. */
+export function defaultSortFor(q: string): JobSort {
+  return q ? 'relevance' : 'newest';
+}
+
+/** The ordering a filter set actually resolves to.
+ *
+ *  An unchosen ordering resolves to the contextual default, and an explicit
+ *  `relevance` collapses to the browse default once the query is cleared — it has
+ *  nothing left to rank against. This is a pure function, not an effect that rewrites
+ *  the stored value, because BOTH the sort control and filtersToParams need the answer
+ *  and a second copy of the rule is a second answer. */
+export function effectiveSort(f: JobFilters): JobSort {
+  const sort = f.sort ?? defaultSortFor(f.q);
+  return sort === 'relevance' && !f.q ? 'newest' : sort;
+}
+
+/** The `sort` values the search endpoint accepts, keyed by our vocabulary. `relevance`
+ *  is absent on purpose: the endpoint spells it as no `sort` parameter at all, and
+ *  inventing a wire value for it would need a handler branch to mean the same thing —
+ *  so a sort with no entry here is one that serializes to nothing. */
+const SORT_PARAM: Partial<Record<JobSort, string>> = { newest: 'posted_at', match: 'match' };
+
+/** SORT_PARAM inverted, so the two directions cannot drift. */
+const SORT_FROM_PARAM: Record<string, JobSort> = Object.fromEntries(
+  Object.entries(SORT_PARAM).map(([sort, param]) => [param, sort as JobSort]),
+);
+
+const SORT_LABEL: Record<JobSort, string> = {
+  relevance: 'Relevance',
+  newest: 'Newest',
+  match: 'Best match',
+};
+
+export interface SortOption {
+  value: JobSort;
+  label: string;
+}
+
+/** The orderings a caller can actually choose between, in display order.
+ *
+ *  `relevance` needs query text to rank against and `match` needs a profile the caller
+ *  has (plus the runtime flag the view resolves); `newest` always applies. The rule is
+ *  per OPTION rather than per control — gating the whole select on the match
+ *  precondition, as it was, took `newest` down with it, so a signed-out visitor
+ *  searching by text had no way to reach the freshest-first ordering.
+ *
+ *  It lives here, not in the view, for the reason effectiveSort does: it is pure, it
+ *  decides what the user sees, and in the component nothing could test it. */
+export function sortOptionsFor(q: string, matchAvailable: boolean): SortOption[] {
+  const values: JobSort[] = [...(q ? (['relevance'] as const) : []), 'newest', ...(matchAvailable ? (['match'] as const) : [])];
+  return values.map((value) => ({ value, label: SORT_LABEL[value] }));
+}
+
+/** The option the control shows as selected.
+ *
+ *  Normally the effective ordering — but a shared `?sort=match` link opened by someone
+ *  it cannot be served to resolves to an ordering that is not on offer. The param stays
+ *  (the server degrades it rather than refusing, and signing in should just work), so
+ *  the control instead names what the server will ACTUALLY serve that caller. A select
+ *  whose value matches no option renders blank, which would put an empty control over a
+ *  live ordering. */
+export function selectedSortFor(f: JobFilters, matchAvailable: boolean): JobSort {
+  const sort = effectiveSort(f);
+  const offered = sortOptionsFor(f.q, matchAvailable);
+  return offered.some((o) => o.value === sort) ? sort : defaultSortFor(f.q);
 }
 
 /** Splits every raw query value on comma and flattens the result, dropping
@@ -52,7 +161,16 @@ function emptyFacets(): Record<string, FacetState> {
 }
 
 export function emptyFilters(): JobFilters {
-  return { q: '', facets: emptyFacets(), visa: false, salaryMin: null, postedWithinDays: null };
+  return {
+    q: '',
+    facets: emptyFacets(),
+    visa: false,
+    clearance: 'any',
+    salaryMin: null,
+    postedWithinDays: null,
+    experienceYearsMax: null,
+    sort: null,
+  };
 }
 
 // ---- URL serialization ----
@@ -70,9 +188,38 @@ export function filtersToParams(f: JobFilters): URLSearchParams {
     if (st.matchAll && st.include.length > 1) p.set(`${def.param}_mode`, 'and');
   }
   if (f.visa) p.set('visa_sponsorship', 'true');
+  if (f.clearance === 'hide') p.set('requires_clearance', 'false');
+  if (f.clearance === 'only') p.set('requires_clearance', 'true');
   if (f.salaryMin != null) p.set('salary_min', String(f.salaryMin));
   if (f.postedWithinDays != null) p.set('posted_within_days', String(f.postedWithinDays));
+  if (f.experienceYearsMax != null) p.set('experience_years_max', String(f.experienceYearsMax));
+  // The default is written as the ABSENCE of the param, which is how the endpoint
+  // spells both of its own defaults — so a browse feed and a relevance-ranked search
+  // both serialize clean, and `newest` under a query becomes explicit instead of
+  // silently meaning relevance.
+  const sort = effectiveSort(f);
+  const sortParam = SORT_PARAM[sort];
+  if (sortParam && sort !== defaultSortFor(f.q)) p.set('sort', sortParam);
   return p;
+}
+
+/** Whether a general facet response measured under `scope` also answers for the role
+ *  distribution, which is measured under the same scope minus the text query.
+ *
+ *  The two coincide exactly when there is no text query to separate them — and then
+ *  they are not merely equivalent but identical, because `/jobs/facets` with no
+ *  `facets=` counts every facet, `role` among them. Measured against prod on
+ *  2026-08-21: `?regions=latam,global` and `?regions=latam,global&facets=role`
+ *  returned byte-identical `role` maps (867 values), while adding `q=python` cut the
+ *  general response's `role` to 209 — which is exactly why the role distribution has
+ *  its own scope in the first place.
+ *
+ *  So this is the test for "the dedicated role request would be a second copy of a
+ *  response we already have". An empty `q` counts as no query: `filtersToParams` only
+ *  writes the param when the string is non-empty, and a hand-built `?q=` means the
+ *  same thing to the API. */
+export function generalCountsCoverRole(scope: URLSearchParams): boolean {
+  return !scope.get('q');
 }
 
 /** Parse filters back from URL query params. Include and exclude are independent
@@ -93,12 +240,29 @@ export function filtersFromParams(p: URLSearchParams): JobFilters {
     f.facets[def.param] = { include, exclude, matchAll };
   }
   f.visa = p.get('visa_sponsorship') === 'true';
+  const clearance = p.get('requires_clearance');
+  f.clearance = clearance === 'false' ? 'hide' : clearance === 'true' ? 'only' : 'any';
   const salary = Number(p.get('salary_min'));
   f.salaryMin = p.get('salary_min') && !Number.isNaN(salary) ? salary : null;
   // Freshness is a positive whole number of days; anything else (absent, zero,
   // negative, non-numeric) reads as "any age", matching the backend's own guard.
   const days = Number(p.get('posted_within_days'));
   f.postedWithinDays = Number.isInteger(days) && days > 0 ? days : null;
+  // Zero IS a bound here — it selects the postings stating no prior experience is
+  // required — so the guard admits it and rejects only what cannot be a year count.
+  // The presence test is on the TRIMMED string, not the raw one: `Number('')` and
+  // `Number(' ')` are both 0 while `' '` is truthy, so a naive check would turn
+  // `?experience_years_max=%20` in a shared link into the entry-level filter.
+  const rawYears = p.get('experience_years_max')?.trim() ?? '';
+  const years = Number(rawYears);
+  f.experienceYearsMax = rawYears !== '' && Number.isInteger(years) && years >= 0 ? years : null;
+  // Anything but a recognized value reads as the contextual default — including the
+  // retired `sort=cv` and the endpoint's `created_at`, which the browse UI does not
+  // offer. Shared links and saved searches still carry old sort params, and the same
+  // rule the backend applies (ignore, never refuse) has to hold here or the two would
+  // disagree about what a stale link means. Reads `f.q`, so it must follow the line
+  // that sets it.
+  f.sort = SORT_FROM_PARAM[p.get('sort') ?? ''] ?? null;
   return f;
 }
 
@@ -110,8 +274,10 @@ export function activeFilterCount(f: JobFilters): number {
     if (st) n += st.include.length + st.exclude.length;
   }
   if (f.visa) n += 1;
+  if (f.clearance !== 'any') n += 1;
   if (f.salaryMin != null) n += 1;
   if (f.postedWithinDays != null) n += 1;
+  if (f.experienceYearsMax != null) n += 1;
   return n;
 }
 
@@ -176,6 +342,29 @@ export function facetAdd(st: FacetState, raw: string): FacetState {
 /** Remove a value from the facet entirely (both sets). */
 export function facetRemove(st: FacetState, v: string): FacetState {
   return facetSetSign(st, v, 'off');
+}
+
+/** Choosing a role suggestion under the header search box: turn that role on and drop
+ *  the typed text, as ONE new state.
+ *
+ *  The two belong together. The role tag is derived from the title by a deterministic
+ *  dictionary, so it is already the more precise of the two filters — keeping the text
+ *  as well would AND a half-typed query against it and return fewer jobs than either
+ *  filter alone, which reads as the suggestion breaking the page. Committing them as
+ *  one state also means the caller writes once (setNow), which cancels the debounce
+ *  the last keystroke left pending instead of racing it.
+ *
+ *  facetSetSign, not facetAdd: a role sitting in the EXCLUDE set is still offered as a
+ *  suggestion — only INCLUDED roles are withheld — and facetAdd treats a value already
+ *  in either set as a no-op. Picking such a role would then clear the typed text and
+ *  change nothing else, a click that visibly does half its job. Choosing a role you had
+ *  excluded is an unambiguous change of mind, so it flips the sign. */
+export function filtersWithRole(f: JobFilters, slug: string): JobFilters {
+  return {
+    ...f,
+    q: '',
+    facets: { ...f.facets, role: facetSetSign(f.facets.role ?? emptyFacet(), slug, 'include') },
+  };
 }
 
 /** Build a fresh filter set seeded from a user profile — the reset-and-seed behind

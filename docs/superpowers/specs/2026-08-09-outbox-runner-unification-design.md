@@ -7,12 +7,12 @@ package under `internal/`, driven from its own `cmd/<name>` binary:
 
 | Queue table | Worker package | `cmd/` binary |
 |---|---|---|
-| `enrichment_outbox` | `internal/enrich` | `cmd/enrich` |
-| `semantic_outbox` | `internal/embed` | `cmd/embed` |
-| `search_outbox` | `internal/searchdrain` | `cmd/search-drain` |
-| `apply_form_outbox` | `internal/applyform` | `cmd/capture-apply-form` |
-| `adzuna_description_outbox` | `internal/adzunadesc` | `cmd/hydrate-adzuna-description` |
-| `email_classification_outbox` | `internal/maillink` | `cmd/classify-mail` |
+| `enrichment_outbox` | `internal/ai/enrich` | `cmd/enrich` |
+| `semantic_outbox` | `internal/ai/embed` | `cmd/embed` |
+| `search_outbox` | `internal/search/searchdrain` | `cmd/search-drain` |
+| `apply_form_outbox` | `internal/ingest/applyform` | `cmd/capture-apply-form` |
+| `adzuna_description_outbox` | `internal/ingest/adzunadesc` | `cmd/hydrate-adzuna-description` |
+| `email_classification_outbox` | `internal/application/maillink` | `cmd/classify-mail` |
 
 All six tables are already structurally identical: `id, <subject>_id, attempts, claimed_at,
 failed_at, last_error, created_at`, plus a partial claimable index on `failed_at IS NULL`.
@@ -38,11 +38,11 @@ be added by writing only its `Store` port and processing logic.
   especially between the two highest-churn queues (`search_outbox`, `semantic_outbox`) and
   the low-frequency ones. The existing columns are already close enough that no alignment
   migration is needed either.
-- **Unify only the Go layer.** A new `internal/outbox` package holds the generic claim-wave
+- **Unify only the Go layer.** A new `internal/platform/outbox` package holds the generic claim-wave
   runner. Every per-queue `Store`/`Indexer`/`Provider` port, `Complete`/`Save`/`Fail`/
   `Discard` signature, and piece of domain logic (LLM retry, batch/fallback boundary,
   `ErrPostingGone` handling) stays exactly where it is, in its own package.
-- **Generic over `Claimed`, not over the queue table.** `internal/outbox` is parameterized
+- **Generic over `Claimed`, not over the queue table.** `internal/platform/outbox` is parameterized
   by Go type parameters (`RunPool[C any]`, `RunBatch[C any]`) on the caller's own claim
   struct (`embed.Claimed`, `applyform.Claimed`, ...). This is the first use of generics in
   the codebase; it is the intended use case for them (one control-flow algorithm reused
@@ -51,7 +51,7 @@ be added by writing only its `Store` port and processing logic.
   concurrency models, driven by the economics of what they call:
   - `RunPool[C]` — bounded-concurrency, one goroutine per claimed item. Fits workers whose
     cost is per-call regardless of batching (LLM calls, HTTP fetches): `enrich`,
-    `applyform`, `adzunadesc`. `classify-mail` (`internal/maillink`) also fits `RunPool`,
+    `applyform`, `adzunadesc`. `classify-mail` (`internal/application/maillink`) also fits `RunPool`,
     at `Concurrency: 1` — see below for why that setting needs its own guarantee, not just
     a small pool.
   - `RunBatch[C]` — one call for the whole wave, falling back to per-item processing only
@@ -68,7 +68,7 @@ be added by writing only its `Store` port and processing logic.
 
 ## Architecture
 
-`internal/outbox` is a new, dependency-free package (no DB, no sqlc, no Meilisearch client)
+`internal/platform/outbox` is a new, dependency-free package (no DB, no sqlc, no Meilisearch client)
 holding only the loop and its bookkeeping:
 
 ```go
@@ -123,7 +123,7 @@ type RunOptions struct {
 
 // RunPool drains via a bounded pool when opt.Concurrency > 1. At Concurrency <= 1 it
 // processes the wave as a plain sequential loop — no goroutine is spawned at all — so a
-// caller that needs in-order processing (internal/maillink, where a later message in a
+// caller that needs in-order processing (internal/application/maillink, where a later message in a
 // thread must see the same wave's earlier link) gets an actual ordering guarantee, not
 // just a pool sized to one: Go's channel semantics between blocked senders are not
 // formally FIFO, so a size-1 semaphore pool would not have been a safe substitute.
@@ -134,9 +134,9 @@ func RunBatch[C any](ctx context.Context, claimer Claimer[C], opt RunOptions, pr
 Both entry points share the same outer shape: claim a wave, process it (via the pool or
 the batch-then-fallback strategy), accumulate `Stats`, stop when a claim returns empty or
 `ctx` is cancelled, honor `MaxPerRun` by shrinking the next claim's batch size once the
-budget is nearly spent (generalized from `internal/applyform`'s existing logic).
+budget is nearly spent (generalized from `internal/ingest/applyform`'s existing logic).
 
-`Enqueue` is deliberately **not** part of `internal/outbox`. It varies too much to
+`Enqueue` is deliberately **not** part of `internal/platform/outbox`. It varies too much to
 generalize usefully (`enrich` takes a `target_version`, `embed` a `target_model`,
 `search_outbox` is enqueued by `cmd/ingest` in the same transaction as the job write and
 is never self-enqueued by `cmd/search-drain` at all) and each `cmd/<worker>` already calls
@@ -144,7 +144,7 @@ its own `Store.Enqueue` (or doesn't) before invoking the runner. That boundary i
 
 ## Error handling
 
-`internal/outbox` never calls `Complete`, `Fail`, or `Discard` itself — those calls happen
+`internal/platform/outbox` never calls `Complete`, `Fail`, or `Discard` itself — those calls happen
 inside each package's `Processor` closure exactly as they do today, preserving every
 existing nuance without a generic abstraction having to model it:
 - `enrich`'s immediate dead-letter (`maxAttempts=1`) for a corrupted row that can never load.
@@ -165,7 +165,7 @@ own `Discarded`-as-`Gone` renaming.
 
 ## Testing
 
-`internal/outbox` gets its own `runner_test.go`, using a fake `Claimer[int]` (or similar
+`internal/platform/outbox` gets its own `runner_test.go`, using a fake `Claimer[int]` (or similar
 minimal type) with fake `Processor`/`BatchProcessor` functions. This is the ONE place that
 tests the loop mechanics currently duplicated near-verbatim across all six existing
 `runner_test.go` files: claim-until-empty termination, `MaxPerRun` budget shrinking,
@@ -176,19 +176,19 @@ that package: `embed`'s open/closed branching and vector-provenance stamping, `e
 `Sanitize`/`Validate` wiring and the corrupted-row dead-letter path, `applyform`'s
 `ErrPostingGone` → `Discard` mapping and its `Degraded()` heuristic, and so on. Their
 existing `Store`/`Indexer`/`Provider` fakes are unchanged; only the outer loop they were
-driving through is replaced by a call into `internal/outbox`.
+driving through is replaced by a call into `internal/platform/outbox`.
 
 ## Rollout
 
 Pure internal refactor: no schema change, no sqlc query change, no `Complete`/`Save`
 signature change, no env var change, no systemd unit change, no change to any `cmd/<name>`
 binary's name or external behavior. Land as one PR, or a small stack of six mechanical
-commits (one per package swapping its hand-rolled loop for `internal/outbox`'s), each easy
+commits (one per package swapping its hand-rolled loop for `internal/platform/outbox`'s), each easy
 to bisect independently since the packages don't depend on each other.
 
 ## Limitations
 
-- `internal/maillink`'s `Store.ClaimBatch(ctx, leaseSeconds, batchSize)` takes its two
+- `internal/application/maillink`'s `Store.ClaimBatch(ctx, leaseSeconds, batchSize)` takes its two
   size arguments in the opposite order from every other package's `Claim(ctx, batch,
   leaseSeconds)`. `Claimer[C].Claim` standardizes on the latter order, so `maillink`'s
   adapter needs a two-line wrapper swapping the argument order — a naming/signature detail

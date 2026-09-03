@@ -8,14 +8,14 @@
 // It mirrors ../telagon/server/cmd/similar-backfill, the original inspiration for
 // this worker: find jobs missing a result, process them (in parallel, -workers wide),
 // write, repeat. Unlike cmd/embed there is no outbox table to drain (design.md
-// Decision 4) — internal/similarjobs.Runner finds outstanding work with a direct
+// Decision 4) — internal/search/similarjobs.Runner finds outstanding work with a direct
 // query instead, so this command only wires flags to it and calls Run once.
 //
 // Run it on a schedule (e.g. daily cron, per design.md's Open Questions — similarity
 // lists don't need same-day freshness the way facets do); it drains what's
 // outstanding (or up to -limit jobs) and exits. It exits non-zero when the run had any
 // per-job failures, so cron can alert; a failed job is simply retried on the next
-// scheduled run (see internal/similarjobs' package doc — no dead-letter machinery).
+// scheduled run (see internal/search/similarjobs' package doc — no dead-letter machinery).
 package main
 
 import (
@@ -24,8 +24,8 @@ import (
 	"log"
 	"math"
 
-	"github.com/strelov1/freehire/internal/similarjobs"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/platform/worker"
+	"github.com/strelov1/freehire/internal/search/similarjobs"
 )
 
 func main() {

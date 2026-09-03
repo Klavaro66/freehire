@@ -1,5 +1,5 @@
 // Command import-company-industries rewrites companies.industries through the
-// internal/industrytag dictionary, and optionally merges an external company dump
+// internal/dict/industrytag dictionary, and optionally merges an external company dump
 // into it.
 //
 //	import-company-industries                 # normalize the stored column only
@@ -27,10 +27,10 @@ import (
 	"os"
 	"slices"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/industrytag"
-	"github.com/strelov1/freehire/internal/normalize"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/dict/industrytag"
+	"github.com/strelov1/freehire/internal/dict/normalize"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // pageSize is the keyset page for both walks. Large enough that 380k companies do

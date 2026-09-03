@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/classify"
+	"github.com/strelov1/freehire/internal/dict/classify"
 )
 
 // A stop word that also occurs inside a known non-tech role phrase would silently

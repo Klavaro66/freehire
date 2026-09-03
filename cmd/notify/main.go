@@ -20,13 +20,13 @@ import (
 	"context"
 	"log"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/emailnotify"
-	"github.com/strelov1/freehire/internal/notify"
-	"github.com/strelov1/freehire/internal/pushnotify"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/telegramnotify"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/engage/emailnotify"
+	"github.com/strelov1/freehire/internal/engage/notify"
+	"github.com/strelov1/freehire/internal/engage/pushnotify"
+	"github.com/strelov1/freehire/internal/engage/telegramnotify"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 func main() {

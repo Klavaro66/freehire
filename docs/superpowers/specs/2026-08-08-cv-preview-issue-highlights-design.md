@@ -15,19 +15,19 @@ underline), and color = severity, not category.
 The anchor mechanism already exists and needs no new plumbing:
 `CvHtmlPreview.svelte`'s `highlightPaths: string[]` prop + `.cv-lit` dotted-underline
 CSS, currently used only for revision-diff highlighting (paths like
-`experience[2].bullets[1]`, matching `internal/cv.Document`'s JSON shape).
+`experience[2].bullets[1]`, matching `internal/candidate/cv.Document`'s JSON shape).
 
 What's missing is upstream: **none of the three issue-producing analyses currently know
 which `Document` field a finding is about.**
 
-- `internal/cvmatch` (live deterministic score): matches skills as flat sets
+- `internal/candidate/cvmatch` (live deterministic score): matches skills as flat sets
   (`owned[skill]` lookups). By the time a `LineItem` exists, "where in the text" is
   already gone. Fixing this is a different architecture, not an added field.
-- `internal/matchanalysis` (AI fit): scores the **base structured résumé**, not the
+- `internal/candidate/matchanalysis` (AI fit): scores the **base structured résumé**, not the
   tailored `Document` the Tailor workspace edits. There is no code anywhere that maps a
   base-résumé location to a tailored-CV path, and no guarantee the two even have the
   same shape (different lengths, reordered roles, edited bullets).
-- `internal/atscheck` (ATS-readability delta): mostly the same flat-text problem as
+- `internal/candidate/atscheck` (ATS-readability delta): mostly the same flat-text problem as
   cvmatch — **except** two checks (`chronologyItem`, `bulletsPerRoleItem`) already scan
   the Experience section role-by-role in document order (`roleBlocks`) to do their job.
   They already know "this is the i-th role block encountered" — that ordinal index is
@@ -46,7 +46,7 @@ none is bundled here.
 
 ## Design
 
-**Backend (`internal/atscheck`):** `roleBlocks`' scan already visits role blocks in
+**Backend (`internal/candidate/atscheck`):** `roleBlocks`' scan already visits role blocks in
 document order. Thread that ordinal index through to `chronologyItem`/`bulletsPerRoleItem`
 so a failing check can attach a `Path` (e.g. `"experience[1]"`) to its `LineItem`. Every
 other check's `LineItem` simply carries an empty `Path` — unaffected, backward compatible.

@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/strelov1/freehire/internal/atsdetect"
+	"github.com/strelov1/freehire/internal/ingest/atsdetect"
 )
 
 // careerPaths are the common careers/jobs locations probed on a company site, in

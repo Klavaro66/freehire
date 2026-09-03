@@ -18,7 +18,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/strelov1/freehire/internal/mailpreview"
+	"github.com/strelov1/freehire/internal/engage/mailpreview"
 )
 
 func main() {
@@ -74,7 +74,6 @@ func copyAssets(dir string) error {
 		"email-icon-discord.png",
 		"email-icon-linkedin.png",
 		"ilya.jpg",
-		"email-icon-producthunt.png",
 	} {
 		b, err := os.ReadFile(filepath.Join("web/static", name))
 		if err != nil {

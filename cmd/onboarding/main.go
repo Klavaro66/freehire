@@ -20,11 +20,11 @@ import (
 	"flag"
 	"log"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/emailnotify"
-	"github.com/strelov1/freehire/internal/onboarding"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/engage/emailnotify"
+	"github.com/strelov1/freehire/internal/engage/onboarding"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 // The -to flag sends one mail to one address and exits, touching neither the

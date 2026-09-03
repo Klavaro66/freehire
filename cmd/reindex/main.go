@@ -2,8 +2,14 @@
 // Postgres. It ensures the index settings exist, then scans the WHOLE table in
 // batches and upserts their documents into a fresh rebuild index before atomically
 // swapping it in. Run it on a schedule (e.g. cron); it processes the whole table and
-// exits. Indexing is idempotent (upsert by id), so re-runs are safe. A full rebuild
-// is minutes, not hours — the index carries no embedder.
+// exits. Indexing is idempotent (upsert by id), so re-runs are safe.
+//
+// The index carries ONE embedder, and it is `userProvided`: the skill vectors backing
+// the match sort are computed here (internal/dict/skillvec) rather than fetched, so a
+// rebuild still contacts no embedding service. It is not free, though — building the
+// vector index is what makes a rebuild materially slower and larger than it was when
+// the index carried no embedder at all, so this is a run to schedule deliberately
+// rather than one to leave on a tight timer.
 package main
 
 import (
@@ -17,19 +23,21 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/strelov1/freehire/internal/config"
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/jobview"
-	"github.com/strelov1/freehire/internal/search"
-	"github.com/strelov1/freehire/internal/sources"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/ingest/sources"
+	"github.com/strelov1/freehire/internal/job/jobview"
+	"github.com/strelov1/freehire/internal/platform/config"
+	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/worker"
+	"github.com/strelov1/freehire/internal/search/search"
 )
 
 // reindexBatchSize bounds how many jobs are read from Postgres and pushed to
-// Meilisearch per round. Once the facet index dropped the per-document embedder,
-// the per-batch round-trip became the throughput lever, so the batch is sized up
-// from 500 to amortize it (Postgres read and the ~7KB-doc payload are both cheap
-// at this size). A const for now; promote to config if it needs tuning.
+// Meilisearch per round. When the facet index dropped its model-backed embedder, the
+// per-batch round-trip became the throughput lever, so the batch was sized up from
+// 500 to amortize it (Postgres read and the ~7KB-doc payload are both cheap at this
+// size). The skill vectors added since do not change that: they are computed locally
+// and add bytes to the payload, not a round trip. A const for now; promote to config
+// if it needs tuning.
 const reindexBatchSize = 2000
 
 // progressInterval is how often reindex emits a heartbeat with its running totals.
@@ -102,9 +110,9 @@ func run() int {
 		log.Printf("reindex: build reality lookup: %v", err)
 		return 1
 	}
-	geo, err := buildClusterGeoLookup(ctx, q)
+	geo, err := buildClosureGeoLookup(ctx, q)
 	if err != nil {
-		log.Printf("reindex: build cluster geo lookup: %v", err)
+		log.Printf("reindex: build closure geo lookup: %v", err)
 		return 1
 	}
 
@@ -180,7 +188,7 @@ type rebuilder interface {
 // index never held them, so unlike the in-place path there is nothing to delete).
 // fetch pages by keyset (id > last seen) so rows inserted or re-ordered during the
 // run cannot be skipped or repeated.
-func reindexFull(ctx context.Context, reader worker.PageReader, b rebuilder, lookup realityLookup, geo clusterGeoLookup, now time.Time) (int, int, error) {
+func reindexFull(ctx context.Context, reader worker.PageReader, b rebuilder, lookup realityLookup, geo closureGeoLookup, now time.Time) (int, int, error) {
 	if err := b.Prepare(ctx); err != nil {
 		return 0, 0, err
 	}
@@ -220,7 +228,7 @@ func reindexFull(ctx context.Context, reader worker.PageReader, b rebuilder, loo
 // used to also back an in-place semantic rehydration path that shared this loop and
 // differed only in the per-batch sink; that path is gone (see openspec/changes/
 // drop-hybrid-search-pgvector-similar), so reindexFull is its only caller now.
-func streamOpenDocs(ctx context.Context, reader worker.PageReader, lookup realityLookup, geo clusterGeoLookup, now time.Time, push func(context.Context, []search.JobDocument) error) (int, int, error) {
+func streamOpenDocs(ctx context.Context, reader worker.PageReader, lookup realityLookup, geo closureGeoLookup, now time.Time, push func(context.Context, []search.JobDocument) error) (int, int, error) {
 	var indexed atomic.Int64
 	stopHeartbeat := worker.Heartbeat(progressInterval, func() {
 		log.Printf("reindex: progress indexed=%d", indexed.Load())
@@ -264,11 +272,15 @@ func streamOpenDocs(ctx context.Context, reader worker.PageReader, lookup realit
 // to (1, 1) everywhere (used by tests that do not exercise clustering).
 type realityLookup func(companySlug, fingerprint string) (repost, mass int)
 
-// clusterGeoLookup returns the union of a role cluster's countries, regions, and cities
-// across its open rows, so the canon's search document can be widened beyond its own
-// geography. A miss (singleton cluster) yields nil slices — a no-op widening. A nil
-// lookup skips widening entirely (tests that do not exercise clustering).
-type clusterGeoLookup func(companySlug, fingerprint string) (countries, regions, cities []string)
+// closureGeoLookup returns the union of countries, regions, and cities across every open row
+// a searchable row REPRESENTS — its duplicate closure — so the row's search document can be
+// widened beyond its own geography. Keyed by job id, not by (company_slug, role_fingerprint):
+// the two dedup passes that suppress rows leave them with fingerprints their canon does not
+// share, so a fingerprint key could never reach them (issue #2225).
+//
+// A miss (the row represents nobody) yields nil slices — a no-op widening. A nil lookup skips
+// widening entirely (tests that do not exercise clustering).
+type closureGeoLookup func(ownerID int64) (countries, regions, cities []string)
 
 // companyBatchSize bounds how many companies one RecomputeRoleDuplicatesForCompanies /
 // SuppressAggregatorDuplicatesForCompanies call covers. Measured on prod (2026-08-06):
@@ -430,22 +442,22 @@ func buildRealityLookup(ctx context.Context, q *db.Queries) (realityLookup, erro
 	}, nil
 }
 
-// buildClusterGeoLookup precomputes the whole-catalogue role-cluster geography union once
-// (RoleClusterGeoAll returns only open multi-row clusters), so widening each canon during
-// the rebuild is a map read, not N queries. A singleton cluster is absent from the map and
-// resolves to nil slices — a no-op widening.
-func buildClusterGeoLookup(ctx context.Context, q *db.Queries) (clusterGeoLookup, error) {
-	rows, err := q.RoleClusterGeoAll(ctx)
+// buildClosureGeoLookup precomputes the whole-catalogue duplicate-closure geography union once
+// (DuplicateClosureGeoAll returns only rows that represent at least one other open row), so
+// widening each document during the rebuild is a map read, not N queries. A row representing
+// nobody is absent from the map and resolves to nil slices — a no-op widening.
+func buildClosureGeoLookup(ctx context.Context, q *db.Queries) (closureGeoLookup, error) {
+	rows, err := q.DuplicateClosureGeoAll(ctx)
 	if err != nil {
 		return nil, err
 	}
 	type geo struct{ countries, regions, cities []string }
-	m := make(map[string]geo, len(rows))
+	m := make(map[int64]geo, len(rows))
 	for _, r := range rows {
-		m[r.CompanySlug+"\x00"+r.RoleFingerprint.String] = geo{r.Countries, r.Regions, r.Cities}
+		m[r.OwnerID] = geo{r.Countries, r.Regions, r.Cities}
 	}
-	return func(cs, fp string) ([]string, []string, []string) {
-		g := m[cs+"\x00"+fp]
+	return func(ownerID int64) ([]string, []string, []string) {
+		g := m[ownerID]
 		return g.countries, g.regions, g.cities
 	}, nil
 }
@@ -455,7 +467,7 @@ func buildClusterGeoLookup(ctx context.Context, q *db.Queries) (clusterGeoLookup
 // reality signal, classified against `now` and its cluster counts); closed, private,
 // or category-unresolved jobs become deletions so they leave the index (the index
 // contains only open, non-private, categorized jobs — see the job-search spec).
-func splitJobs(jobs []db.Job, lookup realityLookup, geo clusterGeoLookup, now time.Time) ([]search.JobDocument, []int64, error) {
+func splitJobs(jobs []db.Job, lookup realityLookup, geo closureGeoLookup, now time.Time) ([]search.JobDocument, []int64, error) {
 	docs := make([]search.JobDocument, 0, len(jobs))
 	deleteIDs := make([]int64, 0, len(jobs))
 	for _, j := range jobs {
@@ -482,11 +494,12 @@ func splitJobs(jobs []db.Job, lookup realityLookup, geo clusterGeoLookup, now ti
 		}
 		reality := jobview.ClassifyReality(j, now, repost, mass)
 		doc.Reality = &reality
-		// Widen the canon's geography with its cluster's union, so a collapsed
-		// multi-country role stays findable by every country its reposts hold. A miss
-		// (singleton cluster or no lookup) leaves the canon's own geography untouched.
+		// Widen the row's geography with the union across its duplicate closure, so a
+		// collapsed multi-country role stays findable by every country the rows it hides
+		// are open in. A miss (the row represents nobody, or no lookup) leaves its own
+		// geography untouched.
 		if geo != nil {
-			doc.MergeClusterGeography(geo(j.CompanySlug, j.RoleFingerprint.String))
+			doc.MergeClosureGeography(geo(j.ID))
 		}
 		docs = append(docs, doc)
 	}

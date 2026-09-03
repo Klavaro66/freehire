@@ -15,6 +15,7 @@ import type {
   CvAtsDelta,
   CvJobMatch,
   CvMeta,
+  CoverLetterView,
   CvRecord,
   CvTailoredItem,
   CvTemplate,
@@ -30,6 +31,7 @@ import type {
   TrackedApplication,
   MailRecallResult,
   FollowUpDraft,
+  Interpretation,
   Company,
   CompanyListItem,
   FacetCounts,
@@ -68,9 +70,10 @@ import type {
   ATSResponse,
   JobMatchResult,
   MatchAnalysisResponse,
-  AiCredits,
+  Allowance,
   AiUsage,
-  CreditHistoryEntry,
+  PlanState,
+  UsageHistoryEntry,
   MyAnalysisItem,
   ResumeProfile,
   PhotoMeta,
@@ -387,8 +390,18 @@ export function createApi(
     return toSlice(await request<Page<Job>>(`/api/v1/jobs${query(limit, offset)}`), offset);
   }
 
+  /** A job by slug. Four words can never be one: `/jobs/{search,find,facets,sitemap}`
+   *  are static API routes declared ahead of `/jobs/:slug`, so they answer 200 with
+   *  their own shape instead of the 404 a missing job gives. Reaching /jobs/search in
+   *  a browser handed the page a list where it expected a posting, and the render died
+   *  on the first field it read — a 500 where the honest answer is "no such job". The
+   *  shape is the check, not a list of the four: any future static sibling is covered. */
   async function getJob(slug: string): Promise<Job> {
-    return requestData<Job>(`/api/v1/jobs/${encodeURIComponent(slug)}`);
+    const data = await requestData<Job>(`/api/v1/jobs/${encodeURIComponent(slug)}`);
+    if (!data || typeof data !== 'object' || Array.isArray(data) || !('public_slug' in data)) {
+      throw new ApiError(404, `not a job: /jobs/${slug}`);
+    }
+    return data;
   }
 
   /** Jobs semantically nearest to the one addressed by `slug` — the "Similar jobs"
@@ -469,6 +482,17 @@ export function createApi(
     params.set('limit', String(limit));
     params.set('offset', String(offset));
     return toSlice(await request<Page<Job>>(`/api/v1/jobs/search?${params}`), offset);
+  }
+
+  /** Turn a written description of a job search into filter values (the AI filter).
+   *  Signed-in only. `previous` refines an interpretation already on screen: the
+   *  server returns a complete replacement search, not a diff, so the caller always
+   *  has one coherent result to show. Nothing is stored on either side. */
+  async function interpretSearch(text: string, previous?: Interpretation): Promise<Interpretation> {
+    return requestData<Interpretation>(
+      '/api/v1/search/interpret',
+      jsonBody('POST', { text, previous: previous ?? null }),
+    );
   }
 
   /** The swipe-deck batch: open jobs matching the same facets/query as
@@ -646,6 +670,18 @@ export function createApi(
     );
   }
 
+  /** The salary bands for one category in one country, as the /roles landings read
+   *  them. Scoping by country drops the per-seniority breakdown the category-only
+   *  call returns — the endpoint answers with one row per (currency, period) for the
+   *  scope as a whole — so the rows carry no seniority and are not merged. */
+  async function insightsSalaryByCategoryInCountry(
+    category: string,
+    country: string,
+  ): Promise<InsightSalaryBand[]> {
+    const q = new URLSearchParams({ category, country });
+    return requestData<InsightSalaryBand[]>(`/api/v1/insights/salary?${q}`);
+  }
+
   /** Company hiring-signal leaderboard: companies ranked by 30-day open-job growth
    *  (`growth` ramping, `-growth` freezing) or `open` size. `minOpen` floors the
    *  current open-count to blunt ingest-artifact spikes. */
@@ -791,8 +827,13 @@ export function createApi(
     return result.recent_auth_expires_at;
   }
 
-  function connectedIdentities(): Promise<ConnectedIdentities> {
-    return requestData<ConnectedIdentities>('/api/v2/auth/identities');
+  /** The caller's connected sign-in providers. `identities` is normalized to an array
+   *  here because Go marshals an empty slice as `null`, not `[]` — the declared type
+   *  says array, so the one place that knows the wire makes that true rather than
+   *  every call site defending against it. */
+  async function connectedIdentities(): Promise<ConnectedIdentities> {
+    const result = await requestData<ConnectedIdentities>('/api/v2/auth/identities');
+    return { ...result, identities: result.identities ?? [] };
   }
 
   /** Sign out everywhere: revokes every session for the account, including this one. */
@@ -948,19 +989,20 @@ export function createApi(
     );
   }
 
-  /** The jobs the current user has run the AI match analysis on (newest first), plus their
-   *  AI-credits balance — powers the Activity → Matches tab. Never triggers the LLM. */
-  async function myAnalyses(): Promise<{ items: MyAnalysisItem[]; credits: AiCredits | null }> {
-    const res = await request<{ data: MyAnalysisItem[]; meta: { credits: AiCredits | null } }>(
+  /** The jobs the current user has run the AI match analysis on (newest first), plus where
+   *  they stand on today's analysis allowance — powers the Activity → Matches tab. Never
+   *  triggers the LLM. */
+  async function myAnalyses(): Promise<{ items: MyAnalysisItem[]; allowance: Allowance | null }> {
+    const res = await request<{ data: MyAnalysisItem[]; meta: { allowance: Allowance | null } }>(
       '/api/v1/me/tracking/analyses',
     );
-    return { items: res.data, credits: res.meta.credits };
+    return { items: res.data, allowance: res.meta.allowance };
   }
 
-  /** The caller's current AI-credits balance (credits left this month + reset date).
-   *  Never triggers the LLM. Powers the Credits page balance headline. */
-  async function myCredits(): Promise<AiCredits> {
-    return requestData<AiCredits>('/api/v1/me/credits');
+  /** The caller's plan and every metered feature's standing today. Never triggers the LLM.
+   *  Powers the plan page. */
+  async function myPlan(): Promise<PlanState> {
+    return requestData<PlanState>('/api/v1/me/plan');
   }
 
   /** What the caller's account did this period: model calls, failures and tokens, read
@@ -970,10 +1012,10 @@ export function createApi(
     return requestData<AiUsage>('/api/v1/me/usage');
   }
 
-  /** The caller's credit transaction history, newest first — grants, match/tailor debits,
-   *  and contribution rewards, each labelled for display. Powers the Credits page list. */
-  async function myCreditsHistory(): Promise<CreditHistoryEntry[]> {
-    return requestData<CreditHistoryEntry[]>('/api/v1/me/credits/history');
+  /** The caller's usage history, newest first — what each metered action was spent on and
+   *  what was given back, each labelled for display. Powers the plan page's list. */
+  async function myPlanHistory(): Promise<UsageHistoryEntry[]> {
+    return requestData<UsageHistoryEntry[]>('/api/v1/me/plan/history');
   }
 
   /** The public slugs of every job the current user has interacted with. The
@@ -1742,7 +1784,7 @@ export function createApi(
     return requestData<EmailBody>(`/api/v1/me/emails/${id}/unlink`, { method: 'POST' });
   }
 
-  // --- CVs and tailoring (open to every signed-in user; credits meter the AI spend) ---
+  // --- CVs and tailoring (open to every signed-in user; the plan meters the AI spend) ---
 
   /** The caller's headshot: whether the feature is configured at all (`enabled`), whether
    *  one is stored, and when it was uploaded. Always 200 — "no photo yet" and "storage is
@@ -1799,6 +1841,24 @@ export function createApi(
   /** Fetch one CV with its full document. */
   async function getCv(id: string): Promise<CvRecord> {
     return requestData<CvRecord>(`/api/v1/me/cvs/${id}`);
+  }
+
+  /** The stored cover letter for the vacancy a tailored CV was written for. Never calls a
+   *  model and consumes no allowance: `present: false` means the pair was never drafted. */
+  async function getCoverLetter(id: string): Promise<CoverLetterView> {
+    return requestData<CoverLetterView>(`/api/v1/me/cvs/${encodeURIComponent(id)}/cover-letter`);
+  }
+
+  /** Open the streaming draft. Returns the raw Response so the caller can read the body as it
+   *  arrives AND see the status: a 402 for an exhausted allowance, a 409 for a vacancy with no
+   *  fit analysis. EventSource would hide both behind a bare connection error, and could not
+   *  POST — which this must be, because drafting spends an allowance and writes storage. */
+  async function openCoverLetterStream(id: string, band: 'short' | 'standard'): Promise<Response> {
+    return fetch(`/api/v1/me/cvs/${encodeURIComponent(id)}/cover-letter/stream?band=${band}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { accept: 'text/event-stream' },
+    });
   }
 
   /** What tailoring did to a tailored CV's ATS readiness, against the base CV it came from.
@@ -2045,6 +2105,7 @@ export function createApi(
     runMatchAnalysis,
     matchAnalysisStreamUrl,
     searchJobs,
+    interpretSearch,
     swipeDeck,
     facetCounts,
     jobsActivity,
@@ -2059,6 +2120,7 @@ export function createApi(
     insightsRoles,
     insightsSkills,
     insightsSalaryByCategory,
+    insightsSalaryByCategoryInCountry,
     insightsCompanies,
     marketPulse,
     sitemapJobs,
@@ -2100,8 +2162,8 @@ export function createApi(
     myTimeline,
     myInterviews,
     myAnalyses,
-    myCredits,
-    myCreditsHistory,
+    myPlan,
+    myPlanHistory,
     myUsage,
     listViewedSlugs,
     listSavedSlugs,
@@ -2218,6 +2280,8 @@ export function createApi(
     setCvSession,
     cvPdfUrl,
     listCvRevisions,
+    getCoverLetter,
+    openCoverLetterStream,
     undoCvRevision,
     undoCvRevisionRun,
     resetCvFromResume,

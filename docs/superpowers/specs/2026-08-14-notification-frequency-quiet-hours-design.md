@@ -43,7 +43,7 @@ quiet hours should second-guess).
 
 ## Decisions
 
-- **Frequency gates only `internal/notify`'s DELIVER phase.** Reminders and
+- **Frequency gates only `internal/engage/notify`'s DELIVER phase.** Reminders and
   nudges are one-shot, trigger-bound events ("you saved this 3 days ago",
   "this stage just moved to interview") — batching them into a digest would
   change what they mean, not just when they arrive. Only the subscription
@@ -60,8 +60,8 @@ quiet hours should second-guess).
   an explicit trade-off, consistent with this codebase's existing "no retry
   queue" posture for the other engines.
 - **Quiet hours is a claim-query predicate, duplicated across three
-  engines, matching this codebase's established pattern.** `internal/notify`,
-  `internal/reminder`, `internal/nudge` already independently implement
+  engines, matching this codebase's established pattern.** `internal/engage/notify`,
+  `internal/engage/reminder`, `internal/engage/nudge` already independently implement
   "channel not configured → soft-skip" three times per
   `docs/agents/notifications.md`'s own documented stance ("adding a channel
   is... a wire-up in all three"); a delivery-time gate is the same shape of

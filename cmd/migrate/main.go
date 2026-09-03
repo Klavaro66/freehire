@@ -18,8 +18,8 @@ import (
 	"flag"
 	"log"
 
-	"github.com/strelov1/freehire/internal/migrate"
-	"github.com/strelov1/freehire/internal/worker"
+	"github.com/strelov1/freehire/internal/platform/migrate"
+	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
 func main() { worker.Main(run) }

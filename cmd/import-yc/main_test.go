@@ -6,12 +6,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/ycdir"
+	"github.com/strelov1/freehire/internal/job/ycdir"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // The directory's own industry words must not reach the column: they are a second
-// vocabulary, and mixing two is the defect internal/industrytag exists to end.
+// vocabulary, and mixing two is the defect internal/dict/industrytag exists to end.
 func TestRecordToParamsCanonicalizesIndustries(t *testing.T) {
 	got := recordToParams(ycdir.Record{
 		Slug: "acme",

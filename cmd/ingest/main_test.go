@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strelov1/freehire/internal/pipeline"
-	"github.com/strelov1/freehire/internal/sources"
+	"github.com/strelov1/freehire/internal/ingest/pipeline"
+	"github.com/strelov1/freehire/internal/ingest/sources"
 )
 
 // The shared custom.yml must load and pass validation against the real adapter registry,
@@ -130,6 +130,35 @@ func TestHydrationRetryWindowFor(t *testing.T) {
 		}
 		if err == nil && got != tc.want {
 			t.Errorf("%s: hydrationRetryWindowFor(%q) = %v, want %v", tc.name, tc.env, got, tc.want)
+		}
+	}
+}
+
+// INGEST_REFETCH_ALL empties the seen-set so a crawl re-writes the provider's stored rows —
+// the only way an adapter fix reaches postings ingested before it, since a re-listed posting
+// otherwise takes the content-less refresh path. Anything but the two accepted spellings is a
+// config error rather than a silent false, for the same reason HYDRATION_RETRY_DAYS is.
+func TestRefetchAllFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		env     string
+		want    bool
+		wantErr bool
+	}{
+		{"unset is an ordinary crawl", "", false, false},
+		{"one", "1", true, false},
+		{"true", "true", true, false},
+		{"zero is not a spelling of off", "0", false, true},
+		{"typo", "yes", false, true},
+	}
+	for _, tc := range cases {
+		got, err := refetchAllFor(tc.env)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("%s: refetchAllFor(%q) err = %v, wantErr %v", tc.name, tc.env, err, tc.wantErr)
+			continue
+		}
+		if err == nil && got != tc.want {
+			t.Errorf("%s: refetchAllFor(%q) = %v, want %v", tc.name, tc.env, got, tc.want)
 		}
 	}
 }

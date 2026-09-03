@@ -9,10 +9,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/db"
-	"github.com/strelov1/freehire/internal/gmailsync"
-	"github.com/strelov1/freehire/internal/inbox"
-	"github.com/strelov1/freehire/internal/maillink"
+	"github.com/strelov1/freehire/internal/application/gmailsync"
+	"github.com/strelov1/freehire/internal/application/inbox"
+	"github.com/strelov1/freehire/internal/application/maillink"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // domainLearner adapts the gmailsync self-learning cache to maillink.Learner: a

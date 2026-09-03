@@ -16,7 +16,7 @@ Three things are wrong with it.
    only one in the whole frontend — adds nothing but the house style of every AI feature
    shipped in the last two years.
 2. **The chat opens empty.** `?preset=profile` creates a session under the interviewer's
-   system prompt and then waits. The prompt (`internal/assistant/prompt.go:69`) already
+   system prompt and then waits. The prompt (`internal/ai/assistant/prompt.go:69`) already
    tells the agent to call `get_profile` + `experience_employments`, find the thinnest gap
    and ask one question — but no turn runs until a user message arrives, so the person who
    clicked "add an achievement" lands on a blank composer and has to invent an opening line.

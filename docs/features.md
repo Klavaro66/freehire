@@ -24,7 +24,7 @@ instead of a plausible wrong one. The trade is deliberate — what a filter retu
 is right, at the cost of a posting phrasing something unusually falling outside
 it — and it is why the dictionaries are worth contributing to.
 
-**Live:** /jobs · **Code:** `internal/search`, `internal/skilltag`, `internal/classify`, `internal/location` · **Deep dive:** [internal/search/AGENTS.md](../internal/search/AGENTS.md)
+**Live:** /jobs · **Code:** `internal/search`, `internal/dict/skilltag`, `internal/dict/classify`, `internal/dict/location` · **Deep dive:** [internal/search/AGENTS.md](../internal/search/AGENTS.md)
 
 ### Collections and role landings
 
@@ -32,7 +32,7 @@ Curated entry points into the catalogue — a stack, a role family, a hiring
 profile — each a real filtered view rather than a static page, so a collection
 never goes stale against the index behind it.
 
-**Live:** /collections · **Code:** `web/src/lib/collections.ts` (the definitions), `internal/roletag`, `internal/search` (the scoped feed)
+**Live:** /collections · **Code:** `web/src/lib/collections.ts` (the definitions), `internal/dict/roletag`, `internal/search` (the scoped feed)
 
 ### Saved searches, shared boards and digests
 
@@ -41,7 +41,7 @@ Telegrams a digest of what is new since the last one; a shared board is a
 link-addressed, unindexed view of a saved search that you can hand to someone
 else.
 
-**Live:** /my/notifications/searches, /b/<slug> · **Code:** `internal/savedsearch`, `internal/subscription`, `internal/notify`, `internal/telegramnotify` · **Deep dive:** [docs/agents/notifications.md](agents/notifications.md)
+**Live:** /my/notifications/searches, /b/<slug> · **Code:** `internal/search/savedsearch`, `internal/engage/subscription`, `internal/engage/notify`, `internal/engage/telegramnotify` · **Deep dive:** [docs/agents/notifications.md](agents/notifications.md)
 
 ### Market analytics
 
@@ -49,7 +49,7 @@ Aggregates over the whole catalogue rather than over one search: which skills
 are gaining postings, what a role pays by region, which companies are actually
 hiring. Built from periodic rollups, so the pages stay fast at catalogue scale.
 
-**Live:** /insights, /trends · **Code:** `internal/facetsnapshot`, `cmd/rollup-facets`, `cmd/rollup-stats`
+**Live:** /insights, /trends · **Code:** `internal/search/facetsnapshot`, `cmd/rollup-facets`, `cmd/rollup-stats`
 
 ### The ghost-job signal
 
@@ -58,7 +58,7 @@ can observe — repost patterns, age, how a posting moves — and carries the
 evidence alongside the flag. When there is nothing to say it says nothing: this
 is a signal with its workings shown, never a verdict about an employer.
 
-**Live:** /features/ghost-jobs · **Code:** `internal/ghost`, `internal/jobreality`, `internal/ghostreport`
+**Live:** /features/ghost-jobs · **Code:** `internal/job/ghost`, `internal/job/jobreality`, `internal/job/ghostreport`
 
 ## Apply
 
@@ -68,7 +68,7 @@ Structured CVs rendered to PDF through Typst templates, each marked for whether
 it survives an ATS parser and whether it prints a headshot. Editing is
 revisioned and undoable. Contact details can be masked on a per-CV basis.
 
-**Live:** /my/cvs · **Code:** `internal/cv`, `internal/cvsection`, `internal/headshot`, `internal/pii` · **Deep dive:** [internal/cv/AGENTS.md](../internal/cv/AGENTS.md)
+**Live:** /my/cvs · **Code:** `internal/candidate/cv`, `internal/candidate/cvsection`, `internal/candidate/headshot`, `internal/candidate/pii` · **Deep dive:** [internal/candidate/cv/AGENTS.md](../internal/candidate/cv/AGENTS.md)
 
 ### Match score and fit analysis
 
@@ -79,7 +79,7 @@ streams its verdict as it goes.
 
 The score itself is free; the analysis on top of it is metered.
 
-**Live:** /match/<slug> · **Code:** `internal/cvmatch`, `internal/jobmatch`, `internal/matchanalysis`, `internal/hardconstraint` · **Deep dive:** [internal/cvmatch/AGENTS.md](../internal/cvmatch/AGENTS.md) — the analysis needs `LLM_*` and costs AI credits
+**Live:** /match/<slug> · **Code:** `internal/candidate/cvmatch`, `internal/candidate/jobmatch`, `internal/candidate/matchanalysis`, `internal/candidate/hardconstraint` · **Deep dive:** [internal/candidate/cvmatch/AGENTS.md](../internal/candidate/cvmatch/AGENTS.md) — the analysis needs `LLM_*` and costs AI credits
 
 ### CV tailoring
 
@@ -89,7 +89,7 @@ check lives in the service path rather than in a prompt. Autopilot walks the
 whole vacancy in a single pass and snapshots the CV first, so the run is
 undoable.
 
-**Live:** /tailor/<slug> · **Code:** `internal/cvedit`, `internal/assistant`, `internal/credits` · **Deep dive:** [internal/cvedit/AGENTS.md](../internal/cvedit/AGENTS.md) — needs `LLM_*` and costs AI credits
+**Live:** /tailor/<slug> · **Code:** `internal/candidate/cvedit`, `internal/ai/assistant`, `internal/ai/credits` · **Deep dive:** [internal/candidate/cvedit/AGENTS.md](../internal/candidate/cvedit/AGENTS.md) — needs `LLM_*` and costs AI credits
 
 ### The experience bank
 
@@ -97,7 +97,7 @@ Durable employments plus the evidence atoms under them, each recording who
 asserted it — you, or the model. Only what you asserted may be written into a
 CV, which is what makes tailoring safe to run unattended.
 
-**Live:** /my/profile · **Code:** `internal/experience`, `internal/resumeextract` · **Deep dive:** [internal/experience/AGENTS.md](../internal/experience/AGENTS.md)
+**Live:** /my/profile · **Code:** `internal/candidate/experience`, `internal/candidate/resumeextract` · **Deep dive:** [internal/candidate/experience/AGENTS.md](../internal/candidate/experience/AGENTS.md)
 
 ### Tracer links
 
@@ -108,14 +108,14 @@ visitor salt configured refuses to turn it *on* — recording less while accepti
 the consent would answer a question you did not ask — but withdrawing consent is
 never refused.
 
-**Live:** /my/cvs/<id>, server:/cv/:token · **Code:** `internal/tracerlink`
+**Live:** /my/cvs/<id>, server:/cv/:token · **Code:** `internal/platform/tracerlink`
 
 ### Referrals
 
 A warm intro beats a cold apply. Members already inside a company can offer
 referrals, and an opening can be matched to someone able to make one.
 
-**Live:** /referrals · **Code:** `internal/referral`
+**Live:** /referrals · **Code:** `internal/engage/referral`
 
 ## Track
 
@@ -127,7 +127,7 @@ hard-deleted, `cmd/prune` clears the reference and leaves the application
 standing, so applying to a role that later vanishes still leaves you a history.
 (Plain views and saves are tied to the posting and go with it.)
 
-**Live:** /my/tracking · **Code:** `internal/jobtracking`, `internal/userjob` · **Deep dive:** [internal/userjob/AGENTS.md](../internal/userjob/AGENTS.md)
+**Live:** /my/tracking · **Code:** `internal/application/jobtracking`, `internal/application/userjob` · **Deep dive:** [internal/application/userjob/AGENTS.md](../internal/application/userjob/AGENTS.md)
 
 ### The mail inbox
 
@@ -135,7 +135,7 @@ Connect Gmail or use a hosted address, and recruiter replies are classified,
 linked to the application they answer, and advance its stage on their own.
 Mislinked mail can be relinked by hand, and that undone.
 
-**Live:** /my/inbox · **Code:** `internal/inbox`, `internal/mailingest`, `internal/mailclassify`, `internal/maillink`, `internal/gmailsync`, `internal/mailbox` · **Deep dive:** [docs/agents/mail-stack.md](agents/mail-stack.md)
+**Live:** /my/inbox · **Code:** `internal/application/inbox`, `internal/application/mailingest`, `internal/application/mailclassify`, `internal/application/maillink`, `internal/application/gmailsync`, `internal/application/mailbox` · **Deep dive:** [docs/agents/mail-stack.md](agents/mail-stack.md)
 
 ### The event ledger and reminders
 
@@ -143,7 +143,7 @@ One append-only history of what happened to each application — sent, answered,
 advanced, gone quiet — and reminders when a saved job is about to age out or an
 application has been silent too long. Notifications go to email or Telegram.
 
-**Live:** /my/activity · **Code:** `internal/appevent`, `internal/reminder`, `internal/emailnotify` · **Deep dive:** [docs/agents/notifications.md](agents/notifications.md)
+**Live:** /my/activity · **Code:** `internal/application/appevent`, `internal/engage/reminder`, `internal/engage/emailnotify` · **Deep dive:** [docs/agents/notifications.md](agents/notifications.md)
 
 ## Ask
 
@@ -156,7 +156,7 @@ must not reach is simply a tool that does not exist. Five presets shape one loop
 — general chat, browsing the catalogue, filling out your profile, tailoring a
 CV, and interview rehearsal. The composer takes dictation as well as typing.
 
-**Live:** /my/assistant/<id> · **Code:** `internal/assistant`, `internal/speech` · **Deep dive:** [internal/assistant/AGENTS.md](../internal/assistant/AGENTS.md) — needs `LLM_*`
+**Live:** /my/assistant/<id> · **Code:** `internal/ai/assistant`, `internal/ai/speech` · **Deep dive:** [internal/ai/assistant/AGENTS.md](../internal/ai/assistant/AGENTS.md) — needs `LLM_*`
 
 ### Interview rehearsal
 
@@ -167,7 +167,7 @@ it is sitting in your inbox. A rehearsal binds to a vacancy you have actually
 applied to, and the server verifies that binding rather than taking the client's
 word for it.
 
-**Live:** /my/assistant/<id> · **Code:** `internal/assistant`, `internal/experience` — needs `LLM_*`
+**Live:** /my/assistant/<id> · **Code:** `internal/ai/assistant`, `internal/candidate/experience` — needs `LLM_*`
 
 ## Build on it
 
@@ -178,7 +178,7 @@ handshake. Per-user surfaces authenticate with a session cookie or an API key,
 and the split is deliberate: the CV builder, the inbox and subscriptions are
 cookie-only, so a leaked key cannot act on them.
 
-**Live:** /docs/api · **Code:** `internal/handler`, `internal/auth` · **Deep dive:** [internal/handler/AGENTS.md](../internal/handler/AGENTS.md)
+**Live:** /docs/api · **Code:** `internal/api/handler`, `internal/identity/auth` · **Deep dive:** [internal/api/handler/AGENTS.md](../internal/api/handler/AGENTS.md)
 
 ### CLI, browser extension and ChatGPT Actions
 
@@ -187,7 +187,7 @@ from your canonical profile, and a ChatGPT Actions manifest. The extension can
 also hand its browser to an agent over a relay that routes strictly within one
 user's channel.
 
-**Live:** /cli, /chatgpt · **Code:** `internal/browsertools`, `internal/autofillagent` · **Deep dive:** [internal/browsertools/AGENTS.md](../internal/browsertools/AGENTS.md)
+**Live:** /cli, /chatgpt · **Code:** `internal/ai/browsertools`, `internal/ai/autofillagent` · **Deep dive:** [internal/ai/browsertools/AGENTS.md](../internal/ai/browsertools/AGENTS.md)
 
 ### Contributing a board or a posting
 
@@ -195,4 +195,4 @@ Paste a careers URL and freehire works out which ATS it runs on and whether that
 board is already covered; a single posting can be submitted directly. Both feed
 the same review queue that onboards new sources.
 
-**Live:** /contribute, /submit · **Code:** `internal/contribution`, `internal/submission`, `internal/boardresolve` · **Deep dive:** [internal/contribution/AGENTS.md](../internal/contribution/AGENTS.md)
+**Live:** /contribute, /submit · **Code:** `internal/ingest/contribution`, `internal/ingest/submission`, `internal/ingest/boardresolve` · **Deep dive:** [internal/ingest/contribution/AGENTS.md](../internal/ingest/contribution/AGENTS.md)

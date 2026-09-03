@@ -18,7 +18,7 @@ Two gaps, both raised live while testing the just-shipped cold-start autopilot c
    atom to `manual` is to open its edit field and re-save the same text — there is no one-click
    "yes, this is right" action, even though the backend already re-stamps provenance to `manual`
    on any update call regardless of whether the text changed
-   (`internal/handler/me_experience.go:206`, `in.Provenance = experience.ProvenanceManual`
+   (`internal/api/handler/me_experience.go:206`, `in.Provenance = experience.ProvenanceManual`
    unconditionally).
 
 ## Decision
@@ -35,7 +35,7 @@ explicit ask, moving Chat first since it's the tab a fresh session opens into).
 buttons on every `agent_inferred` atom, a new button calls the same
 `api.updateExperienceAtom(atom.id, { ...atom, claim: atom.claim })` the edit-save path already
 calls, just without opening the textarea first. No backend change: `UpdateAtom`
-(`internal/handler/me_experience.go:197-206`) already forces `provenance: manual` on every call.
+(`internal/api/handler/me_experience.go:197-206`) already forces `provenance: manual` on every call.
 Because the component is shared, this button appears on `/my/profile` too — intentional, not a
 scope leak: the same claim deserves the same one-click confirmation wherever it's reviewed.
 

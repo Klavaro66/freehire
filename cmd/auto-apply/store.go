@@ -8,9 +8,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/strelov1/freehire/internal/appevent"
-	"github.com/strelov1/freehire/internal/autoapply"
-	"github.com/strelov1/freehire/internal/db"
+	"github.com/strelov1/freehire/internal/application/appevent"
+	"github.com/strelov1/freehire/internal/application/autoapply"
+	"github.com/strelov1/freehire/internal/platform/db"
 )
 
 // dbStore adapts the generated queries + pool to autoapply.Store. It is the only place the

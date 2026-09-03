@@ -18,7 +18,7 @@ type Fillable = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'file']);
 
 /** The ordered list of fillable controls on the page. */
-export function collectFillable(doc: Document): Fillable[] {
+function collectFillable(doc: Document): Fillable[] {
   const all = Array.from(doc.querySelectorAll<Fillable>('input, select, textarea'));
   return all.filter((el) => {
     if (el.disabled) return false;
@@ -170,14 +170,24 @@ export function extractUploads(doc: Document): Upload[] {
 
 /**
  * The index of the form a control answers within, or -1 when it sits outside
- * one. Matched with `isSameNode` rather than `indexOf`, because that is the
- * identity check that holds however the two references were obtained — the
- * reference `closest` hands back need not be the very object the query list
- * holds.
+ * one.
+ *
+ * Asked of the control itself rather than of the tree around it. `.form` is the
+ * form owner HTML defines, and a control carrying `form="signup"` answers that
+ * form from wherever it is rendered — a distinction `closest('form')` cannot
+ * make. (happy-dom does not implement the attribute, so no test here covers
+ * that case; browsers do, which is where the extension runs.)
+ *
+ * It is also the only identity check happy-dom agrees with itself about across
+ * versions. Under 20.11.6 `closest` hands back a different object than the
+ * query list holds, so `===` fails and `isSameNode` is what matches; under
+ * 20.11.13 that reversed — `===` matches and `isSameNode` returns false for a
+ * node against itself. `.form` returns the very object `querySelectorAll`
+ * collected under both, so `indexOf` is enough.
  */
-function formIndex(el: Element, forms: HTMLFormElement[]): number {
-  const owner = el.closest('form');
-  return owner ? forms.findIndex((f) => f.isSameNode(owner)) : -1;
+function formIndex(el: Fillable, forms: HTMLFormElement[]): number {
+  const owner = el.form;
+  return owner ? forms.indexOf(owner) : -1;
 }
 
 function describeQuestion({ label, controls }: Question, index: number, forms: HTMLFormElement[]): FormField {
@@ -224,7 +234,7 @@ function describeQuestion({ label, controls }: Question, index: number, forms: H
  * A react-select renders its listbox only once opened, so this is empty for one
  * that is closed — the agent reaches for `combobox.open` in that case.
  */
-export function comboOptions(el: Element): string[] {
+function comboOptions(el: Element): string[] {
   return comboOptionNodes(el).map(collapseText).filter(Boolean);
 }
 
@@ -659,7 +669,7 @@ function startsWithOption(value: string, option: string): boolean {
 }
 
 /** Writes one control, dispatching native events. Returns false if unfillable. */
-export function fillField(el: Fillable, value: string): boolean {
+function fillField(el: Fillable, value: string): boolean {
   if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
     el.checked = value === 'true' || value === '1' || normalizeLabel(value) === 'yes';
     dispatchNative(el);

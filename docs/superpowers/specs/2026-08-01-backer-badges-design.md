@@ -5,7 +5,7 @@ Date: 2026-08-01
 ## Problem
 
 A company's curated collections already reach the frontend on every job
-(`internal/jobview/jobview.go:72`), but only the *credential* subset renders
+(`internal/job/jobview/jobview.go:72`), but only the *credential* subset renders
 (`JobRow.svelte:291` → `CredentialBadge.svelte`). The editorial tags — including
 `yc` and `techstars` — are invisible everywhere except the `/collections` hub.
 
@@ -29,7 +29,7 @@ icon, and three or four chips on one card is noise. They stay filters.
 
 ### 1. A third Kind in the registry
 
-`internal/collections` carries `Kind` (`editorial` | `credential`), and it is the
+`internal/job/collections` carries `Kind` (`editorial` | `credential`), and it is the
 only render switch there is: `credentials.ts:46` filters `kind === 'credential'`
 and everything else silently renders nothing.
 
@@ -52,7 +52,7 @@ company and OpenAI carry the same signal.
 ### 2. The a16z membership source
 
 `https://speedrun-talent-network.com/api/v1/companies?source=freehire`, the same
-public API `internal/sources/speedrun.go` already crawls. Measured 2026-08-01:
+public API `internal/ingest/sources/speedrun.go` already crawls. Measured 2026-08-01:
 876 companies, 16 560 open roles, three tiers.
 
 | `tier` | count | meaning |
@@ -86,7 +86,7 @@ mutually exclusive form:
 Records func(context.Context, *http.Client) ([]Record, error)
 ```
 
-`internal/collections/speedrun.go` implements it: walk `total_pages`, keep the
+`internal/job/collections/speedrun.go` implements it: walk `total_pages`, keep the
 requested tier, return one `Record` per company name.
 
 ### 3. Matching risk, and how it gets answered
@@ -183,7 +183,7 @@ by `PillGroup.svelte`. One optional field, no special case for collections.
 
 ## Verification
 
-- `internal/collections` registry test covers the new kind and both new tags.
+- `internal/job/collections` registry test covers the new kind and both new tags.
 - A test asserts `market`-tier records are dropped, named for what it protects
   against (a16z badge on Walmart).
 - `cmd/import-collections -dry-run` read for both new tags before any write;

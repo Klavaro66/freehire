@@ -18,7 +18,7 @@
 ![Go version](https://img.shields.io/github/go-mod/go-version/strelov1/freehire)
 ![Last commit](https://img.shields.io/github/last-commit/strelov1/freehire)
 [![Stars](https://img.shields.io/github/stars/strelov1/freehire?style=social)](https://github.com/strelov1/freehire/stargazers)
-[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/aAXS2rghW)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/sYnZksswR)
 
 <br>
 
@@ -31,8 +31,7 @@
     <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1196233&amp;theme=light" alt="freehire — every IT job, straight from the source | Product Hunt" width="250" height="54">
   </picture>
 </a>
-
-<a href="https://trendshift.io/repositories/55060?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-55060" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/55060/daily?language=Go" alt="strelov1%2Ffreehire | Trendshift" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/55060?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-55060" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/55060" alt="strelov1%2Ffreehire | Trendshift" width="250" height="55"/></a>
 
 <br>
 
@@ -234,7 +233,7 @@ three kinds:
   **30 feeds · 59 companies · 26,222 open postings.**
 
 A source's kind is not configuration but a property of the adapter's own Go type,
-so `internal/sources` classifies every provider without a network call.
+so `internal/ingest/sources` classifies every provider without a network call.
 
 Full per-source breakdown — every source with its own companies/open-jobs
 count — lives on its own page: [docs/sources.md](docs/sources.md).
@@ -244,7 +243,7 @@ count — lives on its own page: [docs/sources.md](docs/sources.md).
 Adding a company is one entry in the provider's board file (`sources/<provider>.yml`,
 or the mixed `sources/custom.yml`) — `company` + `board` (and `provider` when an
 entry overrides the file's). Adding an ATS platform is a new adapter in
-`internal/sources` plus one line in `sources.All` — every adapter speaks the same
+`internal/ingest/sources` plus one line in `sources.All` — every adapter speaks the same
 `Source` interface, and `cmd/ingest` validates the file against the registry before
 any crawl.
 
@@ -279,7 +278,7 @@ fill the application form for you. Source lives under `extension/`
 allowlist, no approval step — open one.
 
 The easiest way to help is to **add a source**: one entry in a `sources/` board
-file, or a new adapter in `internal/sources`. Missing a company you would apply
+file, or a new adapter in `internal/ingest/sources`. Missing a company you would apply
 to? That is a one-line PR, and it is the single most useful thing you can send.
 
 Questions and half-formed ideas are equally welcome in
