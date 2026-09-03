@@ -2955,6 +2955,20 @@ type Querier interface {
 	// yields no row exactly like a concurrent delete already did, and the caller reports both
 	// the same way — reload and retry — rather than pretending a still-present row vanished.
 	MergeExperienceAtoms(ctx context.Context, arg MergeExperienceAtomsParams) (MergeExperienceAtomsRow, error)
+	// Raw posting titles with their counts, the source of the suggestion dictionary
+	// (cmd/build-suggestions).
+	//
+	// Grouped HERE rather than streamed row by row: the open catalogue is ~1.8M postings
+	// written with far fewer distinct titles, so aggregating in Postgres keeps the wire
+	// and the worker's memory proportional to the vocabulary rather than to the
+	// catalogue.
+	//
+	// Normalisation is deliberately NOT done here, and neither is the frequency floor.
+	// `suggest.Title` is one function shared with the query path — a SQL copy would drift
+	// — and the floor has to be applied AFTER it: "Product Owner", "product owner" and
+	// "PRODUCT OWNER" are three rows here and one suggestion, so a floor applied to these
+	// counts would drop a title that clears it comfortably once merged.
+	MineJobTitles(ctx context.Context) ([]MineJobTitlesRow, error)
 	// The similar-jobs rollup for one source job (design.md Decision 5), consumed by
 	// cmd/similar-backfill to populate jobs.similar_job_ids. A candidate job's distance to
 	// the source is the MINIMUM cosine distance across every (source chunk, candidate
@@ -3132,6 +3146,18 @@ type Querier interface {
 	// out that it was ever indexed. search_delete_outbox deliberately carries no foreign key to
 	// jobs, which is what lets this entry outlive the row it names — see migration 0113.
 	PruneJobs(ctx context.Context, arg PruneJobsParams) ([]int64, error)
+	// Drop the demand rows that have stopped being vocabulary: asked for only once, and
+	// not since the cut-off. Run at the end of a dictionary build.
+	//
+	// Retention, not cleanup. The write path already refuses anything that is not a search
+	// phrase, so what accumulates here is real but transient — a one-off typo, a phrase
+	// from a job title that no longer exists. Keeping it forever grows the table for
+	// ranking that will never use it, and the honest bound on a public-input table is that
+	// it forgets.
+	//
+	// The `count = 1` condition is what makes this safe: a phrase two people have searched
+	// survives however old it is, so a seasonal query does not vanish between seasons.
+	PruneSearchQueries(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	// One row per company with its current open-count and the open-count as of @prev_ts,
 	// from a single scan of jobs over canonical rows only (same count(*) FILTER idiom as
 	// insights_role_stats). open_count uses closed_at IS NULL (open now); open_count_prev
@@ -3378,6 +3404,12 @@ type Querier interface {
 	// left in place — its expiry gates the retry to a later run and doubles as the
 	// crash reaper, so a failed entry is never reprocessed within the same run.
 	RecordSearchOutboxFailure(ctx context.Context, arg RecordSearchOutboxFailureParams) (RecordSearchOutboxFailureRow, error)
+	// Record that a visitor searched for this normalised query. Upsert, so the table holds
+	// one row per phrase rather than one per search.
+	//
+	// Called on every search carrying a non-empty `q`, and its failure is discarded by the
+	// caller: the search result is what the visitor asked for, and this is a by-product.
+	RecordSearchQuery(ctx context.Context, query string) error
 	// Count a failed attempt: bump attempts, record the error, and dead-letter (set
 	// failed_at) once attempts reach the max. The lease (claimed_at) is intentionally left
 	// in place — its expiry gates the retry to a later run and doubles as the crash reaper,
@@ -3721,6 +3753,9 @@ type Querier interface {
 	// a real measurement that must publish an explicit zero, because an absent series is how
 	// the consuming alert rules recognize a dead exporter.
 	SearchOutboxMetrics(ctx context.Context) (SearchOutboxMetricsRow, error)
+	// Every recorded query with its count, busiest first — the demand side of the
+	// suggestion ranking, read once per dictionary build.
+	SearchQueryCounts(ctx context.Context) ([]SearchQueryCountsRow, error)
 	// Hand an unverified, password-backed account to the proven owner of its address when a
 	// provider-verified OAuth identity arrives for it: the password is destroyed, every
 	// session revoked, and every API key deleted, so a squatter who registered the address
@@ -3977,6 +4012,14 @@ type Querier interface {
 	// about this application explicitly, suggested_job_id holds one value, and a proposal
 	// nobody has confirmed costs nothing to lose.
 	SuggestJobForEmail(ctx context.Context, arg SuggestJobForEmailParams) (int64, error)
+	// Companies worth offering as a suggestion, busiest first. Reads the denormalized
+	// companies.job_count (maintained by cmd/recount-companies), so this does not join
+	// jobs.
+	//
+	// The floor is what keeps the long tail of one-posting slugs — many of them job
+	// titles that landed in an employer column — out of a dictionary meant to name real
+	// employers.
+	SuggestibleCompanies(ctx context.Context, minJobs int32) ([]SuggestibleCompaniesRow, error)
 	// The batched slice of the cross-source aggregator suppression, driven over a CHUNK of
 	// companies (cmd/reindex's forCompanyBatches) rather than one call per company — see
 	// RecomputeRoleDuplicatesForCompanies' doc comment for the prod measurement that

@@ -6,13 +6,20 @@
 // that logic in the header.
 
 import type { FacetStore } from './facets';
+import type { ApplyPlan } from './apiSuggestions';
+import type { Suggestion } from './suggestions';
 import type { FacetCounts } from './types';
 
 /** The slice of a page filter store the header drives. Both FilterStore and
- *  CompanyFilterStore satisfy the base contract (`value.q` + `setQuery`). */
+ *  CompanyFilterStore satisfy the base contract (`value.q` + `commitQuery`).
+ *
+ *  The header COMMITS; it does not type into the store. What the visitor types is a
+ *  draft the header holds until Enter, a chosen suggestion, or the clear button — so
+ *  every write arriving here is a discrete act, and the store's debounced `setQuery`
+ *  (which exists for continuous input) would only delay it. */
 export interface ListSearchTarget {
   readonly value: { q: string };
-  setQuery(q: string): void;
+  commitQuery(q: string): void;
 
   /** The geography (+ work-format) facet scope the header's Location & format popover
    *  drives, present on both list surfaces. `variant` selects the popover body: jobs
@@ -30,20 +37,27 @@ export interface ListSearchTarget {
     inferred?(): boolean;
   };
 
-  /** Role suggestions under the header's search input, present only on jobs-backed
-   *  lists — roles are a jobs facet, so the companies list publishes nothing here and
-   *  the header renders no dropdown there without knowing which page it is on. Same
-   *  opt-in shape as `filterScope` above.
+  /** Suggestions under the header's search input, present only on jobs-backed lists —
+   *  roles and categories are jobs facets, so the companies list publishes nothing
+   *  here and the header renders no dropdown there without knowing which page it is
+   *  on. Same opt-in shape as `filterScope` above.
    *
-   *  `counts` is a getter so the distribution stays reactive across the bridge, and it
-   *  is the role distribution measured WITHOUT the text query: scoped by `q` it would
-   *  lag the typing by one debounce, and the numbers beside the suggestions would
-   *  answer "jobs matching what you typed AND this role" rather than "jobs in this
-   *  role". `active` is the roles already applied, which are not offered again. */
-  readonly roleSuggest?: {
+   *  Every member is a getter so the distributions stay reactive across the bridge.
+   *
+   *  `counts` is the ordinary scoped distribution, and it serves the EMPTY box only —
+   *  empty means no text query is narrowing it, and the visitor's location and other
+   *  filters SHOULD be reflected in what they are offered as a starting point. What a
+   *  TYPED box offers comes from the suggestions endpoint, which reads the catalogue's
+   *  own vocabulary rather than any distribution shipped to the browser. */
+  readonly suggest?: {
     counts(): FacetCounts | null;
-    active(): readonly string[];
-    apply(slug: string): void;
+    /** Apply a locally-built starter row: one facet, named by its own kind. */
+    apply(suggestion: Suggestion): void;
+    /** Apply a completion from the suggestions endpoint, which composes SEVERAL
+     *  values at once — a role plus a company, or a free-text title. They go in one
+     *  write, because applying them one at a time would reload the list per part and
+     *  leave it briefly filtered by half a query. */
+    applyParts(plan: ApplyPlan): void;
   };
 
   /** Opens the page's own filter modal, and reports its active-filter count, so the
