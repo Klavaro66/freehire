@@ -17,6 +17,10 @@ func TestIsSensitiveLabel_CatchesEveryPortedCategory(t *testing.T) {
 		"Do you have a disability?",
 		"This demographic data is voluntary.",
 		"What is your sexual orientation?",
+		"What is your religion?",
+		"What is your national origin?",
+		"What is your date of birth?",
+		"Do you consent to genetic information disclosure?",
 	}
 	for _, label := range labels {
 		if !isSensitiveLabel(label) {

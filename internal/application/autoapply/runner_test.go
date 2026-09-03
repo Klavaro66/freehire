@@ -21,6 +21,7 @@ type fakeStore struct {
 	failAttempts map[int64]int
 	failMax      int
 	deadLetterOn int // dead-letters once failAttempts[id] reaches this
+	failErr      error
 }
 
 func (f *fakeStore) Claim(ctx context.Context, batch, leaseSeconds int) ([]Claimed, error) {
@@ -52,6 +53,9 @@ func (f *fakeStore) Park(ctx context.Context, queueID int64, unmapped []Unmapped
 }
 
 func (f *fakeStore) Fail(ctx context.Context, queueID int64, errMsg string, maxAttempts int) (bool, error) {
+	if f.failErr != nil {
+		return false, f.failErr
+	}
 	f.failed = append(f.failed, queueID)
 	if f.failAttempts == nil {
 		f.failAttempts = map[int64]int{}
@@ -248,6 +252,31 @@ func TestRunDeadLettersImmediatelyOnAnUnconfirmedSubmission(t *testing.T) {
 	}
 	if got := store.failAttempts[6]; got != 1 {
 		t.Errorf("Fail called %d times, want exactly 1 (forced dead-letter, not the normal retry budget)", got)
+	}
+}
+
+// Found by a PR review pass: if the write that was supposed to make an unconfirmed
+// attempt terminal itself fails, the row stays claimed (its lease still runs out on its
+// own) — a later run can reclaim it as an ordinary pending attempt and resubmit for real.
+// Run must not then report it as DeadLettered, which would claim a terminal state that
+// never actually landed.
+func TestRunReportsFailedNotDeadLetteredWhenTheDeadLetterWriteItselfFails(t *testing.T) {
+	store := &fakeStore{
+		waves:   [][]Claimed{{{QueueID: 7, UserID: 10, JobID: 100}}},
+		failErr: errors.New("db unavailable"),
+	}
+	answers := &fakeAnswers{answers: map[string]string{}}
+	sidecar := &fakeSidecar{result: SidecarResult{Status: StatusUnconfirmed}}
+
+	stats, err := Run(context.Background(), store, answers, sidecar, opts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.DeadLettered != 0 {
+		t.Errorf("DeadLettered = %d, want 0 — the write that would have made this terminal failed", stats.DeadLettered)
+	}
+	if stats.Failed != 1 {
+		t.Errorf("Failed = %d, want 1 — an honest report that the row is still live, not terminal", stats.Failed)
 	}
 }
 

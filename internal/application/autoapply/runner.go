@@ -256,7 +256,14 @@ func (rn *run) recordApplied(ctx context.Context, c Claimed) outbox.Outcome {
 // at, not as a queue that quietly retries its way into a duplicate application.
 func (rn *run) deadLetterImmediately(ctx context.Context, c Claimed, reason string) outbox.Outcome {
 	if _, failErr := rn.store.Fail(ctx, c.QueueID, reason, 1); failErr != nil {
-		log.Printf("auto-apply: also failed to dead-letter queue entry %d: %v", c.QueueID, failErr)
+		// The write that was supposed to make this row terminal did not happen: it
+		// stays claimed, its lease still runs out on its own, and a later run can
+		// reclaim it as an ordinary pending attempt — reopening exactly the "might
+		// submit twice" risk this whole path exists to close. CRITICAL because this
+		// is not a case retrying resolves; only a person can decide whether to block
+		// the row by hand before the lease expires.
+		log.Printf("auto-apply: CRITICAL could not dead-letter queue entry %d; it stays reclaimable and may submit twice: %v", c.QueueID, failErr)
+		return outbox.Failed
 	}
 	return outbox.DeadLettered
 }

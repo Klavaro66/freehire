@@ -18,6 +18,10 @@ import "strings"
 var sensitiveTerms = []string{
 	"salary", "compensation", "sponsor", "visa", "authoriz", "right to work",
 	"gender", "race", "ethnic", "veteran", "disab", "demographic", "sexual orientation",
+	// The remaining US EEOC-adjacent categories a live posting could ask about as a
+	// custom question, found missing by a PR review pass: religion, national origin,
+	// date of birth (age-discrimination-adjacent), and genetic information (GINA).
+	"religio", "national origin", "date of birth", "genetic",
 }
 
 // isSensitiveLabel reports whether a question's label text concerns compensation, work

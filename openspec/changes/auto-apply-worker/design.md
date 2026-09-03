@@ -114,7 +114,15 @@ package (`internal/autoapply`), because the success write differs in substance:
 `MarkJobApplied` and marks the queue row done in the same transaction (mirroring
 `LockJobForApply`'s existing serialization, so a double-claim of the same row can't
 double-submit — see the spec's "never twice" requirement; verified by an integration test
-against a real Postgres). **Alternative considered**: generalize `applyform.Store` into a
+against a real Postgres). **Scope of that guarantee, found by a PR review pass**: it closes
+the double-claim/concurrent-worker race, not every path to a duplicate. A crash between
+`SidecarClient.Submit`'s browser click actually succeeding and this transaction committing
+leaves the queue row still claimed and un-recorded; once its lease expires a later run
+reclaims it as an ordinary pending attempt and can submit again for real. Closing that
+window would need the employer's platform to expose its own idempotency or a way to check
+"did this candidate already apply" before submitting — none of Greenhouse, Lever or Ashby
+does (see proposal.md's Why) — so it stays an accepted, unclosed gap, not a guarantee this
+change actually provides. **Alternative considered**: generalize `applyform.Store` into a
 shared outbox-with-side-effect interface both packages implement. Rejected as premature — two
 implementations is not yet a pattern worth abstracting (AGENTS.md: no infrastructure before a
 concrete second need beyond this one), and `internal/outbox.RunPool` itself is already the

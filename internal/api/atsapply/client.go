@@ -111,6 +111,14 @@ func (c *Client) Submit(ctx context.Context, claimed autoapply.Claimed, answers 
 			}
 			return autoapply.SidecarResult{}, fmt.Errorf("render application page: %w", err)
 		}
+		// A reCAPTCHA footprint can be present on a page whose known selector still
+		// rendered fine — the two are independent (found by a PR review pass: the
+		// check below used to run only on the OTHER branch, when the selector timed
+		// out, leaving a page that scans successfully but is still challenge-gated to
+		// fall through to a real fill/submit attempt with no check at all).
+		if hasRecaptchaMarker(pageHTML) {
+			return autoapply.SidecarResult{Status: autoapply.StatusParked, Reason: string(reasonCaptchaProtected)}, nil
+		}
 		dom, err := ScanGreenhouseForm(pageHTML)
 		if err != nil {
 			return autoapply.SidecarResult{}, fmt.Errorf("scan application form: %w", err)

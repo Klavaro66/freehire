@@ -24,7 +24,10 @@ CREATE TABLE public.auto_apply_queue (
     id         bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id    bigint      NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     job_id     bigint      NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
-    attempts   integer     NOT NULL DEFAULT 0,
+    -- squawk-ignore prefer-bigint-over-int
+    attempts   integer     NOT NULL DEFAULT 0, -- a small, bounded retry counter capped by
+    -- AUTO_APPLY_MAX_ATTEMPTS, never remotely close to the 32-bit limit — same as every
+    -- other outbox table's attempts column: semantic_outbox, search_outbox, search_delete_outbox
     claimed_at timestamptz,
     failed_at  timestamptz,
     blocked_at timestamptz,
