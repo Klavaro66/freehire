@@ -14,7 +14,7 @@ import "time"
 //
 // No drafting-specific knobs either: question drafting (openspec/changes/
 // auto-apply-llm-drafting) rides the same LLM_*/LLM_ADMIN_* environment every other
-// feature reads, attributed per candidate under feature:auto-apply-drafting — an
+// feature reads, attributed per candidate under auto-apply-drafting — an
 // unconfigured LLM just means every attempt's unmapped free-text questions stay parked,
 // the same degrade every other LLM feature already has.
 type AutoApply struct {

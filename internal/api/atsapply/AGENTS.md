@@ -93,7 +93,7 @@ decision for the measurements and its caveats.
   filters `internal/experience.Store.ListAtoms` to `cv_import`/`stated_in_chat`/`manual`
   provenance, the same gate `internal/cvedit`'s CV-write path already enforces, applied here
   at read time. An `agent_inferred` atom can never reach a draft.
-- **Drafting LLM spend is attributed to the candidate, tagged `feature:auto-apply-drafting`**
+- **Drafting LLM spend is attributed to the candidate, tagged `auto-apply-drafting`**
   — bound fresh per attempt (`llmkey.Bind`, in `Client.resolve`), never shared across
   attempts. `cmd/auto-apply` is one of exactly two binaries allowed to resolve a per-user
   LLM credential at all (`internal/llmkey/scope_test.go`'s allowlist, alongside
