@@ -55,15 +55,28 @@ var techTitleTerms = []string{
 	"wordpress developer", "drupal developer", "magento developer", "shopify developer",
 	"database developer", "etl developer", "bi developer", "power bi developer",
 	"rpa developer", "erp developer", "sap developer", "oracle developer", "abap developer",
+	"mes developer", "java fejlesztő", "java fejlesztők", "software mérnök",
+	"szoftverfejlesztő", "szoftver fejlesztő",
+	"alkalmazásfejlesztő", "alkalmazás fejlesztő",
+	"python fejlesztő", "node.js fejlesztő", ".net fejlesztő", "c# fejlesztő",
+	"adatbázis fejlesztő", "adattárház fejlesztő", "bi fejlesztő",
+	"sap abap fejlesztő", "pega fejlesztő", "odoo fejlesztő", "odoo-fejlesztő",
+	"beágyazott szoftverfejlesztő", "mobilalkalmazás-fejlesztő", "mobilalkalmazás fejlesztő",
 	// Administration / operations (never bare "administrator")
 	"system administrator", "systems administrator", "sysadmin", "network administrator",
 	"database administrator", "linux administrator", "windows administrator",
 	"it administrator", "devsecops",
+	// IT-anchored support, infrastructure, and delivery roles. The unqualified
+	// nouns are deliberately absent: support, infrastructure, project manager,
+	// and business analyst all occur extensively outside software/IT.
+	"service desk", "helpdesk", "technical support analyst", "it infrastructure",
+	"it project manager", "it business analyst",
 	// Architects (never bare "architect")
-	"software architect", "solutions architect", "cloud architect", "data architect",
+	"software architect", "solutions architect", "solution architect", "cloud architect", "data architect",
 	"security architect", "enterprise architect", "technical architect",
 	// Data / ML / security specialisms
 	"data scientist", "machine learning", "deep learning", "computer vision engineer",
+	"soc analyst",
 	"nlp engineer", "penetration tester", "pentester", "sdet", "software tester",
 	// Generalist software titles that name no sub-discipline, so classify assigns
 	// them no category and only this list can lift them out of `unknown`. Each is

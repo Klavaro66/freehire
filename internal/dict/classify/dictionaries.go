@@ -203,6 +203,7 @@ var categoryTable = []aliasEntry{
 	// "platform engineer" substring, so it needs its own entry.
 	{"platform engineering", "devops"},
 	{"infrastructure engineer", "devops"},
+	{"it infrastructure", "devops"},
 	{"cloud engineer", "devops"},
 	{"system administrator", "devops"},
 	// The plural is the far more common surface form in prod titles ("Systems
@@ -312,6 +313,7 @@ var categoryTable = []aliasEntry{
 	{"grc", "security"},
 	{"vulnerability management", "security"},
 	{"vulnerability analyst", "security"},
+	{"soc analyst", "security"},
 	{"incident response", "security"},
 	{"red team", "security"},
 	{"red teamer", "security"},
@@ -330,6 +332,7 @@ var categoryTable = []aliasEntry{
 	{"devsecops", "security"},
 	{"embedded", "embedded"},
 	{"firmware", "embedded"},
+	{"beágyazott szoftverfejlesztő", "embedded"},
 	{"встраиваемые", "embedded"},
 	{"встраиваемых", "embedded"},
 	// French: "logiciel embarqué" is embedded software, unambiguous.
@@ -640,6 +643,7 @@ var categoryTable = []aliasEntry{
 	// The unspaced compound: "help desk" above cannot reach it, the same trap the
 	// "back-end"/"back end"/"backend" trio guards against.
 	{"helpdesk", "support"},
+	{"service desk", "support"},
 	{"call center", "support"},
 	{"call-центр", "support"},
 	{"колл-центр", "support"},
@@ -876,6 +880,7 @@ var categoryTable = []aliasEntry{
 	{"rpa developer", "software_engineering"},
 	{"erp developer", "software_engineering"},
 	{"sap developer", "software_engineering"},
+	{"mes developer", "software_engineering"},
 	{"oracle developer", "software_engineering"},
 	{"abap developer", "software_engineering"},
 	{"wordpress developer", "software_engineering"},
@@ -904,6 +909,25 @@ var categoryTable = []aliasEntry{
 	// every language's gendered and inclusive spellings is future work, not done
 	// here.
 	//
+	// Hungarian.
+	{"java fejlesztő", "software_engineering"},
+	{"java fejlesztők", "software_engineering"},
+	{"software mérnök", "software_engineering"},
+	{"szoftverfejlesztő", "software_engineering"},
+	{"szoftver fejlesztő", "software_engineering"},
+	{"alkalmazásfejlesztő", "software_engineering"},
+	{"alkalmazás fejlesztő", "software_engineering"},
+	{"python fejlesztő", "software_engineering"},
+	{"node.js fejlesztő", "software_engineering"},
+	{".net fejlesztő", "software_engineering"},
+	{"c# fejlesztő", "software_engineering"},
+	{"adatbázis fejlesztő", "software_engineering"},
+	{"adattárház fejlesztő", "data_engineering"},
+	{"bi fejlesztő", "data_analytics"},
+	{"sap abap fejlesztő", "software_engineering"},
+	{"pega fejlesztő", "software_engineering"},
+	{"odoo fejlesztő", "software_engineering"},
+	{"odoo-fejlesztő", "software_engineering"},
 	// Spanish.
 	{"desarrollador de software", "software_engineering"},
 	{"desarrolladora de software", "software_engineering"},

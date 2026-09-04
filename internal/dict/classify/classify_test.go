@@ -373,6 +373,39 @@ func TestParse_ITCompanyRoles(t *testing.T) {
 	}
 }
 
+// TestParse_TechnicalTitleAuditGaps pins category aliases found while auditing
+// technical titles outside a board's dedicated IT sections. The aliases are
+// deliberately qualified: no bare analyst, developer, engineer, or infrastructure
+// noun is introduced.
+func TestParse_TechnicalTitleAuditGaps(t *testing.T) {
+	cases := []struct{ title, wantCategory string }{
+		{"French Speaking Service Desk Analyst - Level 1", "support"},
+		{"SOC Analyst L2", "security"},
+		{"MES Developer (Delmia Apriso)", "software_engineering"},
+		{"Java fejlesztő", "software_engineering"},
+		{"Termelési software mérnök", "software_engineering"},
+		{"IT Infrastructure & Projects Specialist", "devops"},
+		{"Szoftverfejlesztő - ERP terület", "software_engineering"},
+		{"Hardverközeli alkalmazásfejlesztő", "software_engineering"},
+		{"Python fejlesztő (Python, Django)", "software_engineering"},
+		{"Node.js fejlesztő", "software_engineering"},
+		{"Senior .net fejlesztő", "software_engineering"},
+		{"Oracle adatbázis fejlesztő", "software_engineering"},
+		{"Adattárház fejlesztő", "data_engineering"},
+		{"BI fejlesztő", "data_analytics"},
+		{"SAP ABAP fejlesztő (LJK)", "software_engineering"},
+		{"Senior PEGA fejlesztő", "software_engineering"},
+		{"Odoo-fejlesztő", "software_engineering"},
+		{"Beágyazott szoftverfejlesztő", "embedded"},
+	}
+
+	for _, c := range cases {
+		if got := Parse(c.title).Category; got != c.wantCategory {
+			t.Errorf("Parse(%q).Category = %q, want %q", c.title, got, c.wantCategory)
+		}
+	}
+}
+
 // TestParse_ITAdjacentCoverage covers professions found adjacent to the core IT
 // disciplines during a coverage audit: content/localization crafts that were
 // falling to the bare "designer" entry or resolving to nothing, and back-office
