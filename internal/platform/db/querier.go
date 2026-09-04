@@ -50,6 +50,18 @@ type Querier interface {
 	// tuple) so a file's rows land in a single round trip; view_count accumulates across
 	// a job's day-rows, and additivity lets a day spanning two rotated files sum right.
 	ApplyDailyView(ctx context.Context, arg []ApplyDailyViewParams) *ApplyDailyViewBatchResults
+	// Give an existing catalog row the submitter who contributed it. The board reached the
+	// catalog through the YAML backfill, which carried no attribution, so the person who found
+	// it disappeared from their own contributions list.
+	//
+	// Guarded on submitted_by IS NULL: a row that already names a submitter keeps them, which
+	// makes a re-run inert and stops a later duplicate contribution reassigning credit.
+	//
+	// Keyed on (provider, lower(board), region) — the catalog's own identity, and what
+	// boards_identity_key uses. Dropping region would attribute every regional row of a board
+	// to one submitter and overwrite each one's url; a contribution names one board, in the
+	// region-less form the contribution flow records.
+	AttributeBoardToSubmitter(ctx context.Context, arg AttributeBoardToSubmitterParams) (int64, error)
 	// Resolve a presented token (by its SHA-256 hash) to the owning user id and the key's
 	// scope, enforcing expiry and touching last_used_at in one atomic statement. No row
 	// means the key is unknown, revoked, or expired; the caller treats pgx.ErrNoRows as 401
@@ -1876,11 +1888,20 @@ type Querier interface {
 	// for both status='pending' and status='rejected'. A collision with an existing
 	// 'pending'/'active' row on (provider, lower(board), region) — boards_identity_key — fails as a unique violation;
 	// the caller maps that to a duplicate-board error.
+	//
+	// created_at is passed rather than defaulted so a board carried from an older table keeps
+	// the day it was actually submitted; COALESCE gives every live caller now() by passing
+	// NULL, so nothing else has to know the parameter exists.
 	InsertBoard(ctx context.Context, arg InsertBoardParams) (Board, error)
 	// Queue an unclassified URL for triage. The unique index on (url) rejects a duplicate
 	// submission of the same link; the caller maps that violation the same way a duplicate
 	// board contribution is mapped.
 	InsertBoardSubmission(ctx context.Context, arg InsertBoardSubmissionParams) (BoardSubmission, error)
+	// Carry one unclassified-URL contribution into board_submissions, KEEPING its original
+	// created_at — the ordinary insert defaults to now(), which would restamp a submission
+	// from August as today and reorder every user's list. A URL already queued is left alone,
+	// so a re-run writes nothing.
+	InsertBoardSubmissionAt(ctx context.Context, arg InsertBoardSubmissionAtParams) (int64, error)
 	// Record one change: what it did (ops), what would undo it (inverse), who made it and through
 	// which entry point, and the document version it was computed against. Written in the same
 	// transaction as the document it changed — a change without its revision, or a revision
@@ -2574,6 +2595,17 @@ type Querier interface {
 	// index current without re-pushing the whole table. Returns closed rows too, so
 	// the caller deletes a freshly-closed job from the index.
 	ListJobsUpdatedAfter(ctx context.Context, arg ListJobsUpdatedAfterParams) ([]Job, error)
+	// Queries used only by the one-off cmd/backfill-link-contributions, which carries the
+	// rows #2357 left behind in link_contributions into boards and board_submissions. That
+	// change moved the read and write paths but not the data, so 401 contributions from 11
+	// users stopped being visible and 28 unprocessed ones stopped being actionable.
+	//
+	// Deleted with the worker once the backfill has run in prod and link_contributions is
+	// dropped.
+	// Every contribution, oldest first, so the carry preserves submission order. Ordered by
+	// id rather than created_at: two rows can share a timestamp, and the id is the sequence
+	// the submissions actually arrived in.
+	ListLinkContributionsForBackfill(ctx context.Context) ([]ListLinkContributionsForBackfillRow, error)
 	// Every board a crawl still visits, across all providers — the identity cmd/prune needs
 	// to decide whether a posting is re-crawlable. Only (provider, board, region), not the
 	// whole row: the guard asks a set-membership question and nothing else.
