@@ -1,8 +1,8 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { api } from '$lib/api';
-  import { openAuthDialog } from '$lib/auth-dialog.svelte';
   import { isAuthenticated } from '$lib/auth.svelte';
+  import { promptSignIn } from '$lib/signin';
   import Seo from '$lib/components/Seo.svelte';
   import type { PublicPrice } from '$lib/types';
   import type { PageData } from './$types';
@@ -179,12 +179,11 @@
           </button>
         {:else}
           <!-- Signing in first is not a hurdle we invented: the purchase is attached to an
-               account, and a payment made before there is one lands on nobody. The dialog
-               rather than a route, because that is what signing in is on this site. -->
+               account, and a payment made before there is one lands on nobody. -->
           <button
             type="button"
             class="mt-auto rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground"
-            onclick={() => openAuthDialog()}>Sign in to upgrade</button
+            onclick={promptSignIn}>Sign in to upgrade</button
           >
         {/if}
         {#if error}
