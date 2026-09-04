@@ -27,6 +27,22 @@ export function formatDate(ts: string | null | undefined): string {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/** The same instant with the clock time, for a `title` behind a formatDate label:
+ *  the visible line stays a date, and a reader who cares about the hour gets it on
+ *  hover rather than in a second column. '' for null/invalid, like formatDate. */
+export function formatDateTime(ts: string | null | undefined): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 /** Whether s is a LinkedIn personal-profile URL: an http(s) link on linkedin.com (or a
  *  country/www subdomain) whose path is /in/<handle>. Mirrors the backend's shape check —
  *  the server re-validates on submit, so this is just for inline form feedback. */
@@ -89,4 +105,21 @@ export function timeAgo(ts: string | null | undefined): string {
     }
   }
   return '';
+}
+
+// A day. Inside it "20 minutes ago" is the answer a reader wants and a date cannot
+// give; past it the relative form starts losing to the date it replaced — "3 days
+// ago" is what a reader has to convert back before comparing two postings.
+const RECENT_MS = 86400 * 1000;
+
+/** timeAgo while the instant is still within the last day, formatDate once it is
+ *  not; '' for null/invalid, like both. A timestamp in the FUTURE takes the date
+ *  branch: "in 2 hours" on a posting date is a clock-skew artefact, and reading it
+ *  as an age would be worse than reading it as a date. */
+export function formatDateOrAgo(ts: string | null | undefined): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const age = Date.now() - d.getTime();
+  return age >= 0 && age < RECENT_MS ? timeAgo(ts) : formatDate(ts);
 }
