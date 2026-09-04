@@ -105,6 +105,9 @@ export interface PlansMatrix {
  *  Not exported: it is reached through `BillingOverview.invoices`, and nothing outside
  *  this module names it on its own — which is the line knip.config.js draws. */
 interface BillingInvoice {
+  /** The provider's invoice id. Carried so a list can key on it: two invoices can share a
+   *  second, and a duplicate key in an `{#each}` throws and kills the block. */
+  id: string;
   date: string;
   amount_cents: number;
   currency: string;

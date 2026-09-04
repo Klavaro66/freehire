@@ -2,6 +2,7 @@
   import { resolve } from '$app/paths';
   import { api } from '$lib/api';
   import { currentUser, isAuthenticated } from '$lib/auth.svelte';
+  import { formatMinorUnits } from '$lib/money';
   import type { AiUsage, BillingOverview, PlanState, UsageHistoryEntry } from '$lib/types';
   import States from './States.svelte';
 
@@ -42,26 +43,36 @@
   // section that cannot show the money is worse than none.
   let billing = $state<BillingOverview | null>(null);
 
+  // Both are asked for together, and only for a plan that could have a subscription behind
+  // it: a free account has none by definition, and asking anyway spends two provider
+  // round-trips per page view to be told 404 — the answer `plan` already gave us.
+  //
+  // They are cleared FIRST, on every run. What is on screen belongs to the plan we last
+  // read, so when that changes — a subscription lapses, or another account signs in without
+  // a reload — leaving it there shows one person's invoices and receipt links to the next.
+  // `live` drops a slow response from a plan we have since moved off, which is the same
+  // leak arriving late.
   $effect(() => {
-    if (!isAuthenticated()) return;
+    const pro = plan?.plan === 'pro';
+    billing = null;
+    manageUrl = null;
+    if (!pro) return;
+
+    let live = true;
     api
       .billingSubscription()
-      .then((b) => (billing = b))
-      .catch(() => (billing = null));
+      .then((b) => live && (billing = b))
+      .catch(() => {});
+    api
+      .billingManageUrl()
+      .then(({ url }) => live && (manageUrl = url))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
   });
 
-  // The provider sends minor units, and how many of them make one unit DEPENDS ON THE
-  // CURRENCY: 100 for dollars and euros, 1 for yen, 1000 for dinars. Dividing by 100
-  // unconditionally would render ¥1000 as ¥10 — an error in the customer's favour by a
-  // factor of a hundred, on a screen about their money.
-  //
-  // Intl already knows each currency's exponent, so it is asked rather than tabulated here.
-  const money = (minor: number, currency: string) => {
-    const code = (currency || 'usd').toUpperCase();
-    const fmt = new Intl.NumberFormat(undefined, { style: 'currency', currency: code });
-    const exponent = fmt.resolvedOptions().maximumFractionDigits ?? 2;
-    return fmt.format(minor / 10 ** exponent);
-  };
+  const money = formatMinorUnits;
 
   // The provider's status words, in the reader's language. `past_due` is the one worth
   // spelling out: it is not "cancelled", it is "your card needs attention and you still
@@ -73,14 +84,6 @@
     canceled: 'Cancelled',
     unpaid: 'Unpaid',
   };
-
-  $effect(() => {
-    if (!isAuthenticated()) return;
-    api
-      .billingManageUrl()
-      .then(({ url }) => (manageUrl = url))
-      .catch(() => (manageUrl = null));
-  });
 
   $effect(() => {
     if (!isAuthenticated()) return;
@@ -185,7 +188,7 @@
 
             {#if billing.invoices.length > 0}
               <ul class="flex flex-col divide-y divide-border/60 border-t border-border/60">
-                {#each billing.invoices as inv (inv.date)}
+                {#each billing.invoices as inv (inv.id)}
                   <li class="flex items-center justify-between gap-3 py-2 text-sm">
                     <span class="text-muted-foreground">{fmtDate(inv.date)}</span>
                     <span class="flex items-center gap-3">
