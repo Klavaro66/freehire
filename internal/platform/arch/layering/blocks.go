@@ -75,7 +75,7 @@ var blocks = map[string][]string{
 		// this package, and billing's only callers are the webhook handler in api and a
 		// binary in cmd.
 		"billing",
-		"userprofile",
+		"userprofile", "username",
 	},
 	"candidate": {
 		"atscheck",

@@ -773,7 +773,7 @@ type LearnedAtsDomain struct {
 type Mailbox struct {
 	ID        int64              `json:"id"`
 	UserID    int64              `json:"user_id"`
-	Address   string             `json:"address"`
+	Address   pgtype.Text        `json:"address"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -1087,6 +1087,8 @@ type User struct {
 	Language                   string             `json:"language"`
 	LlmKeyID                   pgtype.Text        `json:"llm_key_id"`
 	ProUntil                   pgtype.Timestamptz `json:"pro_until"`
+	Username                   pgtype.Text        `json:"username"`
+	UsernameUpdatedAt          pgtype.Timestamptz `json:"username_updated_at"`
 	StripeCustomerID           pgtype.Text        `json:"stripe_customer_id"`
 }
 
