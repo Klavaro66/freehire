@@ -80,7 +80,7 @@ Endpoints marked “Session or API key” accept either; endpoints marked “Ses
 
 ## What is not here
 
-This reference covers every endpoint you can call. A handful are deliberately left out because calling them directly is meaningless: the Gmail and calendar consent redirects (`/me/gmail/connect`, `/me/calendar/connect`, and their callbacks), which only a browser can complete; the Telegram bot webhook and the Discord interaction webhook; the browser-tool websocket relay; the sitemap-cursor helpers behind `/sitemap.xml`; and the `/og/*.png` social-preview cards, which render an image rather than answer with JSON.
+This reference covers every endpoint you can call. A handful are deliberately left out because calling them directly is meaningless: the Gmail and calendar consent redirects (`/me/gmail/connect`, `/me/calendar/connect`, and their callbacks), which only a browser can complete; the Telegram bot webhook; the browser-tool websocket relay; the sitemap-cursor helpers behind `/sitemap.xml`; and the `/og/*.png` social-preview cards, which render an image rather than answer with JSON.
 
 The `/jobs/{slug}/fit` endpoints are pre-rename aliases of `/jobs/{slug}/match-analysis` and hit the same handlers. They still work, so existing clients do not break — use the match-analysis paths in new code.
 
@@ -2995,7 +2995,7 @@ curl -X DELETE "https://freehire.me/api/v1/me/searches/2/share" -b cookies.txt
 
 ## Saved searches & subscriptions
 
-Browser conveniences, session-only. A saved search stores a canonical filter query string; a subscription turns one into a recurring digest (e.g. Telegram). Each operation is owner-scoped — a non-owned id is a 404.
+Browser conveniences, session-only. A saved search stores a canonical filter query string; a subscription turns one into a recurring digest (Telegram, email, or your own webhook). Each operation is owner-scoped — a non-owned id is a 404.
 
 ### `GET /me/searches`
 
@@ -3210,44 +3210,74 @@ curl -X DELETE "https://freehire.me/api/v1/me/telegram" -b cookies.txt
 (204 No Content)
 ```
 
-### `GET /me/discord`
+### `GET /me/webhook`
 
 **Auth:** Session only
 
-Your Discord link status (for the `/contribute` bot command).
+Your webhook destination for saved-search matches, or null if none is configured.
 
 ```bash
-curl "https://freehire.me/api/v1/me/discord" -b cookies.txt
+curl "https://freehire.me/api/v1/me/webhook" -b cookies.txt
 ```
 
 ```json
-{ "data": { "enabled": true, "linked": true, "discord_id": 123456789 } }
+{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": null } }
 ```
 
-### `POST /me/discord/link`
+### `POST /me/webhook`
 
 **Auth:** Session only
 
-Mint a one-time token to link your Discord account.
+Create your webhook destination, or update its URL if one already exists.
 
-Discord has no deep-link URL equivalent to Telegram’s — paste the returned token into the bot’s `/link` slash command.
+There is exactly one destination per account. Deliveries are plain, unsigned HTTP POSTs — subscribe a saved search to the `webhook` channel (see `POST /me/subscriptions`) to receive its matches here.
+
+**Body**
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `url` | string | yes | Destination URL — must be http or https. (e.g. `https://example.com/hook`) |
 
 ```bash
-curl -X POST "https://freehire.me/api/v1/me/discord/link" -b cookies.txt
+curl -X POST "https://freehire.me/api/v1/me/webhook" \
+  -H 'Content-Type: application/json' -b cookies.txt \
+  -d '{"url":"https://example.com/hook"}'
 ```
 
 ```json
-{ "data": { "token": "abc123...", "instructions": "In the freehire Discord server, run /link token:abc123..." } }
+{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": null } }
 ```
 
-### `DELETE /me/discord`
+### `PATCH /me/webhook`
 
 **Auth:** Session only
 
-Unlink your Discord account. Idempotent.
+Enable or disable your webhook destination without changing its URL.
+
+**Body**
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `enabled` | boolean | yes | Whether the destination is enabled. (e.g. `false`) |
 
 ```bash
-curl -X DELETE "https://freehire.me/api/v1/me/discord" -b cookies.txt
+curl -X PATCH "https://freehire.me/api/v1/me/webhook" \
+  -H 'Content-Type: application/json' -b cookies.txt \
+  -d '{"enabled":false}'
+```
+
+```json
+{ "data": { "url": "https://example.com/hook", "enabled": false, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": "2026-09-04T13:00:00Z" } }
+```
+
+### `DELETE /me/webhook`
+
+**Auth:** Session only
+
+Delete your webhook destination.
+
+```bash
+curl -X DELETE "https://freehire.me/api/v1/me/webhook" -b cookies.txt
 ```
 
 ```json

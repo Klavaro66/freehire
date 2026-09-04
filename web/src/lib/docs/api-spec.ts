@@ -128,7 +128,7 @@ export const OVERVIEW: Overview[] = [
         'deliberately left out because calling them directly is meaningless: the ' +
         'Gmail and calendar consent redirects (`/me/gmail/connect`, ' +
         '`/me/calendar/connect`, and their callbacks), which only a browser can ' +
-        'complete; the Telegram bot webhook and the Discord interaction webhook; the ' +
+        'complete; the Telegram bot webhook; the ' +
         'browser-tool websocket relay; the sitemap-cursor helpers behind ' +
         '`/sitemap.xml`; and the `/og/*.png` social-preview cards, which render an ' +
         'image rather than answer with JSON.',
@@ -2233,7 +2233,8 @@ data: {"type":"result","stop_reason":"completed"}
     intro:
       'Browser conveniences, session-only. A saved search stores a canonical ' +
       'filter query string; a subscription turns one into a recurring digest ' +
-      '(e.g. Telegram). Each operation is owner-scoped — a non-owned id is a 404.',
+      '(Telegram, email, or your own webhook). Each operation is owner-scoped — ' +
+      'a non-owned id is a 404.',
     endpoints: [
       {
         method: 'GET',
@@ -2350,29 +2351,45 @@ data: {"type":"result","stop_reason":"completed"}
       },
       {
         method: 'GET',
-        path: '/me/discord',
+        path: '/me/webhook',
         auth: 'cookie',
-        summary: 'Your Discord link status (for the `/contribute` bot command).',
-        curl: `curl "${BASE_URL}/me/discord" -b cookies.txt`,
-        responseExample: `{ "data": { "enabled": true, "linked": true, "discord_id": 123456789 } }`,
+        summary: 'Your webhook destination for saved-search matches, or null if none is configured.',
+        curl: `curl "${BASE_URL}/me/webhook" -b cookies.txt`,
+        responseExample: `{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": null } }`,
       },
       {
         method: 'POST',
-        path: '/me/discord/link',
+        path: '/me/webhook',
         auth: 'cookie',
-        summary: 'Mint a one-time token to link your Discord account.',
+        summary: 'Create your webhook destination, or update its URL if one already exists.',
         description:
-          'Discord has no deep-link URL equivalent to Telegram’s — paste the ' +
-          'returned token into the bot’s `/link` slash command.',
-        curl: `curl -X POST "${BASE_URL}/me/discord/link" -b cookies.txt`,
-        responseExample: `{ "data": { "token": "abc123...", "instructions": "In the freehire Discord server, run /link token:abc123..." } }`,
+          'There is exactly one destination per account. Deliveries are plain, unsigned HTTP POSTs — subscribe a ' +
+          'saved search to the `webhook` channel (see `POST /me/subscriptions`) to receive its matches here.',
+        body: [
+          { name: 'url', type: 'string', required: true, description: 'Destination URL — must be http or https.', example: 'https://example.com/hook' },
+        ],
+        curl: `curl -X POST "${BASE_URL}/me/webhook" \\
+  -H 'Content-Type: application/json' -b cookies.txt \\
+  -d '{"url":"https://example.com/hook"}'`,
+        responseExample: `{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": null } }`,
+      },
+      {
+        method: 'PATCH',
+        path: '/me/webhook',
+        auth: 'cookie',
+        summary: 'Enable or disable your webhook destination without changing its URL.',
+        body: [{ name: 'enabled', type: 'boolean', required: true, description: 'Whether the destination is enabled.', example: 'false' }],
+        curl: `curl -X PATCH "${BASE_URL}/me/webhook" \\
+  -H 'Content-Type: application/json' -b cookies.txt \\
+  -d '{"enabled":false}'`,
+        responseExample: `{ "data": { "url": "https://example.com/hook", "enabled": false, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": "2026-09-04T13:00:00Z" } }`,
       },
       {
         method: 'DELETE',
-        path: '/me/discord',
+        path: '/me/webhook',
         auth: 'cookie',
-        summary: 'Unlink your Discord account. Idempotent.',
-        curl: `curl -X DELETE "${BASE_URL}/me/discord" -b cookies.txt`,
+        summary: 'Delete your webhook destination.',
+        curl: `curl -X DELETE "${BASE_URL}/me/webhook" -b cookies.txt`,
         responseExample: `(204 No Content)`,
       },
     ],

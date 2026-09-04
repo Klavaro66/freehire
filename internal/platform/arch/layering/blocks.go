@@ -75,7 +75,7 @@ var blocks = map[string][]string{
 		// this package, and billing's only callers are the webhook handler in api and a
 		// binary in cmd.
 		"billing",
-		"userprofile",
+		"userprofile", "username",
 	},
 	"candidate": {
 		"atscheck",
@@ -118,11 +118,11 @@ var blocks = map[string][]string{
 	// (load.go), so they cannot be handed over in the snapshot.
 	"ingest": {
 		"adzunadesc", "applyform", "atsboard", "atsdetect", "boardcatalog", "boardresolve",
-		"catalogstats", "contribution", "jdresolve", "linkimport", "linksource", "moderation",
-		"pipeline", "screeninganswers", "sources", "submission", "telegram",
+		"catalogstats", "contribution", "ingestsched", "jdresolve", "linkimport", "linksource",
+		"moderation", "pipeline", "screeninganswers", "sources", "submission", "telegram",
 	},
 	"engage": {
-		"broadcast", "community", "companyfeedback", "discordbot", "emailnotify",
+		"broadcast", "community", "companyfeedback", "emailnotify",
 		"mailpreview", "notify", "nudge", "onboarding", "pushnotify", "referral",
 		"reminder", "report", "subscription", "telegramnotify", "vote", "webhooknotify",
 	},
