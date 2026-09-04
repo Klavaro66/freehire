@@ -46,10 +46,10 @@ func TestWebhookEndToEnd(t *testing.T) {
 	cookieReq := func(method, path string, body []byte) *http.Request {
 		var r *http.Request
 		if body != nil {
-			r = httptest.NewRequest(method, path, bytes.NewReader(body))
+			r = httptest.NewRequestWithContext(ctx, method, path, bytes.NewReader(body))
 			r.Header.Set("Content-Type", "application/json")
 		} else {
-			r = httptest.NewRequest(method, path, nil)
+			r = httptest.NewRequestWithContext(ctx, method, path, nil)
 		}
 		r.AddCookie(&http.Cookie{Name: auth.CookieName, Value: cookie})
 		return r
@@ -60,6 +60,7 @@ func TestWebhookEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get (unconfigured): %v", err)
 	}
+	defer getResp.Body.Close()
 	var unconfigured struct {
 		Data *struct{} `json:"data"`
 	}
@@ -76,6 +77,7 @@ func TestWebhookEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	defer createResp.Body.Close()
 	if createResp.StatusCode != fiber.StatusCreated {
 		body, _ := io.ReadAll(createResp.Body)
 		t.Fatalf("create status = %d, want 201 (body %s)", createResp.StatusCode, body)
@@ -98,6 +100,7 @@ func TestWebhookEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("disable: %v", err)
 	}
+	defer disableResp.Body.Close()
 	var toggled struct {
 		Data struct {
 			URL     string `json:"url"`
@@ -118,6 +121,7 @@ func TestWebhookEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enable: %v", err)
 	}
+	defer enableResp.Body.Close()
 	if err := json.NewDecoder(enableResp.Body).Decode(&toggled); err != nil {
 		t.Fatalf("decode enable: %v", err)
 	}
@@ -131,6 +135,7 @@ func TestWebhookEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
+	defer updateResp.Body.Close()
 	var updated struct {
 		Data struct {
 			URL string `json:"url"`
@@ -148,6 +153,7 @@ func TestWebhookEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
+	defer deleteResp.Body.Close()
 	if deleteResp.StatusCode != fiber.StatusNoContent {
 		t.Errorf("delete status = %d, want 204", deleteResp.StatusCode)
 	}
@@ -155,16 +161,18 @@ func TestWebhookEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete again: %v", err)
 	}
+	defer deleteAgainResp.Body.Close()
 	if deleteAgainResp.StatusCode != fiber.StatusNotFound {
 		t.Errorf("second delete status = %d, want 404", deleteAgainResp.StatusCode)
 	}
 
 	// Every endpoint requires the session cookie.
-	noCookie := httptest.NewRequest(fiber.MethodGet, "/api/v1/me/webhook", nil)
+	noCookie := httptest.NewRequestWithContext(ctx, fiber.MethodGet, "/api/v1/me/webhook", nil)
 	noCookieResp, err := app.Test(noCookie)
 	if err != nil {
 		t.Fatalf("no-cookie get: %v", err)
 	}
+	defer noCookieResp.Body.Close()
 	if noCookieResp.StatusCode != fiber.StatusUnauthorized {
 		t.Errorf("no-cookie get status = %d, want 401", noCookieResp.StatusCode)
 	}
