@@ -218,6 +218,9 @@ SELECT s.id, s.user_id, s.channel, s.destination, s.last_digest_sent_at,
        u.timezone AS timezone,
        tl.chat_id AS telegram_chat_id,
        EXISTS(SELECT 1 FROM user_push_tokens upt WHERE upt.user_id = s.user_id) AS has_push_device,
+       wc.url AS webhook_url,
+       wc.secret_encrypted AS webhook_secret_encrypted,
+       COALESCE(wc.enabled, false) AS webhook_enabled,
        COALESCE(ns.digest_frequency, 'instant')::text AS digest_frequency,
        ns.digest_time AS digest_time,
        ns.quiet_hours_start AS quiet_hours_start,
@@ -226,25 +229,29 @@ FROM subscriptions s
 JOIN saved_searches ss ON ss.id = s.saved_search_id
 JOIN users u ON u.id = s.user_id
 LEFT JOIN telegram_links tl ON tl.user_id = s.user_id
+LEFT JOIN webhook_configs wc ON wc.user_id = s.user_id
 LEFT JOIN notification_settings ns ON ns.user_id = s.user_id
 WHERE s.id = $1
 `
 
 type GetSubscriptionForDeliveryRow struct {
-	ID               int64              `json:"id"`
-	UserID           int64              `json:"user_id"`
-	Channel          string             `json:"channel"`
-	Destination      pgtype.Text        `json:"destination"`
-	LastDigestSentAt pgtype.Timestamptz `json:"last_digest_sent_at"`
-	SavedSearchName  string             `json:"saved_search_name"`
-	AccountEmail     string             `json:"account_email"`
-	Timezone         pgtype.Text        `json:"timezone"`
-	TelegramChatID   pgtype.Int8        `json:"telegram_chat_id"`
-	HasPushDevice    bool               `json:"has_push_device"`
-	DigestFrequency  string             `json:"digest_frequency"`
-	DigestTime       pgtype.Time        `json:"digest_time"`
-	QuietHoursStart  pgtype.Time        `json:"quiet_hours_start"`
-	QuietHoursEnd    pgtype.Time        `json:"quiet_hours_end"`
+	ID                     int64              `json:"id"`
+	UserID                 int64              `json:"user_id"`
+	Channel                string             `json:"channel"`
+	Destination            pgtype.Text        `json:"destination"`
+	LastDigestSentAt       pgtype.Timestamptz `json:"last_digest_sent_at"`
+	SavedSearchName        string             `json:"saved_search_name"`
+	AccountEmail           string             `json:"account_email"`
+	Timezone               pgtype.Text        `json:"timezone"`
+	TelegramChatID         pgtype.Int8        `json:"telegram_chat_id"`
+	HasPushDevice          bool               `json:"has_push_device"`
+	WebhookUrl             pgtype.Text        `json:"webhook_url"`
+	WebhookSecretEncrypted pgtype.Text        `json:"webhook_secret_encrypted"`
+	WebhookEnabled         bool               `json:"webhook_enabled"`
+	DigestFrequency        string             `json:"digest_frequency"`
+	DigestTime             pgtype.Time        `json:"digest_time"`
+	QuietHoursStart        pgtype.Time        `json:"quiet_hours_start"`
+	QuietHoursEnd          pgtype.Time        `json:"quiet_hours_end"`
 }
 
 // The delivery context for one subscription: channel + destination, the saved
@@ -252,10 +259,12 @@ type GetSubscriptionForDeliveryRow struct {
 // channel's live recipient), the user's linked Telegram chat (NULL when unlinked
 // → the worker soft-skips telegram delivery rather than failing it), whether
 // the user has at least one registered push device (the push channel's live
-// deliverability check, same soft-skip role as the Telegram link), and the
-// delivery-timing context (live, not snapshotted, same as the channel checks
-// above) — the account's timezone and its saved-search digest frequency
-// settings, read via internal/application/deliverywindow before a digest is sent.
+// deliverability check, same soft-skip role as the Telegram link), the user's
+// webhook destination (URL + encrypted secret, NULL or disabled → the worker
+// soft-skips webhook delivery the same way), and the delivery-timing context
+// (live, not snapshotted, same as the channel checks above) — the account's
+// timezone and its saved-search digest frequency settings, read via
+// internal/application/deliverywindow before a digest is sent.
 func (q *Queries) GetSubscriptionForDelivery(ctx context.Context, id int64) (GetSubscriptionForDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionForDelivery, id)
 	var i GetSubscriptionForDeliveryRow
@@ -270,6 +279,9 @@ func (q *Queries) GetSubscriptionForDelivery(ctx context.Context, id int64) (Get
 		&i.Timezone,
 		&i.TelegramChatID,
 		&i.HasPushDevice,
+		&i.WebhookUrl,
+		&i.WebhookSecretEncrypted,
+		&i.WebhookEnabled,
 		&i.DigestFrequency,
 		&i.DigestTime,
 		&i.QuietHoursStart,

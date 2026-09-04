@@ -40,6 +40,9 @@ export const accountNav = [
   // line pointing here instead of duplicating the connect/disconnect UI.
   { href: '/my/integrations', label: 'Integrations' },
   { href: '/my/api-keys', label: 'API keys' },
+  // The saved-search webhook destination: one URL + secret per account, signed
+  // HTTP POSTs on the same matches email/Telegram alerts already carry.
+  { href: '/my/webhook', label: 'Webhook' },
   { href: '/my/submissions', label: 'My submissions' },
   // Paste a job link we don't have yet; a supported, novel link adds a board we don't crawl.
   { href: '/my/contributions', label: 'Contributions' },

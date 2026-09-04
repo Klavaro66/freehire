@@ -47,6 +47,8 @@ import type {
   VoteResult,
   ApiKey,
   CreatedApiKey,
+  WebhookConfig,
+  CreatedWebhookConfig,
   ConnectedIdentities,
   SavedSearch,
   Board,
@@ -1185,6 +1187,34 @@ export function createApi(
     await call(`/api/v1/me/api-keys/${id}`, { method: 'DELETE' });
   }
 
+  // --- Webhook (saved-search alerts) -----------------------------------------
+  //
+  // The account's single webhook destination for saved-search matches (the
+  // `webhook` subscription channel). Management is cookie-only; the plaintext
+  // secret is returned once, by createOrRotateWebhook, and never again.
+
+  /** The current user's webhook destination, or null if none is configured
+   *  (metadata only — no secret). */
+  async function getWebhook(): Promise<WebhookConfig | null> {
+    return requestData<WebhookConfig | null>('/api/v1/me/webhook');
+  }
+
+  /** Create the destination, or rotate it if one already exists, returning it
+   *  with its one-time plaintext `secret`. */
+  async function createOrRotateWebhook(url: string): Promise<CreatedWebhookConfig> {
+    return requestData<CreatedWebhookConfig>('/api/v1/me/webhook', jsonBody('POST', { url }));
+  }
+
+  /** Enable or disable the destination without rotating its secret or URL. */
+  async function setWebhookEnabled(enabled: boolean): Promise<WebhookConfig> {
+    return requestData<WebhookConfig>('/api/v1/me/webhook', jsonBody('PATCH', { enabled }));
+  }
+
+  /** Delete the destination entirely. */
+  async function deleteWebhook(): Promise<void> {
+    await call('/api/v1/me/webhook', { method: 'DELETE' });
+  }
+
   // Saved searches: named snapshots of the filter state (cookie-only on the server).
 
   /** The current user's saved searches, most recently updated first. */
@@ -2297,6 +2327,10 @@ export function createApi(
     listApiKeys,
     createApiKey,
     revokeApiKey,
+    getWebhook,
+    createOrRotateWebhook,
+    setWebhookEnabled,
+    deleteWebhook,
     listSavedSearches,
     createSavedSearch,
     updateSavedSearch,

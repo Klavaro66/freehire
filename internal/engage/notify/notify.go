@@ -13,6 +13,7 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -35,10 +36,16 @@ const ChannelTelegram = "telegram"
 // environment configuration.
 const ChannelPush = "push"
 
+// ChannelWebhook delivers a digest as a signed HTTP POST to the account's
+// configured webhook destination (see internal/engage/webhooknotify). Unlike
+// Telegram/email/push, the destination is a URL the user supplies, not a
+// platform-owned transport.
+const ChannelWebhook = "webhook"
+
 // Channels is the delivery-channel vocabulary: the single source of truth shared
 // by the router's dispatch and the subscription use case's create-time allowlist,
 // so the two can never drift.
-var Channels = []string{ChannelTelegram, ChannelEmail, ChannelPush}
+var Channels = []string{ChannelTelegram, ChannelEmail, ChannelPush, ChannelWebhook}
 
 // ValidChannel reports whether c is a delivery channel. It exists because the slice alone is
 // not usable as an allowlist, so both create-time gates — subscriptions and reminders — built
@@ -147,6 +154,15 @@ type Store interface {
 	// reports the chat is permanently closed (ErrRecipientGone) — the same
 	// unlink the settings page performs, reached from the delivery side.
 	DeleteTelegramLink(ctx context.Context, userID int64) (int64, error)
+	// DisableWebhookConfig disables a user's webhook destination. Called when a
+	// webhook send reports the destination is gone for good (ErrRecipientGone,
+	// mapped from an HTTP 410) — the webhook channel's counterpart to
+	// DeleteTelegramLink.
+	DisableWebhookConfig(ctx context.Context, userID int64) (int64, error)
+	// RecordWebhookDeliverySuccess stamps last_success_at after a webhook
+	// digest sends successfully — the counterpart to DisableWebhookConfig on
+	// the success side.
+	RecordWebhookDeliverySuccess(ctx context.Context, userID int64) error
 }
 
 // Config tunes one pass. Defaults come from DefaultConfig.
@@ -232,13 +248,24 @@ func (r *Runner) Run(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
+// WebhookDest is the JSON shape encoded into recipient()'s dest string for the
+// webhook channel: the account's destination URL and its encrypted secret.
+// It travels through Notifier.Send's opaque dest parameter undecrypted —
+// recipient() has no cipher dependency, and decrypting is webhooknotify's job,
+// done only once the secret is actually needed to sign a request.
+type WebhookDest struct {
+	URL             string `json:"url"`
+	SecretEncrypted string `json:"secret_encrypted"`
+}
+
 // recipient resolves the destination string for delivery, and whether the
 // subscription is deliverable right now. Telegram resolves the linked chat_id
 // (absent → not deliverable, soft-skipped); email resolves the user's account
 // email live (absent → soft-skipped); push resolves the subscribing user's id,
 // deliverable only when they have a currently registered device (absent →
-// soft-skipped, same as an unlinked Telegram chat); any other channel uses the
-// stored destination.
+// soft-skipped, same as an unlinked Telegram chat); webhook resolves the
+// account's configured destination, deliverable only when one exists and is
+// enabled; any other channel uses the stored destination.
 func recipient(info db.GetSubscriptionForDeliveryRow) (string, bool) {
 	switch info.Channel {
 	case ChannelTelegram:
@@ -256,6 +283,18 @@ func recipient(info db.GetSubscriptionForDeliveryRow) (string, bool) {
 			return "", false
 		}
 		return strconv.FormatInt(info.UserID, 10), true
+	case ChannelWebhook:
+		if !info.WebhookEnabled || !info.WebhookUrl.Valid || info.WebhookUrl.String == "" {
+			return "", false
+		}
+		encoded, err := json.Marshal(WebhookDest{
+			URL:             info.WebhookUrl.String,
+			SecretEncrypted: info.WebhookSecretEncrypted.String,
+		})
+		if err != nil {
+			return "", false
+		}
+		return string(encoded), true
 	}
 	if !info.Destination.Valid || info.Destination.String == "" {
 		return "", false

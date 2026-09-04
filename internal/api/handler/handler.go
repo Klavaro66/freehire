@@ -330,6 +330,10 @@ type Config struct {
 	// feature is off (connect routes unregistered, inbox empty).
 	GmailConnector *gmailsync.Connector
 	GmailCipher    *tokencrypt.Cipher
+	// WebhookCipher enables the saved-search webhook destination endpoints. Nil =
+	// the feature is off (its routes are unregistered) — see
+	// internal/platform/config.WebhookSecretKey.
+	WebhookCipher *tokencrypt.Cipher
 	// MailboxDomain enables the hosted-mailbox option: the receiving domain user
 	// addresses live on (<handle>@MailboxDomain). Empty = the feature is off.
 	MailboxDomain string
@@ -411,6 +415,7 @@ func Register(app *fiber.App, cfg Config) {
 	ghostReportsH := newGhostReportHandlers(queries)
 	savedSearchH := newSavedSearchHandlers(queries)
 	subscriptionH := newSubscriptionHandlers(queries)
+	webhookH := newWebhookHandlers(queries, cfg.WebhookCipher)
 	profileSvc := userprofile.New(userprofile.NewQueriesRepository(queries))
 	// The candidate's own screening answers (visa, salary, notice period, relocation, …) —
 	// a distinct singleton from profileSvc above (search/targeting preferences, a
@@ -791,6 +796,7 @@ func Register(app *fiber.App, cfg Config) {
 
 	// Filter subscriptions (see subscriptionHandlers).
 	subscriptionH.register(api, mw)
+	webhookH.register(api, mw)
 
 	// Telegram linking + the inbound bot webhook (see telegramHandlers).
 	telegramH.register(api, mw)

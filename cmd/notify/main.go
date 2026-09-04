@@ -2,18 +2,20 @@
 // run does a single MATCH→DELIVER pass: it re-runs each distinct saved-search
 // query against the search index, records new matches in the dedup ledger, then
 // delivers each subscription's pending matches as one digest over the channel it
-// was subscribed on (Telegram, email, and/or push). Run it on a schedule (e.g.
-// cron); it processes a bounded batch and exits. It exits non-zero when the run
-// had delivery failures so cron can alert.
+// was subscribed on (Telegram, email, push, and/or webhook). Run it on a
+// schedule (e.g. cron); it processes a bounded batch and exits. It exits
+// non-zero when the run had delivery failures so cron can alert.
 //
 // Matching itself is optional: with the search backend unconfigured, the worker
 // logs that it is disabled and exits 0 (nothing to do), so scheduling it before
-// the feature is set up does not raise false alarms. Telegram and email are each
-// registered conditionally on their own server credential (bot token / SES
-// region+from address); push needs none (Expo's relay holds the APNs/FCM
-// credential on its own side) and is therefore always registered. A subscription
-// on a channel that is not configured this run — or, for push, a user with no
-// registered device — is soft-skipped, so one channel can run without the others.
+// the feature is set up does not raise false alarms. Telegram, email, and
+// webhook are each registered conditionally on their own server credential (bot
+// token / SES region+from address / webhook secret encryption key); push needs
+// none (Expo's relay holds the APNs/FCM credential on its own side) and is
+// therefore always registered. A subscription on a channel that is not
+// configured this run — or, for push, a user with no registered device, or for
+// webhook, an account with no enabled destination — is soft-skipped, so one
+// channel can run without the others.
 package main
 
 import (
@@ -24,7 +26,9 @@ import (
 	"github.com/strelov1/freehire/internal/engage/notify"
 	"github.com/strelov1/freehire/internal/engage/pushnotify"
 	"github.com/strelov1/freehire/internal/engage/telegramnotify"
+	"github.com/strelov1/freehire/internal/engage/webhooknotify"
 	"github.com/strelov1/freehire/internal/platform/db"
+	"github.com/strelov1/freehire/internal/platform/tokencrypt"
 	"github.com/strelov1/freehire/internal/platform/worker"
 	"github.com/strelov1/freehire/internal/search/search"
 )
@@ -70,6 +74,14 @@ func run() int {
 			log.Printf("notify: email channel disabled: %v", err)
 		} else {
 			router[notify.ChannelEmail] = emailnotify.NewNotifier(ses, cfg.NotifyEmailFrom, cfg.FrontendOrigin)
+		}
+	}
+	if len(cfg.WebhookSecretKey) == 32 {
+		cipher, err := tokencrypt.New(cfg.WebhookSecretKey)
+		if err != nil {
+			log.Printf("notify: webhook channel disabled: %v", err)
+		} else {
+			router[notify.ChannelWebhook] = webhooknotify.NewNotifier(cipher)
 		}
 	}
 

@@ -1133,3 +1133,14 @@ type UserPushToken struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
 }
+
+type WebhookConfig struct {
+	UserID          int64              `json:"user_id"`
+	URL             string             `json:"url"`
+	SecretEncrypted string             `json:"secret_encrypted"`
+	Enabled         bool               `json:"enabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	LastSuccessAt   pgtype.Timestamptz `json:"last_success_at"`
+	DisabledAt      pgtype.Timestamptz `json:"disabled_at"`
+}
