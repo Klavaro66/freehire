@@ -103,7 +103,7 @@
       {/each}
     </ul>
 
-    <div class="relative mt-8 aspect-[4/3] w-full overflow-hidden rounded-2xl border border-background/15 bg-background/5 p-4">
+    <div class="relative mt-8 aspect-square w-full overflow-hidden rounded-2xl border border-background/15 bg-background/5 p-4">
       {#if active === 0}
         <div class="flex h-full flex-col justify-center gap-3">
           {#each [100, 72, 85] as w (w)}
