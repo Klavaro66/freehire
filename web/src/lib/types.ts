@@ -958,6 +958,18 @@ export interface CreatedApiKey extends ApiKey {
   token: string;
 }
 
+/** The account's single saved-search webhook destination. Deliveries are
+ *  plain, unsigned POSTs. Timestamps are RFC3339 strings or null;
+ *  `disabled_at` is set once a delivery got a definitive 410 from the
+ *  destination or the user turned it off. */
+export interface WebhookConfig {
+  url: string;
+  enabled: boolean;
+  created_at: string | null;
+  last_success_at: string | null;
+  disabled_at: string | null;
+}
+
 interface ConnectedIdentity {
   provider: string;
   linked_at: string;

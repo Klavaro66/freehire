@@ -129,7 +129,7 @@ var blocks = map[string][]string{
 	"engage": {
 		"broadcast", "community", "companyfeedback", "emailnotify",
 		"mailpreview", "notify", "nudge", "onboarding", "pushnotify", "referral",
-		"reminder", "report", "subscription", "telegramnotify", "vote",
+		"reminder", "report", "subscription", "telegramnotify", "vote", "webhooknotify",
 	},
 	// atsapply and candidateprofile sit here, not lower, because both need to reach
 	// ingest (applyform, screeninganswers) as well as candidate (experience, cv,

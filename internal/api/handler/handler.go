@@ -402,6 +402,7 @@ func Register(app *fiber.App, cfg Config) {
 	ghostReportsH := newGhostReportHandlers(queries)
 	savedSearchH := newSavedSearchHandlers(queries)
 	subscriptionH := newSubscriptionHandlers(queries)
+	webhookH := newWebhookHandlers(queries)
 	profileSvc := userprofile.New(userprofile.NewQueriesRepository(queries))
 	// The candidate's own screening answers (visa, salary, notice period, relocation, …) —
 	// a distinct singleton from profileSvc above (search/targeting preferences, a
@@ -787,6 +788,7 @@ func Register(app *fiber.App, cfg Config) {
 
 	// Filter subscriptions (see subscriptionHandlers).
 	subscriptionH.register(api, mw)
+	webhookH.register(api, mw)
 
 	// Telegram linking + the inbound bot webhook (see telegramHandlers).
 	telegramH.register(api, mw)

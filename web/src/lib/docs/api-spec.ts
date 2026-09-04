@@ -2301,7 +2301,8 @@ data: {"type":"result","stop_reason":"completed"}
     intro:
       'Browser conveniences, session-only. A saved search stores a canonical ' +
       'filter query string; a subscription turns one into a recurring digest ' +
-      '(e.g. Telegram). Each operation is owner-scoped — a non-owned id is a 404.',
+      '(Telegram, email, or your own webhook). Each operation is owner-scoped — ' +
+      'a non-owned id is a 404.',
     endpoints: [
       {
         method: 'GET',
@@ -2414,6 +2415,49 @@ data: {"type":"result","stop_reason":"completed"}
         auth: 'cookie',
         summary: 'Unlink your Telegram account.',
         curl: `curl -X DELETE "${BASE_URL}/me/telegram" -b cookies.txt`,
+        responseExample: `(204 No Content)`,
+      },
+      {
+        method: 'GET',
+        path: '/me/webhook',
+        auth: 'cookie',
+        summary: 'Your webhook destination for saved-search matches, or null if none is configured.',
+        curl: `curl "${BASE_URL}/me/webhook" -b cookies.txt`,
+        responseExample: `{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": null } }`,
+      },
+      {
+        method: 'POST',
+        path: '/me/webhook',
+        auth: 'cookie',
+        summary: 'Create your webhook destination, or update its URL if one already exists.',
+        description:
+          'There is exactly one destination per account. Deliveries are plain, unsigned HTTP POSTs — subscribe a ' +
+          'saved search to the `webhook` channel (see `POST /me/subscriptions`) to receive its matches here.',
+        body: [
+          { name: 'url', type: 'string', required: true, description: 'Destination URL — must be http or https.', example: 'https://example.com/hook' },
+        ],
+        curl: `curl -X POST "${BASE_URL}/me/webhook" \\
+  -H 'Content-Type: application/json' -b cookies.txt \\
+  -d '{"url":"https://example.com/hook"}'`,
+        responseExample: `{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": null } }`,
+      },
+      {
+        method: 'PATCH',
+        path: '/me/webhook',
+        auth: 'cookie',
+        summary: 'Enable or disable your webhook destination without changing its URL.',
+        body: [{ name: 'enabled', type: 'boolean', required: true, description: 'Whether the destination is enabled.', example: 'false' }],
+        curl: `curl -X PATCH "${BASE_URL}/me/webhook" \\
+  -H 'Content-Type: application/json' -b cookies.txt \\
+  -d '{"enabled":false}'`,
+        responseExample: `{ "data": { "url": "https://example.com/hook", "enabled": false, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": "2026-09-04T13:00:00Z" } }`,
+      },
+      {
+        method: 'DELETE',
+        path: '/me/webhook',
+        auth: 'cookie',
+        summary: 'Delete your webhook destination.',
+        curl: `curl -X DELETE "${BASE_URL}/me/webhook" -b cookies.txt`,
         responseExample: `(204 No Content)`,
       },
     ],

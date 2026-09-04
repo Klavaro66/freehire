@@ -3071,7 +3071,7 @@ curl -X DELETE "https://freehire.me/api/v1/me/searches/2/share" -b cookies.txt
 
 ## Saved searches & subscriptions
 
-Browser conveniences, session-only. A saved search stores a canonical filter query string; a subscription turns one into a recurring digest (e.g. Telegram). Each operation is owner-scoped — a non-owned id is a 404.
+Browser conveniences, session-only. A saved search stores a canonical filter query string; a subscription turns one into a recurring digest (Telegram, email, or your own webhook). Each operation is owner-scoped — a non-owned id is a 404.
 
 ### `GET /me/searches`
 
@@ -3280,6 +3280,80 @@ Unlink your Telegram account.
 
 ```bash
 curl -X DELETE "https://freehire.me/api/v1/me/telegram" -b cookies.txt
+```
+
+```json
+(204 No Content)
+```
+
+### `GET /me/webhook`
+
+**Auth:** Session only
+
+Your webhook destination for saved-search matches, or null if none is configured.
+
+```bash
+curl "https://freehire.me/api/v1/me/webhook" -b cookies.txt
+```
+
+```json
+{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": null } }
+```
+
+### `POST /me/webhook`
+
+**Auth:** Session only
+
+Create your webhook destination, or update its URL if one already exists.
+
+There is exactly one destination per account. Deliveries are plain, unsigned HTTP POSTs — subscribe a saved search to the `webhook` channel (see `POST /me/subscriptions`) to receive its matches here.
+
+**Body**
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `url` | string | yes | Destination URL — must be http or https. (e.g. `https://example.com/hook`) |
+
+```bash
+curl -X POST "https://freehire.me/api/v1/me/webhook" \
+  -H 'Content-Type: application/json' -b cookies.txt \
+  -d '{"url":"https://example.com/hook"}'
+```
+
+```json
+{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": null } }
+```
+
+### `PATCH /me/webhook`
+
+**Auth:** Session only
+
+Enable or disable your webhook destination without changing its URL.
+
+**Body**
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `enabled` | boolean | yes | Whether the destination is enabled. (e.g. `false`) |
+
+```bash
+curl -X PATCH "https://freehire.me/api/v1/me/webhook" \
+  -H 'Content-Type: application/json' -b cookies.txt \
+  -d '{"enabled":false}'
+```
+
+```json
+{ "data": { "url": "https://example.com/hook", "enabled": false, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": "2026-09-04T13:00:00Z" } }
+```
+
+### `DELETE /me/webhook`
+
+**Auth:** Session only
+
+Delete your webhook destination.
+
+```bash
+curl -X DELETE "https://freehire.me/api/v1/me/webhook" -b cookies.txt
 ```
 
 ```json

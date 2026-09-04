@@ -1144,6 +1144,13 @@ type Querier interface {
 	// Remove the caller's profile. Returns the affected row count (0 when none existed); the
 	// handler treats delete as idempotent (204 either way).
 	DeleteUserProfile(ctx context.Context, userID int64) (int64, error)
+	DeleteWebhookConfig(ctx context.Context, userID int64) (int64, error)
+	// Disables the destination, stamping disabled_at. Used both by the settings
+	// API (user-initiated) and by the notify delivery engine when a send gets a
+	// definitive 410 Gone from the destination (see internal/engage/webhooknotify).
+	// Returns the affected row count: 0 means there was no destination to disable
+	// (or it was already disabled by an earlier subscription in the same pass).
+	DisableWebhookConfig(ctx context.Context, userID int64) (int64, error)
 	// Dismiss (swipe away) a job for a user in the swipe deck. Idempotent and
 	// independent of a prior view: it inserts the row (viewed_at defaults) or
 	// refreshes dismissed_at in place.
@@ -1208,6 +1215,9 @@ type Querier interface {
 	// purpose, like the folded-slug bounds beside it: the pass is run by hand and rarely, and a wrong
 	// "0 remaining" would end it early.
 	DuplicateMarkerOwnerBackfillBounds(ctx context.Context) (DuplicateMarkerOwnerBackfillBoundsRow, error)
+	// Re-enables a user-disabled (or auto-disabled) webhook destination without
+	// changing its URL.
+	EnableWebhookConfig(ctx context.Context, userID int64) (WebhookConfig, error)
 	// Transactional-outbox enqueue for the ingest write path: queue this one job for a full-
 	// description fetch, gated on it not having been hydrated already.
 	//
@@ -1759,10 +1769,12 @@ type Querier interface {
 	// channel's live recipient), the user's linked Telegram chat (NULL when unlinked
 	// → the worker soft-skips telegram delivery rather than failing it), whether
 	// the user has at least one registered push device (the push channel's live
-	// deliverability check, same soft-skip role as the Telegram link), and the
-	// delivery-timing context (live, not snapshotted, same as the channel checks
-	// above) — the account's timezone and its saved-search digest frequency
-	// settings, read via internal/application/deliverywindow before a digest is sent.
+	// deliverability check, same soft-skip role as the Telegram link), the user's
+	// webhook destination (URL, NULL or disabled → the worker soft-skips webhook
+	// delivery the same way), and the delivery-timing context
+	// (live, not snapshotted, same as the channel checks above) — the account's
+	// timezone and its saved-search digest frequency settings, read via
+	// internal/application/deliverywindow before a digest is sent.
 	GetSubscriptionForDelivery(ctx context.Context, id int64) (GetSubscriptionForDeliveryRow, error)
 	// The user's existing tailored copy for one vacancy, newest first. The tailoring bootstrap is
 	// reached by an address (/tailor/<slug>) that carries no CV reference, so a reload runs the
@@ -1903,6 +1915,10 @@ type Querier interface {
 	// allocated default written by SetUsernameIfAbsent, which never touches this
 	// column (see the add-username-claim change's design.md, Decision 2).
 	GetUsernameByUser(ctx context.Context, id int64) (GetUsernameByUserRow, error)
+	// The user's webhook destination, if any. No row means the user has never
+	// configured one — the caller (both the settings API and delivery's recipient
+	// resolution) treats absence as "not configured" rather than an error.
+	GetWebhookConfig(ctx context.Context, userID int64) (WebhookConfig, error)
 	// Why CreateGhostReport returned no row. Read only on the failure path, so the happy
 	// path stays one statement. Each column answers one gate, and the repository maps the
 	// first failing one — unverified before closed before duplicate — because an
@@ -3629,6 +3645,10 @@ type Querier interface {
 	// Write one click. Best-effort by contract: the handler redirects whether or not this succeeds,
 	// because a broken redirect lives in a PDF the candidate can neither see nor fix.
 	RecordTracerClick(ctx context.Context, arg RecordTracerClickParams) error
+	// Stamps last_success_at after a delivery succeeds. Not gated on `enabled` —
+	// a disabled destination is never delivered to (soft-skipped upstream), so
+	// this only ever runs for an enabled one.
+	RecordWebhookDeliverySuccess(ctx context.Context, userID int64) error
 	// Recompute a single company's materialized feedback_count/feedback_rating_avg
 	// from company_feedback and return them. Run as its own statement AFTER the
 	// write within one transaction, scoped to one company_slug via
@@ -4694,6 +4714,12 @@ type Querier interface {
 	// (updated_at moved, or the profile was deleted) returns zero rows; the caller re-reads and
 	// retries rather than overwriting blind.
 	UpsertUserProfileIfUnchanged(ctx context.Context, arg UpsertUserProfileIfUnchangedParams) (UserProfile, error)
+	// Creates the account's webhook destination, or updates its URL if one
+	// already exists — there is exactly one row per user (see migration 0132).
+	// Saving re-enables a previously disabled destination and clears
+	// disabled_at, since submitting the form is an explicit re-commitment to
+	// the endpoint.
+	UpsertWebhookConfig(ctx context.Context, arg UpsertWebhookConfigParams) (WebhookConfig, error)
 	// Apply one yc-oss directory entry, matched by slug. A new slug is inserted as a
 	// reference row (is_reference = true) with no jobs; an existing slug (job-backed or a
 	// prior reference) has the YC-owned columns refreshed — name, job_count, collections,

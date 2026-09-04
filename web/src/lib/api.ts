@@ -50,6 +50,7 @@ import type {
   VoteResult,
   ApiKey,
   CreatedApiKey,
+  WebhookConfig,
   ConnectedIdentities,
   SavedSearch,
   Board,
@@ -1186,6 +1187,32 @@ export function createApi(
     await call(`/api/v1/me/api-keys/${id}`, { method: 'DELETE' });
   }
 
+  // --- Webhook (saved-search alerts) -----------------------------------------
+  //
+  // The account's single webhook destination for saved-search matches (the
+  // `webhook` subscription channel). Management is cookie-only. Deliveries
+  // are plain, unsigned POSTs.
+
+  /** The current user's webhook destination, or null if none is configured. */
+  async function getWebhook(): Promise<WebhookConfig | null> {
+    return requestData<WebhookConfig | null>('/api/v1/me/webhook');
+  }
+
+  /** Create the destination, or update its URL if one already exists. */
+  async function createOrUpdateWebhook(url: string): Promise<WebhookConfig> {
+    return requestData<WebhookConfig>('/api/v1/me/webhook', jsonBody('POST', { url }));
+  }
+
+  /** Enable or disable the destination without changing its URL. */
+  async function setWebhookEnabled(enabled: boolean): Promise<WebhookConfig> {
+    return requestData<WebhookConfig>('/api/v1/me/webhook', jsonBody('PATCH', { enabled }));
+  }
+
+  /** Delete the destination entirely. */
+  async function deleteWebhook(): Promise<void> {
+    await call('/api/v1/me/webhook', { method: 'DELETE' });
+  }
+
   // Saved searches: named snapshots of the filter state (cookie-only on the server).
 
   /** The current user's saved searches, most recently updated first. */
@@ -2311,6 +2338,10 @@ export function createApi(
     listApiKeys,
     createApiKey,
     revokeApiKey,
+    getWebhook,
+    createOrUpdateWebhook,
+    setWebhookEnabled,
+    deleteWebhook,
     listSavedSearches,
     createSavedSearch,
     updateSavedSearch,
