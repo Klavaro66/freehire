@@ -65,13 +65,6 @@ type Settings struct {
 	// inbox feature is disabled (like an unset optional integration).
 	GmailTokenKey []byte
 
-	// WebhookSecretKey is the 32-byte AES key (from WEBHOOK_SECRET_KEY, base64)
-	// that encrypts stored saved-search webhook secrets. Empty/invalid = the
-	// webhook notification channel is disabled, the same degrade as
-	// GmailTokenKey — a dedicated key rather than sharing GmailTokenKey keeps
-	// the two secret domains independently rotatable.
-	WebhookSecretKey []byte
-
 	// MailboxDomain is the receiving domain hosted mailboxes live on
 	// (<handle>@MailboxDomain, e.g. inbox.freehire.me). Empty = the hosted-mailbox
 	// option is off (claim route unregistered, status reports unavailable). It is
@@ -350,7 +343,6 @@ func Load() Settings {
 		AppleGrantKeys:        parseKeyRing(os.Getenv("APPLE_GRANT_KEYS")),
 		RecentAuthTTL:         envDuration("RECENT_AUTH_TTL", 10*time.Minute),
 		GmailTokenKey:         decodeKey(os.Getenv("GMAIL_TOKEN_KEY")),
-		WebhookSecretKey:      decodeKey(os.Getenv("WEBHOOK_SECRET_KEY")),
 		MailboxDomain:         os.Getenv("MAILBOX_DOMAIN"),
 		MeiliURL:              env("MEILI_URL", "http://localhost:7700"),
 		MeiliKey:              os.Getenv("MEILI_MASTER_KEY"),

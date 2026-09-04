@@ -276,10 +276,6 @@ func main() {
 	// token-encryption key are configured. Both nil disables the feature.
 	gmailConnector, gmailCipher := buildGmail(cfg)
 
-	// Saved-search webhook destination: enabled only when its own encryption key
-	// is configured. Nil disables the feature (its routes are unregistered).
-	webhookCipher := buildWebhookCipher(cfg)
-
 	// PII detector for de-identifying CV text before it reaches the LLM. Nil when
 	// PII_FILTER_URL is unset, which fails the CV→LLM paths closed (no analysis) rather
 	// than leaking PII (see internal/candidate/pii, internal/candidate/matchanalysis, internal/candidate/resumeextract).
@@ -309,7 +305,6 @@ func main() {
 		AppleGrantKeys:              appleGrantKeys,
 		GmailConnector:              gmailConnector,
 		GmailCipher:                 gmailCipher,
-		WebhookCipher:               webhookCipher,
 		MailboxDomain:               cfg.MailboxDomain,
 		Search:                      searchClient,
 		Suggest:                     suggestSvc,
@@ -384,22 +379,6 @@ func buildGmail(cfg config.Settings) (*gmailsync.Connector, *tokencrypt.Cipher) 
 		return nil, nil
 	}
 	return gmailsync.NewConnector(g.ClientID, g.ClientSecret, cfg.FrontendOrigin), cipher
-}
-
-// buildWebhookCipher wires the saved-search webhook destination's encryption
-// key. A missing or malformed key returns nil — the feature stays off and the
-// server runs unchanged, the same degrade buildGmail uses for its own key.
-func buildWebhookCipher(cfg config.Settings) *tokencrypt.Cipher {
-	if len(cfg.WebhookSecretKey) != 32 {
-		return nil
-	}
-	cipher, err := tokencrypt.New(cfg.WebhookSecretKey)
-	if err != nil {
-		// A configured-but-broken key must not silently disable the feature.
-		log.Printf("webhook: secret cipher init failed, saved-search webhooks disabled: %v", err)
-		return nil
-	}
-	return cipher
 }
 
 // suggestRefreshInterval is how often the completion service reloads the phrases it

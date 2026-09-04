@@ -11,7 +11,7 @@ Telegram, and mobile push), each with its own small `Notifier`/`Router` pair:
 | `internal/engage/emailnotify` | Email channel (SES) — implements `notify.Notifier` (the `reminder`/`nudge`-side email transports live in their own `transports.go`) | — |
 | `internal/engage/telegramnotify` | Telegram channel (Bot API, deep-link token) | — |
 | `internal/engage/pushnotify` | Mobile push channel (Expo relay) — the bare Expo transport; each of `notify`/`reminder`/`nudge` has its own thin `PushNotifier` on top, same as Telegram/email | — |
-| `internal/engage/webhooknotify` | Webhook channel (HMAC-signed HTTP POST to an account's own URL) — implements `notify.Notifier` for `notify` ONLY, see the bullet below | — |
+| `internal/engage/webhooknotify` | Webhook channel (plain, unsigned HTTP POST to an account's own URL) — implements `notify.Notifier` for `notify` ONLY, see the bullet below | — |
 
 ## Always true
 

@@ -49,18 +49,17 @@ SET enabled = true,
     disabled_at = NULL,
     updated_at = now()
 WHERE user_id = $1
-RETURNING user_id, url, secret_encrypted, enabled, created_at, updated_at, last_success_at, disabled_at
+RETURNING user_id, url, enabled, created_at, updated_at, last_success_at, disabled_at
 `
 
 // Re-enables a user-disabled (or auto-disabled) webhook destination without
-// rotating its secret or URL.
+// changing its URL.
 func (q *Queries) EnableWebhookConfig(ctx context.Context, userID int64) (WebhookConfig, error) {
 	row := q.db.QueryRow(ctx, enableWebhookConfig, userID)
 	var i WebhookConfig
 	err := row.Scan(
 		&i.UserID,
 		&i.URL,
-		&i.SecretEncrypted,
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -71,7 +70,7 @@ func (q *Queries) EnableWebhookConfig(ctx context.Context, userID int64) (Webhoo
 }
 
 const getWebhookConfig = `-- name: GetWebhookConfig :one
-SELECT user_id, url, secret_encrypted, enabled, created_at, updated_at, last_success_at, disabled_at
+SELECT user_id, url, enabled, created_at, updated_at, last_success_at, disabled_at
 FROM webhook_configs
 WHERE user_id = $1
 `
@@ -85,7 +84,6 @@ func (q *Queries) GetWebhookConfig(ctx context.Context, userID int64) (WebhookCo
 	err := row.Scan(
 		&i.UserID,
 		&i.URL,
-		&i.SecretEncrypted,
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -110,35 +108,32 @@ func (q *Queries) RecordWebhookDeliverySuccess(ctx context.Context, userID int64
 }
 
 const upsertWebhookConfig = `-- name: UpsertWebhookConfig :one
-INSERT INTO webhook_configs (user_id, url, secret_encrypted, enabled, updated_at, disabled_at)
-VALUES ($1, $2, $3, true, now(), NULL)
+INSERT INTO webhook_configs (user_id, url, enabled, updated_at, disabled_at)
+VALUES ($1, $2, true, now(), NULL)
 ON CONFLICT (user_id) DO UPDATE
 SET url = EXCLUDED.url,
-    secret_encrypted = EXCLUDED.secret_encrypted,
     enabled = true,
     disabled_at = NULL,
     updated_at = now()
-RETURNING user_id, url, secret_encrypted, enabled, created_at, updated_at, last_success_at, disabled_at
+RETURNING user_id, url, enabled, created_at, updated_at, last_success_at, disabled_at
 `
 
 type UpsertWebhookConfigParams struct {
-	UserID          int64  `json:"user_id"`
-	URL             string `json:"url"`
-	SecretEncrypted string `json:"secret_encrypted"`
+	UserID int64  `json:"user_id"`
+	URL    string `json:"url"`
 }
 
-// Creates the account's webhook destination, or rotates it if one already
-// exists — there is exactly one row per user (see migration 0132), so this is
-// always "replace the whole destination", never a partial patch. Rotating
-// re-enables a previously disabled destination and clears disabled_at, since
-// supplying a fresh secret is an explicit re-commitment to the endpoint.
+// Creates the account's webhook destination, or updates its URL if one
+// already exists — there is exactly one row per user (see migration 0132).
+// Saving re-enables a previously disabled destination and clears
+// disabled_at, since submitting the form is an explicit re-commitment to
+// the endpoint.
 func (q *Queries) UpsertWebhookConfig(ctx context.Context, arg UpsertWebhookConfigParams) (WebhookConfig, error) {
-	row := q.db.QueryRow(ctx, upsertWebhookConfig, arg.UserID, arg.URL, arg.SecretEncrypted)
+	row := q.db.QueryRow(ctx, upsertWebhookConfig, arg.UserID, arg.URL)
 	var i WebhookConfig
 	err := row.Scan(
 		&i.UserID,
 		&i.URL,
-		&i.SecretEncrypted,
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,

@@ -407,23 +407,6 @@ func TestLoad_OAuthApplePrivateKeyInvalidBase64IsEmpty(t *testing.T) {
 	}
 }
 
-func TestLoad_WebhookSecretKeyFromEnv(t *testing.T) {
-	key := bytes.Repeat([]byte{9}, 32)
-	t.Setenv("WEBHOOK_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
-
-	if got := Load().WebhookSecretKey; !bytes.Equal(got, key) {
-		t.Errorf("WebhookSecretKey = %x, want %x", got, key)
-	}
-}
-
-func TestLoad_WebhookSecretKeyInvalidOrUnsetIsNil(t *testing.T) {
-	t.Setenv("WEBHOOK_SECRET_KEY", "not valid base64!!")
-
-	if got := Load().WebhookSecretKey; got != nil {
-		t.Errorf("WebhookSecretKey = %x, want nil for invalid base64 (feature disabled)", got)
-	}
-}
-
 func TestLoad_NativeAppleAndAuthV2(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 32)
 	t.Setenv("AUTH_V2_ENABLED", "true")

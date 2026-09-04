@@ -8,14 +8,14 @@
 //
 // Matching itself is optional: with the search backend unconfigured, the worker
 // logs that it is disabled and exits 0 (nothing to do), so scheduling it before
-// the feature is set up does not raise false alarms. Telegram, email, and
-// webhook are each registered conditionally on their own server credential (bot
-// token / SES region+from address / webhook secret encryption key); push needs
-// none (Expo's relay holds the APNs/FCM credential on its own side) and is
-// therefore always registered. A subscription on a channel that is not
-// configured this run — or, for push, a user with no registered device, or for
-// webhook, an account with no enabled destination — is soft-skipped, so one
-// channel can run without the others.
+// the feature is set up does not raise false alarms. Telegram and email are
+// each registered conditionally on their own server credential (bot token /
+// SES region+from address); push and webhook need none (Expo's relay holds
+// the APNs/FCM credential on its own side; a webhook POSTs to a URL the
+// account itself supplies) and are therefore always registered. A
+// subscription on a channel that is not configured this run — or, for push, a
+// user with no registered device, or for webhook, an account with no enabled
+// destination — is soft-skipped, so one channel can run without the others.
 package main
 
 import (
@@ -28,7 +28,6 @@ import (
 	"github.com/strelov1/freehire/internal/engage/telegramnotify"
 	"github.com/strelov1/freehire/internal/engage/webhooknotify"
 	"github.com/strelov1/freehire/internal/platform/db"
-	"github.com/strelov1/freehire/internal/platform/tokencrypt"
 	"github.com/strelov1/freehire/internal/platform/worker"
 	"github.com/strelov1/freehire/internal/search/search"
 )
@@ -61,7 +60,8 @@ func run() int {
 	// per-user via recipient()'s HasPushDevice check.
 	pushStore := pushnotify.NewQueriesStore(queries)
 	router := notify.Router{
-		notify.ChannelPush: notify.NewPushNotifier(queries, pushnotify.NewExpoNotifier(pushStore, pushStore, pushStore)),
+		notify.ChannelPush:    notify.NewPushNotifier(queries, pushnotify.NewExpoNotifier(pushStore, pushStore, pushStore)),
+		notify.ChannelWebhook: webhooknotify.NewNotifier(),
 	}
 	if cfg.TelegramBotToken != "" {
 		router[notify.ChannelTelegram] = telegramnotify.NewNotifier(telegramnotify.NewClient(cfg.TelegramBotToken), cfg.FrontendOrigin)
@@ -76,15 +76,6 @@ func run() int {
 			router[notify.ChannelEmail] = emailnotify.NewNotifier(ses, cfg.NotifyEmailFrom, cfg.FrontendOrigin)
 		}
 	}
-	if len(cfg.WebhookSecretKey) == 32 {
-		cipher, err := tokencrypt.New(cfg.WebhookSecretKey)
-		if err != nil {
-			log.Printf("notify: webhook channel disabled: %v", err)
-		} else {
-			router[notify.ChannelWebhook] = webhooknotify.NewNotifier(cipher)
-		}
-	}
-
 	searcher := search.NewClient(cfg.MeiliURL, cfg.MeiliKey)
 	runner := notify.New(queries, searcher, router, notify.DefaultConfig())
 

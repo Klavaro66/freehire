@@ -1184,7 +1184,7 @@ type Querier interface {
 	// "0 remaining" would end it early.
 	DuplicateMarkerOwnerBackfillBounds(ctx context.Context) (DuplicateMarkerOwnerBackfillBoundsRow, error)
 	// Re-enables a user-disabled (or auto-disabled) webhook destination without
-	// rotating its secret or URL.
+	// changing its URL.
 	EnableWebhookConfig(ctx context.Context, userID int64) (WebhookConfig, error)
 	// Transactional-outbox enqueue for the ingest write path: queue this one job for a full-
 	// description fetch, gated on it not having been hydrated already.
@@ -1723,8 +1723,8 @@ type Querier interface {
 	// → the worker soft-skips telegram delivery rather than failing it), whether
 	// the user has at least one registered push device (the push channel's live
 	// deliverability check, same soft-skip role as the Telegram link), the user's
-	// webhook destination (URL + encrypted secret, NULL or disabled → the worker
-	// soft-skips webhook delivery the same way), and the delivery-timing context
+	// webhook destination (URL, NULL or disabled → the worker soft-skips webhook
+	// delivery the same way), and the delivery-timing context
 	// (live, not snapshotted, same as the channel checks above) — the account's
 	// timezone and its saved-search digest frequency settings, read via
 	// internal/application/deliverywindow before a digest is sent.
@@ -4586,11 +4586,11 @@ type Querier interface {
 	// (updated_at moved, or the profile was deleted) returns zero rows; the caller re-reads and
 	// retries rather than overwriting blind.
 	UpsertUserProfileIfUnchanged(ctx context.Context, arg UpsertUserProfileIfUnchangedParams) (UserProfile, error)
-	// Creates the account's webhook destination, or rotates it if one already
-	// exists — there is exactly one row per user (see migration 0132), so this is
-	// always "replace the whole destination", never a partial patch. Rotating
-	// re-enables a previously disabled destination and clears disabled_at, since
-	// supplying a fresh secret is an explicit re-commitment to the endpoint.
+	// Creates the account's webhook destination, or updates its URL if one
+	// already exists — there is exactly one row per user (see migration 0132).
+	// Saving re-enables a previously disabled destination and clears
+	// disabled_at, since submitting the form is an explicit re-commitment to
+	// the endpoint.
 	UpsertWebhookConfig(ctx context.Context, arg UpsertWebhookConfigParams) (WebhookConfig, error)
 	// Apply one yc-oss directory entry, matched by slug. A new slug is inserted as a
 	// reference row (is_reference = true) with no jobs; an existing slug (job-backed or a

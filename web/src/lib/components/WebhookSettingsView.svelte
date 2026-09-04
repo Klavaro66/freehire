@@ -2,7 +2,7 @@
   import { api, ApiError } from '$lib/api';
   import { AsyncData } from '$lib/asyncData.svelte';
   import { isAuthenticated } from '$lib/auth.svelte';
-  import type { CreatedWebhookConfig, WebhookConfig } from '$lib/types';
+  import type { WebhookConfig } from '$lib/types';
   import { Button, ConfirmDialog, Input } from '$lib/ui';
   import { timeAgo } from '$lib/utils';
   import States from './States.svelte';
@@ -19,11 +19,6 @@
   let saving = $state(false);
   let formError = $state<string | null>(null);
 
-  // The plaintext secret from a create/rotate response — shown here exactly
-  // once, then dismissed. Never persisted client-side and never fetched again.
-  let revealed = $state.raw<CreatedWebhookConfig | null>(null);
-  let copied = $state(false);
-
   $effect(() => {
     if (webhook && !url) url = webhook.url;
   });
@@ -34,11 +29,8 @@
     if (!trimmed || saving) return;
     saving = true;
     formError = null;
-    copied = false;
     try {
-      const created = await api.createOrRotateWebhook(trimmed);
-      revealed = created;
-      webhookData.value = created;
+      webhookData.value = await api.createOrUpdateWebhook(trimmed);
     } catch (error) {
       formError =
         error instanceof ApiError && error.status === 400
@@ -46,16 +38,6 @@
           : 'Could not save the webhook. Please try again.';
     } finally {
       saving = false;
-    }
-  }
-
-  async function copySecret() {
-    if (!revealed) return;
-    try {
-      await navigator.clipboard.writeText(revealed.secret);
-      copied = true;
-    } catch {
-      copied = false;
     }
   }
 
@@ -74,7 +56,6 @@
     try {
       await api.deleteWebhook();
       webhookData.value = null;
-      revealed = null;
       url = '';
     } catch (error) {
       formError = 'Could not delete the webhook. Please try again.';
@@ -90,44 +71,11 @@
     <div class="flex flex-col gap-1">
       <h1 class="text-2xl font-semibold tracking-tight">Webhook</h1>
       <p class="text-sm text-muted-foreground">
-        Get a signed HTTP POST whenever one of your saved searches finds a new match —
+        Get an HTTP POST whenever one of your saved searches finds a new match —
         alongside or instead of email/Telegram. Turn it on for a saved search from its
         alert settings once a destination is configured here.
       </p>
     </div>
-
-    {#if revealed}
-      <div class="flex flex-col gap-3 rounded-lg border border-border bg-secondary/40 p-4">
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex flex-col gap-0.5">
-            <p class="text-sm font-medium">Webhook secret</p>
-            <p class="text-xs text-muted-foreground">
-              Copy it now — it won’t be shown again. Verify each request with HMAC-SHA256
-              over the raw body, keyed by this secret, against the
-              <code class="rounded bg-background px-1 py-0.5 font-mono text-xs"
-                >X-Freehire-Signature</code
-              > header.
-            </p>
-          </div>
-          <button
-            type="button"
-            onclick={() => (revealed = null)}
-            aria-label="Dismiss"
-            class="text-muted-foreground transition-colors hover:text-foreground"
-          >
-            ✕
-          </button>
-        </div>
-        <div class="flex items-center gap-2">
-          <code class="flex-1 overflow-x-auto rounded bg-background px-3 py-2 font-mono text-sm"
-            >{revealed.secret}</code
-          >
-          <Button variant="secondary" size="sm" onclick={copySecret}
-            >{copied ? 'Copied' : 'Copy'}</Button
-          >
-        </div>
-      </div>
-    {/if}
 
     {#if status === 'loading'}
       <States state="loading" />
@@ -146,7 +94,7 @@
           />
         </label>
         <Button variant="primary" type="submit" disabled={!url.trim() || saving}>
-          {saving ? 'Saving…' : webhook ? 'Rotate secret' : 'Create webhook'}
+          {saving ? 'Saving…' : webhook ? 'Save' : 'Create webhook'}
         </Button>
       </form>
 

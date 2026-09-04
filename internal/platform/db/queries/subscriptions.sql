@@ -116,8 +116,8 @@ RETURNING m.subscription_id, m.job_id;
 -- → the worker soft-skips telegram delivery rather than failing it), whether
 -- the user has at least one registered push device (the push channel's live
 -- deliverability check, same soft-skip role as the Telegram link), the user's
--- webhook destination (URL + encrypted secret, NULL or disabled → the worker
--- soft-skips webhook delivery the same way), and the delivery-timing context
+-- webhook destination (URL, NULL or disabled → the worker soft-skips webhook
+-- delivery the same way), and the delivery-timing context
 -- (live, not snapshotted, same as the channel checks above) — the account's
 -- timezone and its saved-search digest frequency settings, read via
 -- internal/application/deliverywindow before a digest is sent.
@@ -128,7 +128,6 @@ SELECT s.id, s.user_id, s.channel, s.destination, s.last_digest_sent_at,
        tl.chat_id AS telegram_chat_id,
        EXISTS(SELECT 1 FROM user_push_tokens upt WHERE upt.user_id = s.user_id) AS has_push_device,
        wc.url AS webhook_url,
-       wc.secret_encrypted AS webhook_secret_encrypted,
        COALESCE(wc.enabled, false) AS webhook_enabled,
        COALESCE(ns.digest_frequency, 'instant')::text AS digest_frequency,
        ns.digest_time AS digest_time,

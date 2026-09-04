@@ -48,7 +48,6 @@ import type {
   ApiKey,
   CreatedApiKey,
   WebhookConfig,
-  CreatedWebhookConfig,
   ConnectedIdentities,
   SavedSearch,
   Board,
@@ -1190,22 +1189,20 @@ export function createApi(
   // --- Webhook (saved-search alerts) -----------------------------------------
   //
   // The account's single webhook destination for saved-search matches (the
-  // `webhook` subscription channel). Management is cookie-only; the plaintext
-  // secret is returned once, by createOrRotateWebhook, and never again.
+  // `webhook` subscription channel). Management is cookie-only. Deliveries
+  // are plain, unsigned POSTs.
 
-  /** The current user's webhook destination, or null if none is configured
-   *  (metadata only — no secret). */
+  /** The current user's webhook destination, or null if none is configured. */
   async function getWebhook(): Promise<WebhookConfig | null> {
     return requestData<WebhookConfig | null>('/api/v1/me/webhook');
   }
 
-  /** Create the destination, or rotate it if one already exists, returning it
-   *  with its one-time plaintext `secret`. */
-  async function createOrRotateWebhook(url: string): Promise<CreatedWebhookConfig> {
-    return requestData<CreatedWebhookConfig>('/api/v1/me/webhook', jsonBody('POST', { url }));
+  /** Create the destination, or update its URL if one already exists. */
+  async function createOrUpdateWebhook(url: string): Promise<WebhookConfig> {
+    return requestData<WebhookConfig>('/api/v1/me/webhook', jsonBody('POST', { url }));
   }
 
-  /** Enable or disable the destination without rotating its secret or URL. */
+  /** Enable or disable the destination without changing its URL. */
   async function setWebhookEnabled(enabled: boolean): Promise<WebhookConfig> {
     return requestData<WebhookConfig>('/api/v1/me/webhook', jsonBody('PATCH', { enabled }));
   }
@@ -2328,7 +2325,7 @@ export function createApi(
     createApiKey,
     revokeApiKey,
     getWebhook,
-    createOrRotateWebhook,
+    createOrUpdateWebhook,
     setWebhookEnabled,
     deleteWebhook,
     listSavedSearches,

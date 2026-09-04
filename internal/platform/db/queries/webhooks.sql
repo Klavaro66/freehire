@@ -2,35 +2,34 @@
 -- The user's webhook destination, if any. No row means the user has never
 -- configured one — the caller (both the settings API and delivery's recipient
 -- resolution) treats absence as "not configured" rather than an error.
-SELECT user_id, url, secret_encrypted, enabled, created_at, updated_at, last_success_at, disabled_at
+SELECT user_id, url, enabled, created_at, updated_at, last_success_at, disabled_at
 FROM webhook_configs
 WHERE user_id = $1;
 
 -- name: UpsertWebhookConfig :one
--- Creates the account's webhook destination, or rotates it if one already
--- exists — there is exactly one row per user (see migration 0132), so this is
--- always "replace the whole destination", never a partial patch. Rotating
--- re-enables a previously disabled destination and clears disabled_at, since
--- supplying a fresh secret is an explicit re-commitment to the endpoint.
-INSERT INTO webhook_configs (user_id, url, secret_encrypted, enabled, updated_at, disabled_at)
-VALUES ($1, $2, $3, true, now(), NULL)
+-- Creates the account's webhook destination, or updates its URL if one
+-- already exists — there is exactly one row per user (see migration 0132).
+-- Saving re-enables a previously disabled destination and clears
+-- disabled_at, since submitting the form is an explicit re-commitment to
+-- the endpoint.
+INSERT INTO webhook_configs (user_id, url, enabled, updated_at, disabled_at)
+VALUES ($1, $2, true, now(), NULL)
 ON CONFLICT (user_id) DO UPDATE
 SET url = EXCLUDED.url,
-    secret_encrypted = EXCLUDED.secret_encrypted,
     enabled = true,
     disabled_at = NULL,
     updated_at = now()
-RETURNING user_id, url, secret_encrypted, enabled, created_at, updated_at, last_success_at, disabled_at;
+RETURNING user_id, url, enabled, created_at, updated_at, last_success_at, disabled_at;
 
 -- name: EnableWebhookConfig :one
 -- Re-enables a user-disabled (or auto-disabled) webhook destination without
--- rotating its secret or URL.
+-- changing its URL.
 UPDATE webhook_configs
 SET enabled = true,
     disabled_at = NULL,
     updated_at = now()
 WHERE user_id = $1
-RETURNING user_id, url, secret_encrypted, enabled, created_at, updated_at, last_success_at, disabled_at;
+RETURNING user_id, url, enabled, created_at, updated_at, last_success_at, disabled_at;
 
 -- name: DisableWebhookConfig :execrows
 -- Disables the destination, stamping disabled_at. Used both by the settings

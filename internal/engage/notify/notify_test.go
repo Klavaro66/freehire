@@ -687,38 +687,30 @@ func TestRecipient_PushWithDevice(t *testing.T) {
 	}
 }
 
-// recipient's webhook case resolves the account's configured destination
-// (URL + encrypted secret) rather than a per-subscription value, encoded as
-// JSON so the notifier can decrypt the secret at send time without recipient()
-// itself depending on a cipher.
+// recipient's webhook case resolves the account's configured destination URL
+// rather than a per-subscription value.
 func TestRecipient_WebhookEnabledAndConfigured(t *testing.T) {
 	info := db.GetSubscriptionForDeliveryRow{
-		UserID:                 42,
-		Channel:                ChannelWebhook,
-		WebhookUrl:             pgtype.Text{String: "https://example.com/hook", Valid: true},
-		WebhookSecretEncrypted: pgtype.Text{String: "encrypted-secret", Valid: true},
-		WebhookEnabled:         true,
+		UserID:         42,
+		Channel:        ChannelWebhook,
+		WebhookUrl:     pgtype.Text{String: "https://example.com/hook", Valid: true},
+		WebhookEnabled: true,
 	}
 	dest, ok := recipient(info)
 	if !ok {
 		t.Fatal("recipient: ok = false, want true when a webhook destination is configured and enabled")
 	}
-	var decoded WebhookDest
-	if err := json.Unmarshal([]byte(dest), &decoded); err != nil {
-		t.Fatalf("dest is not valid JSON: %v (%q)", err, dest)
-	}
-	if decoded.URL != "https://example.com/hook" || decoded.SecretEncrypted != "encrypted-secret" {
-		t.Errorf("decoded dest = %+v, want URL/SecretEncrypted from the row", decoded)
+	if dest != "https://example.com/hook" {
+		t.Errorf("recipient dest = %q, want the webhook URL", dest)
 	}
 }
 
 func TestRecipient_WebhookDisabledIsNotDeliverable(t *testing.T) {
 	info := db.GetSubscriptionForDeliveryRow{
-		UserID:                 42,
-		Channel:                ChannelWebhook,
-		WebhookUrl:             pgtype.Text{String: "https://example.com/hook", Valid: true},
-		WebhookSecretEncrypted: pgtype.Text{String: "encrypted-secret", Valid: true},
-		WebhookEnabled:         false,
+		UserID:         42,
+		Channel:        ChannelWebhook,
+		WebhookUrl:     pgtype.Text{String: "https://example.com/hook", Valid: true},
+		WebhookEnabled: false,
 	}
 	dest, ok := recipient(info)
 	if ok {

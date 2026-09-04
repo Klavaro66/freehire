@@ -1,9 +1,8 @@
 //go:build integration
 
 // Integration tests for the saved-search webhook HTTP flow against a real
-// Postgres: create/rotate returns the plaintext secret once, get/list never
-// does, patch toggles without rotating, delete removes the destination, and
-// every endpoint requires the session cookie. Run with:
+// Postgres: create/update, get, patch toggles, delete removes the
+// destination, and every endpoint requires the session cookie. Run with:
 // go test -tags=integration ./internal/api/handler/
 package handler
 
@@ -36,10 +35,10 @@ func TestWebhookEndToEnd(t *testing.T) {
 	iss := auth.NewIssuer("test-secret", time.Hour)
 	cookie, _ := iss.Issue(userID, testTokenVersion)
 	queries := db.New(pool)
-	h := newWebhookHandlers(queries, testWebhookCipher(t))
+	h := newWebhookHandlers(queries)
 
 	app := fiber.New(fiber.Config{ErrorHandler: RenderError})
-	app.Post("/api/v1/me/webhook", auth.RequireAuth(iss, testVersions), h.CreateOrRotateWebhook)
+	app.Post("/api/v1/me/webhook", auth.RequireAuth(iss, testVersions), h.CreateOrUpdateWebhook)
 	app.Get("/api/v1/me/webhook", auth.RequireAuth(iss, testVersions), h.GetWebhook)
 	app.Patch("/api/v1/me/webhook", auth.RequireAuth(iss, testVersions), h.SetWebhookEnabled)
 	app.Delete("/api/v1/me/webhook", auth.RequireAuth(iss, testVersions), h.DeleteWebhook)
@@ -71,7 +70,7 @@ func TestWebhookEndToEnd(t *testing.T) {
 		t.Errorf("GET before creation: data = %+v, want null", unconfigured.Data)
 	}
 
-	// Create returns the secret exactly once.
+	// Create.
 	createResp, err := app.Test(cookieReq(fiber.MethodPost, "/api/v1/me/webhook",
 		[]byte(`{"url":"https://example.test/hook"}`)))
 	if err != nil {
@@ -85,7 +84,6 @@ func TestWebhookEndToEnd(t *testing.T) {
 		Data struct {
 			URL     string `json:"url"`
 			Enabled bool   `json:"enabled"`
-			Secret  string `json:"secret"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
@@ -94,22 +92,8 @@ func TestWebhookEndToEnd(t *testing.T) {
 	if created.Data.URL != "https://example.test/hook" || !created.Data.Enabled {
 		t.Errorf("created = %+v, want the given URL and enabled=true", created.Data)
 	}
-	if created.Data.Secret == "" {
-		t.Error("create response carries no secret")
-	}
-	firstSecret := created.Data.Secret
 
-	// GET afterward never repeats the secret.
-	getResp2, err := app.Test(cookieReq(fiber.MethodGet, "/api/v1/me/webhook", nil))
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	getBody, _ := io.ReadAll(getResp2.Body)
-	if bytes.Contains(getBody, []byte(firstSecret)) {
-		t.Error("GET response leaks the secret")
-	}
-
-	// Disable, then re-enable without rotating.
+	// Disable, then re-enable.
 	disableResp, err := app.Test(cookieReq(fiber.MethodPatch, "/api/v1/me/webhook", []byte(`{"enabled":false}`)))
 	if err != nil {
 		t.Fatalf("disable: %v", err)
@@ -141,22 +125,22 @@ func TestWebhookEndToEnd(t *testing.T) {
 		t.Error("after PATCH enabled=true, want enabled=true")
 	}
 
-	// Rotating replaces the secret.
-	rotateResp, err := app.Test(cookieReq(fiber.MethodPost, "/api/v1/me/webhook",
-		[]byte(`{"url":"https://example.test/hook"}`)))
+	// Updating the URL replaces it in place.
+	updateResp, err := app.Test(cookieReq(fiber.MethodPost, "/api/v1/me/webhook",
+		[]byte(`{"url":"https://example.test/hook-2"}`)))
 	if err != nil {
-		t.Fatalf("rotate: %v", err)
+		t.Fatalf("update: %v", err)
 	}
-	var rotated struct {
+	var updated struct {
 		Data struct {
-			Secret string `json:"secret"`
+			URL string `json:"url"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(rotateResp.Body).Decode(&rotated); err != nil {
-		t.Fatalf("decode rotate: %v", err)
+	if err := json.NewDecoder(updateResp.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode update: %v", err)
 	}
-	if rotated.Data.Secret == "" || rotated.Data.Secret == firstSecret {
-		t.Errorf("rotated secret = %q, want a new non-empty secret (old: %q)", rotated.Data.Secret, firstSecret)
+	if updated.Data.URL != "https://example.test/hook-2" {
+		t.Errorf("updated url = %q, want the new URL", updated.Data.URL)
 	}
 
 	// Delete removes it; a second delete 404s.
@@ -200,7 +184,7 @@ func TestRecordWebhookDeliverySuccessStampsLastSuccessAt(t *testing.T) {
 	}
 	queries := db.New(pool)
 	if _, err := queries.UpsertWebhookConfig(ctx, db.UpsertWebhookConfigParams{
-		UserID: userID, URL: "https://example.test/hook", SecretEncrypted: "enc",
+		UserID: userID, URL: "https://example.test/hook",
 	}); err != nil {
 		t.Fatalf("create webhook config: %v", err)
 	}
@@ -223,61 +207,5 @@ func TestRecordWebhookDeliverySuccessStampsLastSuccessAt(t *testing.T) {
 	}
 	if !after.LastSuccessAt.Valid {
 		t.Error("last_success_at should be set after RecordWebhookDeliverySuccess")
-	}
-}
-
-// GetWebhook stays registered and reports "unconfigured" (not an error) even
-// when the webhook feature is off server-side (cipher nil): the frontend's
-// shared notification-state load calls it inside the same Promise.all as
-// telegramStatus/listSubscriptions, so a route that failed here would fail
-// that whole load — not just hide the webhook chip.
-func TestWebhookGetServedWithoutCipher(t *testing.T) {
-	pool := startPostgres(t)
-	ctx := context.Background()
-
-	var userID int64
-	if err := pool.QueryRow(ctx,
-		`INSERT INTO users (email, email_verified) VALUES ('webhook-nocipher@example.test', true) RETURNING id`).Scan(&userID); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-
-	iss := auth.NewIssuer("test-secret", time.Hour)
-	cookie, _ := iss.Issue(userID, testTokenVersion)
-	h := newWebhookHandlers(db.New(pool), nil) // nil cipher: feature off
-
-	app := fiber.New(fiber.Config{ErrorHandler: RenderError})
-	apiGroup := app.Group("/api/v1")
-	h.register(apiGroup, middleware{cookie: auth.RequireAuth(iss, testVersions)})
-
-	req := httptest.NewRequest(fiber.MethodGet, "/api/v1/me/webhook", nil)
-	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: cookie})
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if resp.StatusCode != fiber.StatusOK {
-		t.Errorf("status = %d, want 200 (GET must be served even with no cipher)", resp.StatusCode)
-	}
-	var out struct {
-		Data *struct{} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if out.Data != nil {
-		t.Errorf("data = %+v, want null", out.Data)
-	}
-
-	// Writes stay unregistered without a cipher.
-	createReq := httptest.NewRequest(fiber.MethodPost, "/api/v1/me/webhook",
-		bytes.NewReader([]byte(`{"url":"https://example.test/hook"}`)))
-	createReq.Header.Set("Content-Type", "application/json")
-	createReq.AddCookie(&http.Cookie{Name: auth.CookieName, Value: cookie})
-	createResp, err := app.Test(createReq)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if createResp.StatusCode != fiber.StatusMethodNotAllowed {
-		t.Errorf("create status = %d, want 405 (writes must be unregistered with no cipher)", createResp.StatusCode)
 	}
 }

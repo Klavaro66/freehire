@@ -13,7 +13,6 @@ package notify
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -248,16 +247,6 @@ func (r *Runner) Run(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
-// WebhookDest is the JSON shape encoded into recipient()'s dest string for the
-// webhook channel: the account's destination URL and its encrypted secret.
-// It travels through Notifier.Send's opaque dest parameter undecrypted —
-// recipient() has no cipher dependency, and decrypting is webhooknotify's job,
-// done only once the secret is actually needed to sign a request.
-type WebhookDest struct {
-	URL             string `json:"url"`
-	SecretEncrypted string `json:"secret_encrypted"`
-}
-
 // recipient resolves the destination string for delivery, and whether the
 // subscription is deliverable right now. Telegram resolves the linked chat_id
 // (absent → not deliverable, soft-skipped); email resolves the user's account
@@ -287,14 +276,7 @@ func recipient(info db.GetSubscriptionForDeliveryRow) (string, bool) {
 		if !info.WebhookEnabled || !info.WebhookUrl.Valid || info.WebhookUrl.String == "" {
 			return "", false
 		}
-		encoded, err := json.Marshal(WebhookDest{
-			URL:             info.WebhookUrl.String,
-			SecretEncrypted: info.WebhookSecretEncrypted.String,
-		})
-		if err != nil {
-			return "", false
-		}
-		return string(encoded), true
+		return info.WebhookUrl.String, true
 	}
 	if !info.Destination.Valid || info.Destination.String == "" {
 		return "", false

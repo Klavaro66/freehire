@@ -3,54 +3,36 @@
 ## Purpose
 
 The account-level webhook destination a candidate points at their own tooling, and
-the signed HTTP delivery that carries a saved-search digest to it once a saved
+the plain HTTP delivery that carries a saved-search digest to it once a saved
 search subscribes to the `webhook` channel.
 
 ## Requirements
 
-### Requirement: Creating or rotating the webhook destination
+### Requirement: Creating or updating the webhook destination
 
-The system SHALL let a signed-in user create or rotate their account's single
-webhook destination (URL plus an opaque, high-entropy secret), and SHALL return
-the plaintext secret **exactly once**, in the response to that create/rotate
-call. The stored secret SHALL be kept in a form the system can recover for
-signing later deliveries (not a one-way hash) but SHALL never itself be returned
-by any endpoint after that one response. A URL whose scheme is not `http` or
-`https` SHALL be rejected and SHALL create or change nothing. Rotating replaces
-the destination's secret (and, if provided, its URL) in place — there SHALL be
-at most one webhook destination per account.
+The system SHALL let a signed-in user create their account's single webhook
+destination (a URL), or update its URL if one already exists. A URL whose
+scheme is not `http` or `https` SHALL be rejected and SHALL create or change
+nothing. There SHALL be at most one webhook destination per account.
 
-#### Scenario: First-time creation returns the secret once
+#### Scenario: First-time creation
 
 - **WHEN** a signed-in user with no existing webhook destination submits a
   `https://` URL
 - **THEN** the system creates the destination, enabled, and responds with the
-  URL and the plaintext secret
-- **AND** no later read of the destination includes that secret or a hash of it
+  URL
 
-#### Scenario: Rotating replaces the secret
+#### Scenario: Updating replaces the URL
 
-- **WHEN** a signed-in user with an existing webhook destination rotates it
-- **THEN** the system generates a new secret, returns it once, and subsequent
-  deliveries sign with the new secret only — the previous secret no longer
-  validates
+- **WHEN** a signed-in user with an existing webhook destination submits a
+  different URL
+- **THEN** the destination's URL is replaced, and subsequent deliveries go to
+  the new URL only
 
 #### Scenario: A non-HTTP(S) URL is rejected
 
 - **WHEN** a user submits a URL whose scheme is not `http` or `https`
 - **THEN** the system rejects the request and creates or changes nothing
-
-### Requirement: Reading the webhook destination never exposes the secret
-
-The system SHALL let a signed-in user view their webhook destination's
-metadata — URL, enabled state, creation time, last successful delivery time,
-and disabled time if applicable — and SHALL NOT include the secret or any
-derivative of it in that response.
-
-#### Scenario: Viewing the destination omits the secret
-
-- **WHEN** a signed-in user requests their webhook destination after creating it
-- **THEN** the response includes the URL and status fields but no secret
 
 ### Requirement: Enabling, disabling, and deleting the destination
 
@@ -72,25 +54,6 @@ same way an unconfigured channel is skipped today.
 - **WHEN** a user re-enables a previously disabled webhook destination
 - **THEN** the next delivery pass delivers that account's pending webhook
   matches normally
-
-### Requirement: Delivered payloads are HMAC-signed
-
-The system SHALL sign every webhook delivery's request body with HMAC-SHA256
-keyed by the destination's current secret, and SHALL carry the signature in a
-request header, so the receiver can verify the request originated from this
-system and was not altered in transit.
-
-#### Scenario: Signature matches a receiver's own computation
-
-- **WHEN** a receiver recomputes HMAC-SHA256 over the exact bytes of a received
-  request body using the secret it was given at creation or rotation
-- **THEN** the recomputed value equals the signature header on that request
-
-#### Scenario: A rotated secret changes future signatures only
-
-- **WHEN** a destination's secret is rotated
-- **THEN** deliveries sent after the rotation are signed with the new secret,
-  and a receiver still validating with the old secret can no longer verify them
 
 ### Requirement: Delivery is SSRF-safe
 

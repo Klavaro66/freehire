@@ -946,9 +946,9 @@ export interface CreatedApiKey extends ApiKey {
   token: string;
 }
 
-/** The account's single saved-search webhook destination — metadata only; the
- *  HMAC secret is never part of this shape. Timestamps are RFC3339 strings or
- *  null; `disabled_at` is set once a delivery got a definitive 410 from the
+/** The account's single saved-search webhook destination. Deliveries are
+ *  plain, unsigned POSTs. Timestamps are RFC3339 strings or null;
+ *  `disabled_at` is set once a delivery got a definitive 410 from the
  *  destination or the user turned it off. */
 export interface WebhookConfig {
   url: string;
@@ -956,13 +956,6 @@ export interface WebhookConfig {
   created_at: string | null;
   last_success_at: string | null;
   disabled_at: string | null;
-}
-
-/** The response of creating or rotating the webhook destination: the metadata
- *  plus the plaintext `secret`, returned exactly once and never retrievable
- *  again — sign requests received on `url` with HMAC-SHA256 keyed by it. */
-export interface CreatedWebhookConfig extends WebhookConfig {
-  secret: string;
 }
 
 interface ConnectedIdentity {
