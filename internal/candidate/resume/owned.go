@@ -443,11 +443,21 @@ func educationEqual(a, b []resumeextract.Education) bool {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if a[i].Degree != b[i].Degree || a[i].Institution != b[i].Institution || !periodDateEqual(a[i].Year, b[i].Year) {
 			return false
 		}
 	}
 	return true
+}
+
+// periodDateEqual compares by value: Sanitize (see clipEducation) always allocates a
+// fresh *PeriodDate, even for an unchanged date, so a plain != on Education structs
+// would compare that pointer's address instead of what it points to.
+func periodDateEqual(a, b *perioddate.PeriodDate) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func stringsEqual(a, b []string) bool {

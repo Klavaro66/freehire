@@ -83,18 +83,25 @@ func (d *PeriodDate) Format() string {
 	return monthNames[d.Month] + " " + strconv.Itoa(d.Year)
 }
 
+// FormatEnd formats a period's end boundary, substituting "Present" when current is
+// true instead of leaving it blank — the caller passes end=nil for an ongoing entry,
+// matching Employment/ExperienceItem's own Current-means-no-end convention. Exported so
+// a consumer that renders start and end separately (cv/renderer.go's per-field render
+// projection) doesn't hand-roll the same substitution FormatRange applies internally.
+func FormatEnd(end *PeriodDate, current bool) string {
+	if current {
+		return "Present"
+	}
+	return end.Format()
+}
+
 // FormatRange joins a start/end pair for display the same way every consumer that used
 // to hold pre-formatted strings already joined them (cv's typst templates' daterange,
 // the assistant tools' period line): " – " between two present sides, just the one side
-// when only it is present, "" when neither is. current, when true, renders end as
-// "Present" instead of leaving it blank — the caller passes end=nil for an ongoing
-// entry, matching Employment/ExperienceItem's own Current-means-no-end convention.
+// when only it is present, "" when neither is.
 func FormatRange(start, end *PeriodDate, current bool) string {
 	a := start.Format()
-	b := end.Format()
-	if current {
-		b = "Present"
-	}
+	b := FormatEnd(end, current)
 	if a != "" && b != "" {
 		return a + " – " + b
 	}

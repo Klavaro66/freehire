@@ -13,9 +13,14 @@ package resumeextract
 // placeholder to be reworded later.
 const currentEmployerLabel = "Current employer"
 
-// isCurrentEntry reports whether an experience entry is ongoing.
+// isCurrentEntry reports whether an experience entry is ongoing. Current is the model's
+// own signal, but the extraction contract defines an unstated End the same way ("for a
+// role that has not ended ... set current to true and end to null" — resumeextract.go's
+// systemPrompt), so a nil End is treated as ongoing too: a fail-closed guard against a
+// model that complies with end:null but slips on the accompanying current:true, since
+// under-masking a still-current employer is exactly what this feature exists to prevent.
 func isCurrentEntry(e Experience) bool {
-	return e.Current
+	return e.Current || e.End == nil
 }
 
 // stripProjectLinks blanks Link on a copy of every project entry, leaving name and

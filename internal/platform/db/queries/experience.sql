@@ -72,25 +72,32 @@ RETURNING id, user_id, kind, company, role, location, period_start_year, period_
 -- name: ListExperienceEmploymentDatesForBackfill :many
 -- cmd/backfill-experience-dates' input: every employment still missing at least one of the
 -- structured boundaries migration 0135 added, alongside the legacy free-text labels to
--- parse and the row's own created_at (the approved fallback for a label that fails to
--- parse). OR, not AND: a row where an ordinary write path (deployed ahead of this pass)
--- already filled one boundary but not the other must still be visited, or the other
--- boundary's only surviving copy — the free-text column — is never migrated.
-SELECT id, user_id, period_start, period_end, created_at
+-- parse, the row's own created_at (the approved fallback for a label that fails to
+-- parse), and is_current — the pre-migration sort key (period_sort.go, since deleted)
+-- read a present-reading period_end as "ongoing" independently of is_current, so a row
+-- where the two disagree needs is_current corrected in the same pass (see
+-- SetExperienceEmploymentBackfilledDates), or that row silently loses its "ongoing" sort
+-- position once the free-text column backing the old check is gone. OR, not AND: a row
+-- where an ordinary write path (deployed ahead of this pass) already filled one boundary
+-- but not the other must still be visited, or the other boundary's only surviving copy —
+-- the free-text column — is never migrated.
+SELECT id, user_id, period_start, period_end, is_current, created_at
 FROM experience_employments
 WHERE period_start_year IS NULL OR period_end_year IS NULL
 ORDER BY id;
 
 -- name: SetExperienceEmploymentBackfilledDates :execrows
--- cmd/backfill-experience-dates' write: only the four structured columns, and only into
--- whichever boundary is still NULL — the same per-boundary independence
--- FillExperienceEmploymentBlanks uses, so a boundary an ordinary write path already
--- populated is never clobbered by a backfill pass racing behind it.
+-- cmd/backfill-experience-dates' write: the four structured columns, each filled only
+-- when still NULL — the same per-boundary independence FillExperienceEmploymentBlanks
+-- uses, so a boundary an ordinary write path already populated is never clobbered by a
+-- backfill pass racing behind it — plus is_current, which this only ever turns TRUE, never
+-- back to false, when the caller found a present-reading label is_current disagreed with.
 UPDATE experience_employments
 SET period_start_year  = CASE WHEN period_start_year IS NULL THEN @period_start_year ELSE period_start_year END,
     period_start_month = CASE WHEN period_start_year IS NULL THEN @period_start_month ELSE period_start_month END,
     period_end_year    = CASE WHEN period_end_year IS NULL THEN @period_end_year ELSE period_end_year END,
-    period_end_month   = CASE WHEN period_end_year IS NULL THEN @period_end_month ELSE period_end_month END
+    period_end_month   = CASE WHEN period_end_year IS NULL THEN @period_end_month ELSE period_end_month END,
+    is_current         = is_current OR @set_current::boolean
 WHERE id = @id AND (period_start_year IS NULL OR period_end_year IS NULL);
 
 -- name: DeleteExperienceEmployment :execrows

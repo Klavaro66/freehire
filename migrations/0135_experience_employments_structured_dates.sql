@@ -16,6 +16,13 @@ ALTER TABLE public.experience_employments
     ADD COLUMN period_end_month smallint;
 
 ALTER TABLE public.experience_employments
+    -- Same [1900, 2100] bound internal/candidate/perioddate.Sanitize enforces in Go before
+    -- any of these columns is written — a DB-level backstop for a write path that bypasses
+    -- it (a raw fix-up, a future direct writer), matching the month check's own role.
+    ADD CONSTRAINT experience_employments_period_start_year_check
+        CHECK (period_start_year IS NULL OR period_start_year BETWEEN 1900 AND 2100),
+    ADD CONSTRAINT experience_employments_period_end_year_check
+        CHECK (period_end_year IS NULL OR period_end_year BETWEEN 1900 AND 2100),
     ADD CONSTRAINT experience_employments_period_start_month_check
         CHECK (period_start_month IS NULL OR period_start_month BETWEEN 1 AND 12),
     ADD CONSTRAINT experience_employments_period_end_month_check

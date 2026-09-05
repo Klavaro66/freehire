@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/strelov1/freehire/internal/candidate/perioddate"
 	"github.com/strelov1/freehire/internal/platform/tracerlink"
 )
 
@@ -189,11 +190,11 @@ type renderCertification struct {
 func formatExperienceForRender(items []ExperienceItem) []renderExperienceItem {
 	out := make([]renderExperienceItem, len(items))
 	for i, e := range items {
-		end := e.End.Format()
-		if e.Current {
-			end = "Present"
+		out[i] = renderExperienceItem{
+			ExperienceItem: e,
+			Start:          e.Start.Format(),
+			End:            perioddate.FormatEnd(e.End, e.Current),
 		}
-		out[i] = renderExperienceItem{ExperienceItem: e, Start: e.Start.Format(), End: end}
 	}
 	return out
 }

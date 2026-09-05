@@ -13,10 +13,14 @@
 // about a real row reads better to its owner than an empty one. Rare in practice — real
 // data is "2024"/"October 2018"-shaped — but a free-text field accepts anything.
 //
-// Idempotent and safe to stop and resume: SetExperienceEmploymentBackfilledDates is
-// guarded to rows still missing both structured periods, so a row already filled (by
-// this worker or by the ordinary write paths once deployed) is never touched again.
-// Needs only DATABASE_URL.
+// Idempotent and safe to stop and resume: SetExperienceEmploymentBackfilledDates fills
+// each period boundary independently, only when it is still NULL, so a boundary already
+// filled (by this worker or by the ordinary write paths once deployed) is never touched
+// again. Also corrects is_current — never back to false, only ever to true — for a row
+// whose free-text period_end reads as a present label ("Present", "Current", ...) that
+// is_current disagrees with: the pre-migration sort key read that label as "ongoing"
+// independently of is_current, so the correction preserves that behavior once the
+// free-text column backing it is gone. Needs only DATABASE_URL.
 //
 //	go run ./cmd/backfill-experience-dates
 package main
@@ -55,13 +59,21 @@ func run() int {
 	}
 	log.Printf("backfill-experience-dates: %d rows to fill", len(rows))
 
-	var filled, fellBack int
+	var filled, fellBack, currentFixed int
 	lastLog := time.Now()
 	for i, row := range rows {
-		start := parseOrFallback(row.PeriodStart, row.CreatedAt.Time)
-		end := parseOrFallback(row.PeriodEnd, row.CreatedAt.Time)
-		if isFallback(row.PeriodStart, start) || isFallback(row.PeriodEnd, end) {
+		start, startFellBack := parseOrFallback(row.PeriodStart, row.CreatedAt.Time)
+		end, endFellBack := parseOrFallback(row.PeriodEnd, row.CreatedAt.Time)
+		if startFellBack || endFellBack {
 			fellBack++
+		}
+		// The pre-migration sort key read a present-reading period_end as "ongoing"
+		// independently of is_current (see period_sort.go, since deleted); a row where the
+		// two disagreed needs is_current corrected here, or it silently loses that "ongoing"
+		// sort position once the free-text column backing the old check is gone.
+		setCurrent := !row.IsCurrent && perioddate.IsPresentLabel(strings.TrimSpace(row.PeriodEnd))
+		if setCurrent {
+			currentFixed++
 		}
 		startYear, startMonth := experience.PeriodToColumns(start)
 		endYear, endMonth := experience.PeriodToColumns(end)
@@ -69,6 +81,7 @@ func run() int {
 			ID:              row.ID,
 			PeriodStartYear: startYear, PeriodStartMonth: startMonth,
 			PeriodEndYear: endYear, PeriodEndMonth: endMonth,
+			SetCurrent: setCurrent,
 		})
 		if err != nil {
 			log.Printf("backfill-experience-dates: row %s after %d filled: %v", row.ID, filled, err)
@@ -87,7 +100,7 @@ func run() int {
 		default:
 		}
 	}
-	log.Printf("backfill-experience-dates: done, filled=%d (fell back to created_at year for %d unparseable labels)", filled, fellBack)
+	log.Printf("backfill-experience-dates: done, filled=%d (fell back to created_at year for %d unparseable labels, corrected is_current for %d rows)", filled, fellBack, currentFixed)
 	return 0
 }
 
@@ -95,27 +108,17 @@ func run() int {
 // ("Present", "Current", ...) means the period genuinely was not stated — nil, no
 // fallback. A label that parses is used as-is. Anything else (non-empty, not a present
 // label, still unparseable) falls back to createdAt's year — see the package doc.
-func parseOrFallback(raw string, createdAt time.Time) *perioddate.PeriodDate {
+// fellBack reports whether that fallback fired, purely for the run's own summary log.
+func parseOrFallback(raw string, createdAt time.Time) (d *perioddate.PeriodDate, fellBack bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || perioddate.IsPresentLabel(trimmed) {
-		return nil
+		return nil, false
 	}
-	if d, ok := perioddate.Parse(trimmed); ok {
-		return d
+	if parsed, ok := perioddate.Parse(trimmed); ok {
+		return parsed, false
 	}
 	// Sanitize like every other write path does, even though createdAt's year is
 	// practically always in range: a fabricated date is only as safe as the same bounds
 	// check every candidate-entered or LLM-produced one goes through.
-	return perioddate.Sanitize(&perioddate.PeriodDate{Year: createdAt.Year()})
-}
-
-// isFallback reports whether parseOrFallback took the created_at-year fallback path for
-// raw, purely for the run's own summary log — it does not affect what gets written.
-func isFallback(raw string, got *perioddate.PeriodDate) bool {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" || perioddate.IsPresentLabel(trimmed) || got == nil {
-		return false
-	}
-	_, ok := perioddate.Parse(trimmed)
-	return !ok
+	return perioddate.Sanitize(&perioddate.PeriodDate{Year: createdAt.Year()}), true
 }

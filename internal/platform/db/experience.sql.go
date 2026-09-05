@@ -531,7 +531,7 @@ func (q *Queries) ListExperienceBackfillTargets(ctx context.Context, userID int6
 }
 
 const listExperienceEmploymentDatesForBackfill = `-- name: ListExperienceEmploymentDatesForBackfill :many
-SELECT id, user_id, period_start, period_end, created_at
+SELECT id, user_id, period_start, period_end, is_current, created_at
 FROM experience_employments
 WHERE period_start_year IS NULL OR period_end_year IS NULL
 ORDER BY id
@@ -542,15 +542,21 @@ type ListExperienceEmploymentDatesForBackfillRow struct {
 	UserID      int64              `json:"user_id"`
 	PeriodStart string             `json:"period_start"`
 	PeriodEnd   string             `json:"period_end"`
+	IsCurrent   bool               `json:"is_current"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 // cmd/backfill-experience-dates' input: every employment still missing at least one of the
 // structured boundaries migration 0135 added, alongside the legacy free-text labels to
-// parse and the row's own created_at (the approved fallback for a label that fails to
-// parse). OR, not AND: a row where an ordinary write path (deployed ahead of this pass)
-// already filled one boundary but not the other must still be visited, or the other
-// boundary's only surviving copy — the free-text column — is never migrated.
+// parse, the row's own created_at (the approved fallback for a label that fails to
+// parse), and is_current — the pre-migration sort key (period_sort.go, since deleted)
+// read a present-reading period_end as "ongoing" independently of is_current, so a row
+// where the two disagree needs is_current corrected in the same pass (see
+// SetExperienceEmploymentBackfilledDates), or that row silently loses its "ongoing" sort
+// position once the free-text column backing the old check is gone. OR, not AND: a row
+// where an ordinary write path (deployed ahead of this pass) already filled one boundary
+// but not the other must still be visited, or the other boundary's only surviving copy —
+// the free-text column — is never migrated.
 func (q *Queries) ListExperienceEmploymentDatesForBackfill(ctx context.Context) ([]ListExperienceEmploymentDatesForBackfillRow, error) {
 	rows, err := q.db.Query(ctx, listExperienceEmploymentDatesForBackfill)
 	if err != nil {
@@ -565,6 +571,7 @@ func (q *Queries) ListExperienceEmploymentDatesForBackfill(ctx context.Context) 
 			&i.UserID,
 			&i.PeriodStart,
 			&i.PeriodEnd,
+			&i.IsCurrent,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -749,8 +756,9 @@ UPDATE experience_employments
 SET period_start_year  = CASE WHEN period_start_year IS NULL THEN $1 ELSE period_start_year END,
     period_start_month = CASE WHEN period_start_year IS NULL THEN $2 ELSE period_start_month END,
     period_end_year    = CASE WHEN period_end_year IS NULL THEN $3 ELSE period_end_year END,
-    period_end_month   = CASE WHEN period_end_year IS NULL THEN $4 ELSE period_end_month END
-WHERE id = $5 AND (period_start_year IS NULL OR period_end_year IS NULL)
+    period_end_month   = CASE WHEN period_end_year IS NULL THEN $4 ELSE period_end_month END,
+    is_current         = is_current OR $5::boolean
+WHERE id = $6 AND (period_start_year IS NULL OR period_end_year IS NULL)
 `
 
 type SetExperienceEmploymentBackfilledDatesParams struct {
@@ -758,19 +766,22 @@ type SetExperienceEmploymentBackfilledDatesParams struct {
 	PeriodStartMonth pgtype.Int2 `json:"period_start_month"`
 	PeriodEndYear    pgtype.Int4 `json:"period_end_year"`
 	PeriodEndMonth   pgtype.Int2 `json:"period_end_month"`
+	SetCurrent       bool        `json:"set_current"`
 	ID               uuid.UUID   `json:"id"`
 }
 
-// cmd/backfill-experience-dates' write: only the four structured columns, and only into
-// whichever boundary is still NULL — the same per-boundary independence
-// FillExperienceEmploymentBlanks uses, so a boundary an ordinary write path already
-// populated is never clobbered by a backfill pass racing behind it.
+// cmd/backfill-experience-dates' write: the four structured columns, each filled only
+// when still NULL — the same per-boundary independence FillExperienceEmploymentBlanks
+// uses, so a boundary an ordinary write path already populated is never clobbered by a
+// backfill pass racing behind it — plus is_current, which this only ever turns TRUE, never
+// back to false, when the caller found a present-reading label is_current disagreed with.
 func (q *Queries) SetExperienceEmploymentBackfilledDates(ctx context.Context, arg SetExperienceEmploymentBackfilledDatesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setExperienceEmploymentBackfilledDates,
 		arg.PeriodStartYear,
 		arg.PeriodStartMonth,
 		arg.PeriodEndYear,
 		arg.PeriodEndMonth,
+		arg.SetCurrent,
 		arg.ID,
 	)
 	if err != nil {
