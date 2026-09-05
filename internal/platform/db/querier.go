@@ -2528,9 +2528,12 @@ type Querier interface {
 	// falls through to extraction. The freshness test is the same one resume.Store.Structured
 	// applies, so the worker never reuses a structure the app itself treats as absent.
 	ListExperienceBackfillTargets(ctx context.Context, userID int64) ([]ListExperienceBackfillTargetsRow, error)
-	// cmd/backfill-experience-dates' input: every employment still missing the structured
-	// columns migration 0135 added, alongside the legacy free-text labels to parse and the
-	// row's own created_at (the approved fallback for a label that fails to parse).
+	// cmd/backfill-experience-dates' input: every employment still missing at least one of the
+	// structured boundaries migration 0135 added, alongside the legacy free-text labels to
+	// parse and the row's own created_at (the approved fallback for a label that fails to
+	// parse). OR, not AND: a row where an ordinary write path (deployed ahead of this pass)
+	// already filled one boundary but not the other must still be visited, or the other
+	// boundary's only surviving copy — the free-text column — is never migrated.
 	ListExperienceEmploymentDatesForBackfill(ctx context.Context) ([]ListExperienceEmploymentDatesForBackfillRow, error)
 	// The caller's places of work, current roles first and most recent within that. Owner-scoped
 	// by construction — another user's employments can never appear. Ordered natively on the
@@ -4150,9 +4153,10 @@ type Querier interface {
 	// write. job_id/suggested_job_id/link_source/match_confidence are nullable — an
 	// unlinked or suggestion-only email leaves job_id NULL.
 	SetEmailClassification(ctx context.Context, arg SetEmailClassificationParams) error
-	// cmd/backfill-experience-dates' write: only the four structured columns, guarded so a
-	// concurrent edit through the ordinary update paths (which now populate these columns
-	// directly) is never clobbered by a backfill pass racing behind it.
+	// cmd/backfill-experience-dates' write: only the four structured columns, and only into
+	// whichever boundary is still NULL — the same per-boundary independence
+	// FillExperienceEmploymentBlanks uses, so a boundary an ordinary write path already
+	// populated is never clobbered by a backfill pass racing behind it.
 	SetExperienceEmploymentBackfilledDates(ctx context.Context, arg SetExperienceEmploymentBackfilledDatesParams) (int64, error)
 	SetGmailStatus(ctx context.Context, arg SetGmailStatusParams) error
 	SetGmailSynced(ctx context.Context, arg SetGmailSyncedParams) error

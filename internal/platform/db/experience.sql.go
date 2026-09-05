@@ -533,7 +533,7 @@ func (q *Queries) ListExperienceBackfillTargets(ctx context.Context, userID int6
 const listExperienceEmploymentDatesForBackfill = `-- name: ListExperienceEmploymentDatesForBackfill :many
 SELECT id, user_id, period_start, period_end, created_at
 FROM experience_employments
-WHERE period_start_year IS NULL AND period_end_year IS NULL
+WHERE period_start_year IS NULL OR period_end_year IS NULL
 ORDER BY id
 `
 
@@ -545,9 +545,12 @@ type ListExperienceEmploymentDatesForBackfillRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-// cmd/backfill-experience-dates' input: every employment still missing the structured
-// columns migration 0135 added, alongside the legacy free-text labels to parse and the
-// row's own created_at (the approved fallback for a label that fails to parse).
+// cmd/backfill-experience-dates' input: every employment still missing at least one of the
+// structured boundaries migration 0135 added, alongside the legacy free-text labels to
+// parse and the row's own created_at (the approved fallback for a label that fails to
+// parse). OR, not AND: a row where an ordinary write path (deployed ahead of this pass)
+// already filled one boundary but not the other must still be visited, or the other
+// boundary's only surviving copy — the free-text column — is never migrated.
 func (q *Queries) ListExperienceEmploymentDatesForBackfill(ctx context.Context) ([]ListExperienceEmploymentDatesForBackfillRow, error) {
 	rows, err := q.db.Query(ctx, listExperienceEmploymentDatesForBackfill)
 	if err != nil {
@@ -743,9 +746,11 @@ func (q *Queries) MergeExperienceAtoms(ctx context.Context, arg MergeExperienceA
 
 const setExperienceEmploymentBackfilledDates = `-- name: SetExperienceEmploymentBackfilledDates :execrows
 UPDATE experience_employments
-SET period_start_year = $1, period_start_month = $2,
-    period_end_year = $3, period_end_month = $4
-WHERE id = $5 AND period_start_year IS NULL AND period_end_year IS NULL
+SET period_start_year  = CASE WHEN period_start_year IS NULL THEN $1 ELSE period_start_year END,
+    period_start_month = CASE WHEN period_start_year IS NULL THEN $2 ELSE period_start_month END,
+    period_end_year    = CASE WHEN period_end_year IS NULL THEN $3 ELSE period_end_year END,
+    period_end_month   = CASE WHEN period_end_year IS NULL THEN $4 ELSE period_end_month END
+WHERE id = $5 AND (period_start_year IS NULL OR period_end_year IS NULL)
 `
 
 type SetExperienceEmploymentBackfilledDatesParams struct {
@@ -756,9 +761,10 @@ type SetExperienceEmploymentBackfilledDatesParams struct {
 	ID               uuid.UUID   `json:"id"`
 }
 
-// cmd/backfill-experience-dates' write: only the four structured columns, guarded so a
-// concurrent edit through the ordinary update paths (which now populate these columns
-// directly) is never clobbered by a backfill pass racing behind it.
+// cmd/backfill-experience-dates' write: only the four structured columns, and only into
+// whichever boundary is still NULL — the same per-boundary independence
+// FillExperienceEmploymentBlanks uses, so a boundary an ordinary write path already
+// populated is never clobbered by a backfill pass racing behind it.
 func (q *Queries) SetExperienceEmploymentBackfilledDates(ctx context.Context, arg SetExperienceEmploymentBackfilledDatesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setExperienceEmploymentBackfilledDates,
 		arg.PeriodStartYear,

@@ -51,11 +51,11 @@ func stripProjectLinks(projects []Project) []Project {
 // signal for anyone else the candidate shares the link with (see design.md, "Risks /
 // Trade-offs").
 //
-// The mask is content-based (the End label), not positional: Structured.Experience's
+// The mask is content-based (Current), not positional: Structured.Experience's
 // ordering (newest-first vs. oldest-first) is nowhere documented or enforced by the LLM
 // extraction prompt or schema, so "the newest entry" cannot be determined reliably by
-// array position alone (see design.md, "Masking is content-based (the End label), not
-// positional."). If more than one entry reads as current (concurrent roles, or a
+// array position alone (see design.md, "Masking is content-based, not positional."). If
+// more than one entry reads as current (concurrent roles, or a
 // sloppily-filled CV), every matching entry is masked — there is no reliable signal for
 // picking "the real" one. If zero entries read as current, none are masked.
 func (s Structured) Anonymous() Professional {

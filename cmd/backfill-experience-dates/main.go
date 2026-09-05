@@ -103,7 +103,10 @@ func parseOrFallback(raw string, createdAt time.Time) *perioddate.PeriodDate {
 	if d, ok := perioddate.Parse(trimmed); ok {
 		return d
 	}
-	return &perioddate.PeriodDate{Year: createdAt.Year()}
+	// Sanitize like every other write path does, even though createdAt's year is
+	// practically always in range: a fabricated date is only as safe as the same bounds
+	// check every candidate-entered or LLM-produced one goes through.
+	return perioddate.Sanitize(&perioddate.PeriodDate{Year: createdAt.Year()})
 }
 
 // isFallback reports whether parseOrFallback took the created_at-year fallback path for

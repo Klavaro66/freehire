@@ -168,7 +168,7 @@
 
     {#if editingEducation}
       <div class="flex flex-col gap-2">
-        {#each educationDraft as row, i (i)}
+        {#each educationDraft as row, i (row)}
           <div class="flex flex-col gap-2 rounded-lg border border-border p-3">
             <div class="flex items-start gap-2">
               <div class="grid flex-1 gap-2 sm:grid-cols-2">

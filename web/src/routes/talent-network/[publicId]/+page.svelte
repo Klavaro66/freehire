@@ -2,6 +2,7 @@
   import { Award, Briefcase, FolderKanban, GraduationCap, Languages, Tags, User } from '@lucide/svelte';
   import Seo from '$lib/components/Seo.svelte';
   import { dateRange } from '$lib/cv';
+  import { formatPeriodDate } from '$lib/periodDate';
   import type { Experience } from '$lib/generated/contracts';
   import { companyLogoUrl } from '$lib/logo';
   import { EntityLogo } from '$lib/ui';
@@ -265,7 +266,7 @@
                   {/if}
                 </div>
                 {#if ed.year}
-                  <span class="text-xs text-muted-foreground tabular-nums">{ed.year}</span>
+                  <span class="text-xs text-muted-foreground tabular-nums">{formatPeriodDate(ed.year)}</span>
                 {/if}
               </li>
             {/each}

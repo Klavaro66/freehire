@@ -70,22 +70,28 @@ WHERE id = @id AND user_id = @user_id
 RETURNING id, user_id, kind, company, role, location, period_start_year, period_start_month, period_end_year, period_end_month, is_current, summary, stack, created_at, updated_at, link;
 
 -- name: ListExperienceEmploymentDatesForBackfill :many
--- cmd/backfill-experience-dates' input: every employment still missing the structured
--- columns migration 0135 added, alongside the legacy free-text labels to parse and the
--- row's own created_at (the approved fallback for a label that fails to parse).
+-- cmd/backfill-experience-dates' input: every employment still missing at least one of the
+-- structured boundaries migration 0135 added, alongside the legacy free-text labels to
+-- parse and the row's own created_at (the approved fallback for a label that fails to
+-- parse). OR, not AND: a row where an ordinary write path (deployed ahead of this pass)
+-- already filled one boundary but not the other must still be visited, or the other
+-- boundary's only surviving copy — the free-text column — is never migrated.
 SELECT id, user_id, period_start, period_end, created_at
 FROM experience_employments
-WHERE period_start_year IS NULL AND period_end_year IS NULL
+WHERE period_start_year IS NULL OR period_end_year IS NULL
 ORDER BY id;
 
 -- name: SetExperienceEmploymentBackfilledDates :execrows
--- cmd/backfill-experience-dates' write: only the four structured columns, guarded so a
--- concurrent edit through the ordinary update paths (which now populate these columns
--- directly) is never clobbered by a backfill pass racing behind it.
+-- cmd/backfill-experience-dates' write: only the four structured columns, and only into
+-- whichever boundary is still NULL — the same per-boundary independence
+-- FillExperienceEmploymentBlanks uses, so a boundary an ordinary write path already
+-- populated is never clobbered by a backfill pass racing behind it.
 UPDATE experience_employments
-SET period_start_year = @period_start_year, period_start_month = @period_start_month,
-    period_end_year = @period_end_year, period_end_month = @period_end_month
-WHERE id = @id AND period_start_year IS NULL AND period_end_year IS NULL;
+SET period_start_year  = CASE WHEN period_start_year IS NULL THEN @period_start_year ELSE period_start_year END,
+    period_start_month = CASE WHEN period_start_year IS NULL THEN @period_start_month ELSE period_start_month END,
+    period_end_year    = CASE WHEN period_end_year IS NULL THEN @period_end_year ELSE period_end_year END,
+    period_end_month   = CASE WHEN period_end_year IS NULL THEN @period_end_month ELSE period_end_month END
+WHERE id = @id AND (period_start_year IS NULL OR period_end_year IS NULL);
 
 -- name: DeleteExperienceEmployment :execrows
 -- Remove an owned employment; its atoms go with it (ON DELETE CASCADE) because they are
