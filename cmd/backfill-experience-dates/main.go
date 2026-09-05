@@ -27,8 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/strelov1/freehire/internal/candidate/experience"
 	"github.com/strelov1/freehire/internal/candidate/perioddate"
 	"github.com/strelov1/freehire/internal/platform/db"
 	"github.com/strelov1/freehire/internal/platform/worker"
@@ -64,8 +63,8 @@ func run() int {
 		if isFallback(row.PeriodStart, start) || isFallback(row.PeriodEnd, end) {
 			fellBack++
 		}
-		startYear, startMonth := dateToParams(start)
-		endYear, endMonth := dateToParams(end)
+		startYear, startMonth := experience.PeriodToColumns(start)
+		endYear, endMonth := experience.PeriodToColumns(end)
 		n, err := q.SetExperienceEmploymentBackfilledDates(ctx, db.SetExperienceEmploymentBackfilledDatesParams{
 			ID:              row.ID,
 			PeriodStartYear: startYear, PeriodStartMonth: startMonth,
@@ -116,15 +115,4 @@ func isFallback(raw string, got *perioddate.PeriodDate) bool {
 	}
 	_, ok := perioddate.Parse(trimmed)
 	return !ok
-}
-
-func dateToParams(d *perioddate.PeriodDate) (year pgtype.Int4, month pgtype.Int2) {
-	if d == nil {
-		return year, month
-	}
-	year = pgtype.Int4{Int32: int32(d.Year), Valid: true}
-	if d.Month != 0 {
-		month = pgtype.Int2{Int16: int16(d.Month), Valid: true}
-	}
-	return year, month
 }

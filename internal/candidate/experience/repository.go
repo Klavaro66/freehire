@@ -38,10 +38,11 @@ type employmentRow struct {
 	UpdatedAt        pgtype.Timestamptz
 }
 
-// dateToDB splits d into the two nullable columns Create/Update/FillBlanks bind — both
-// invalid (NULL) for a nil or year-only-with-zero-year date, month additionally invalid
-// for a year-only date.
-func dateToDB(d *perioddate.PeriodDate) (year pgtype.Int4, month pgtype.Int2) {
+// PeriodToColumns splits d into the two nullable columns experience_employments stores a
+// period boundary as — both invalid (NULL) for a nil date, month additionally invalid for
+// a year-only date. Exported so cmd/backfill-experience-dates, which fills these same
+// columns from parsed free text, shares this mapping instead of re-deriving it.
+func PeriodToColumns(d *perioddate.PeriodDate) (year pgtype.Int4, month pgtype.Int2) {
 	if d == nil {
 		return year, month
 	}
@@ -52,9 +53,9 @@ func dateToDB(d *perioddate.PeriodDate) (year pgtype.Int4, month pgtype.Int2) {
 	return year, month
 }
 
-// dateFromDB is dateToDB's inverse, used by employmentFromRow (store.go) to rebuild the
-// domain's *perioddate.PeriodDate from the two columns a row carries.
-func dateFromDB(year pgtype.Int4, month pgtype.Int2) *perioddate.PeriodDate {
+// PeriodFromColumns is PeriodToColumns' inverse, used by employmentFromRow (store.go) to
+// rebuild the domain's *perioddate.PeriodDate from the two columns a row carries.
+func PeriodFromColumns(year pgtype.Int4, month pgtype.Int2) *perioddate.PeriodDate {
 	if !year.Valid {
 		return nil
 	}
@@ -120,8 +121,8 @@ func (r queriesRepository) FindEmployment(ctx context.Context, userID int64, com
 }
 
 func (r queriesRepository) CreateEmployment(ctx context.Context, userID int64, e Employment) (employmentRow, error) {
-	startYear, startMonth := dateToDB(e.Start)
-	endYear, endMonth := dateToDB(e.End)
+	startYear, startMonth := PeriodToColumns(e.Start)
+	endYear, endMonth := PeriodToColumns(e.End)
 	row, err := r.q.CreateExperienceEmployment(ctx, db.CreateExperienceEmploymentParams{
 		UserID: userID, Kind: e.Kind, Company: e.Company, Role: e.Role, Location: e.Location,
 		PeriodStartYear: startYear, PeriodStartMonth: startMonth,
@@ -140,8 +141,8 @@ func (r queriesRepository) CreateEmployment(ctx context.Context, userID int64, e
 }
 
 func (r queriesRepository) UpdateEmployment(ctx context.Context, id uuid.UUID, userID int64, e Employment) (employmentRow, error) {
-	startYear, startMonth := dateToDB(e.Start)
-	endYear, endMonth := dateToDB(e.End)
+	startYear, startMonth := PeriodToColumns(e.Start)
+	endYear, endMonth := PeriodToColumns(e.End)
 	row, err := r.q.UpdateExperienceEmployment(ctx, db.UpdateExperienceEmploymentParams{
 		ID: id, UserID: userID, Kind: e.Kind, Company: e.Company, Role: e.Role, Location: e.Location,
 		PeriodStartYear: startYear, PeriodStartMonth: startMonth,
@@ -162,8 +163,8 @@ func (r queriesRepository) UpdateEmployment(ctx context.Context, id uuid.UUID, u
 // FillEmploymentBlanks passes no is_current: the query does not touch it, because a CV
 // that still reads "Present" for a role the user has left must not resurrect it.
 func (r queriesRepository) FillEmploymentBlanks(ctx context.Context, id uuid.UUID, userID int64, e Employment) (employmentRow, error) {
-	startYear, startMonth := dateToDB(e.Start)
-	endYear, endMonth := dateToDB(e.End)
+	startYear, startMonth := PeriodToColumns(e.Start)
+	endYear, endMonth := PeriodToColumns(e.End)
 	row, err := r.q.FillExperienceEmploymentBlanks(ctx, db.FillExperienceEmploymentBlanksParams{
 		ID: id, UserID: userID, Company: e.Company, Role: e.Role, Location: e.Location,
 		PeriodStartYear: startYear, PeriodStartMonth: startMonth,

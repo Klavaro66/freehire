@@ -392,8 +392,8 @@ func employmentFromRow(row employmentRow) Employment {
 	return Employment{
 		ID: row.ID, Kind: row.Kind, Company: row.Company, Role: row.Role,
 		Location: row.Location,
-		Start:    dateFromDB(row.PeriodStartYear, row.PeriodStartMonth),
-		End:      dateFromDB(row.PeriodEndYear, row.PeriodEndMonth),
+		Start:    PeriodFromColumns(row.PeriodStartYear, row.PeriodStartMonth),
+		End:      PeriodFromColumns(row.PeriodEndYear, row.PeriodEndMonth),
 		Current:  row.IsCurrent, Summary: row.Summary, Link: row.Link, Stack: row.Stack,
 	}
 }

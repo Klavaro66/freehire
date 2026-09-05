@@ -57,17 +57,3 @@ func TestIsFallback(t *testing.T) {
 		})
 	}
 }
-
-func TestDateToParams(t *testing.T) {
-	if year, month := dateToParams(nil); year.Valid || month.Valid {
-		t.Errorf("dateToParams(nil) = %+v/%+v, want both invalid", year, month)
-	}
-	year, month := dateToParams(&perioddate.PeriodDate{Year: 2018})
-	if !year.Valid || year.Int32 != 2018 || month.Valid {
-		t.Errorf("dateToParams(year-only) = %+v/%+v, want year=2018 valid, month invalid", year, month)
-	}
-	year, month = dateToParams(&perioddate.PeriodDate{Year: 2018, Month: 3})
-	if !year.Valid || year.Int32 != 2018 || !month.Valid || month.Int16 != 3 {
-		t.Errorf("dateToParams(year+month) = %+v/%+v, want year=2018, month=3, both valid", year, month)
-	}
-}

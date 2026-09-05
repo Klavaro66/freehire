@@ -76,8 +76,8 @@ func (f *fakeRepo) FindEmployment(_ context.Context, userID int64, company, role
 
 func (f *fakeRepo) CreateEmployment(_ context.Context, userID int64, e Employment) (employmentRow, error) {
 	id := uuid.New()
-	startYear, startMonth := dateToDB(e.Start)
-	endYear, endMonth := dateToDB(e.End)
+	startYear, startMonth := PeriodToColumns(e.Start)
+	endYear, endMonth := PeriodToColumns(e.End)
 	row := employmentRow{
 		ID: id, UserID: userID, Kind: e.Kind, Company: e.Company, Role: e.Role,
 		Location:         e.Location,
@@ -100,8 +100,8 @@ func (f *fakeRepo) UpdateEmployment(_ context.Context, id uuid.UUID, userID int6
 	}
 	row.Kind, row.Company, row.Role = e.Kind, e.Company, e.Role
 	row.Location = e.Location
-	row.PeriodStartYear, row.PeriodStartMonth = dateToDB(e.Start)
-	row.PeriodEndYear, row.PeriodEndMonth = dateToDB(e.End)
+	row.PeriodStartYear, row.PeriodStartMonth = PeriodToColumns(e.Start)
+	row.PeriodEndYear, row.PeriodEndMonth = PeriodToColumns(e.End)
 	row.IsCurrent, row.Summary, row.Link, row.Stack = e.Current, e.Summary, e.Link, e.Stack
 	f.employments[id] = row
 	return row, nil
@@ -117,11 +117,11 @@ func (f *fakeRepo) FillEmploymentBlanks(_ context.Context, id uuid.UUID, userID 
 	row.Location = orExisting(row.Location, e.Location)
 	// A period fills as a whole pair exactly when its year is currently unset — mirrors
 	// the real query's CASE WHEN (see queries/experience.sql's own comment).
-	startYear, startMonth := dateToDB(e.Start)
+	startYear, startMonth := PeriodToColumns(e.Start)
 	if !row.PeriodStartYear.Valid {
 		row.PeriodStartYear, row.PeriodStartMonth = startYear, startMonth
 	}
-	endYear, endMonth := dateToDB(e.End)
+	endYear, endMonth := PeriodToColumns(e.End)
 	if !row.PeriodEndYear.Valid {
 		row.PeriodEndYear, row.PeriodEndMonth = endYear, endMonth
 	}
