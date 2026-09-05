@@ -3,12 +3,14 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/strelov1/freehire/internal/identity/billing"
+	"github.com/strelov1/freehire/internal/identity/promo"
 )
 
 // billingHandlers serve the two ends of the Pro subscription: where a candidate goes to
@@ -20,10 +22,14 @@ import (
 type billingHandlers struct {
 	billing *billing.Service
 	store   *billing.RevenueCat
+	// promo decides what discount the buyer is owed. Held here rather than imported by
+	// billing, because a discount is a reason to buy and billing's scope is the
+	// subscription itself — the two packages meet in this handler and nowhere else.
+	promo *promo.Service
 }
 
-func newBillingHandlers(svc *billing.Service, store *billing.RevenueCat) *billingHandlers {
-	return &billingHandlers{billing: svc, store: store}
+func newBillingHandlers(svc *billing.Service, store *billing.RevenueCat, discounts *promo.Service) *billingHandlers {
+	return &billingHandlers{billing: svc, store: store, promo: discounts}
 }
 
 // webhookProvider is the part of a billing provider a webhook route needs, and it is all the
@@ -173,9 +179,11 @@ func (h *billingHandlers) Checkout(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), applyTimeout)
 	defer cancel()
 
+	discount := h.discountFor(ctx, userID)
+
 	// The price comes from the pricing page's monthly/annual choice. It is validated
 	// against the configured list inside the service — never trusted as sent.
-	url, err := h.billing.CheckoutURL(ctx, userID, c.Query("price"))
+	url, err := h.billing.CheckoutURL(ctx, userID, c.Query("price"), discount)
 	if err != nil {
 		// Either checkout is unconfigured, or the provider refused. Neither is something a
 		// candidate can act on, and a 404 lets the surface omit the offer rather than render
@@ -183,7 +191,46 @@ func (h *billingHandlers) Checkout(c *fiber.Ctx) error {
 		log.Printf("billing: no checkout for user %d: %v", userID, err)
 		return fiber.NewError(fiber.StatusNotFound, "checkout is not available")
 	}
-	return c.JSON(fiber.Map{"data": fiber.Map{"url": url}})
+	return c.JSON(fiber.Map{"data": fiber.Map{
+		"url": url,
+		// Which offer was applied, so the page can say so rather than leaving the buyer to
+		// work it out from the amount on the provider's page. Empty when there was none.
+		"discount_percent": discount.PercentOff,
+		"discount_source":  discount.Label,
+	}})
+}
+
+// discountFor reads the ONE discount this checkout may carry, and writes nothing.
+//
+// This route is a GET, so it must have no side effects — and `SameSite=Lax` is exactly why
+// that is a security rule here rather than a stylistic one: the session cookie IS sent on a
+// cross-site top-level navigation, so any page linking here would act as this visitor. An
+// earlier draft redeemed a code from the query string on this path, which meant a link
+// could burn somebody's one lifetime redemption. Redeeming now lives on its own POST
+// (`/me/promo/redeem`) and is durable, so what reaches here is only what the account
+// already holds.
+//
+// It cannot fail the checkout either. A discount somebody was offered but that we could not
+// read is not a reason to refuse them the purchase, so a failure is logged and the sale
+// goes ahead at list price.
+func (h *billingHandlers) discountFor(ctx context.Context, userID int64) billing.Discount {
+	if h.promo == nil {
+		return billing.Discount{}
+	}
+
+	resolved, err := h.promo.Discount(ctx, userID)
+	if err != nil {
+		log.Printf("promo: resolving the discount of user %d: %v", userID, err)
+		return billing.Discount{}
+	}
+	if resolved.Percent <= 0 {
+		return billing.Discount{}
+	}
+	return billing.Discount{
+		PercentOff: int32(resolved.Percent),
+		Label:      resolved.Source,
+		Key:        fmt.Sprintf("%s_%d_%d", resolved.Source, userID, resolved.Percent),
+	}
 }
 
 // Subscription returns what the caller is paying and what has been charged.

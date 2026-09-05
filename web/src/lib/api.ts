@@ -79,6 +79,8 @@ import type {
   Allowance,
   AiUsage,
   BillingOverview,
+  CheckoutSession,
+  InviteSummary,
   PlansMatrix,
   PlanState,
   UsageHistoryEntry,
@@ -1065,9 +1067,41 @@ export function createApi(
    *  Throws when billing is not configured on this deployment, or when no paywall is set
    *  up — both answer 404. Callers treat that as "no upgrade offer here" and hide the
    *  entry point, never as an error to show. */
-  async function billingCheckout(priceID?: string): Promise<{ url: string }> {
+  async function billingCheckout(priceID?: string): Promise<CheckoutSession> {
     const q = priceID ? `?price=${encodeURIComponent(priceID)}` : '';
-    return requestData<{ url: string }>(`/api/v1/billing/checkout${q}`);
+    // No code here. This is a GET, and `SameSite=Lax` sends the session cookie on a
+    // cross-site top-level navigation — so a GET that redeemed a code would let any page
+    // burn a visitor's one lifetime redemption by linking to it. Redemption is its own
+    // POST; this call only reads back what the account already holds.
+    return requestData<CheckoutSession>(`/api/v1/billing/checkout${q}`);
+  }
+
+  /** Check what a promo code is worth without spending it. Rate limited server-side, and
+   *  every refusal about the code itself is the same 404 — telling "no such code" apart
+   *  from "out of seats" would make this an oracle for guessing them. */
+  async function promoPreview(code: string): Promise<{ percent_off: number }> {
+    // jsonBody and not a hand-built init: it carries the Content-Type the server's body
+    // parser requires. Without that header the request is refused before the code is even
+    // read, which looks exactly like a code that does not exist.
+    return requestData<{ percent_off: number }>(
+      '/api/v1/me/promo/preview',
+      jsonBody('POST', { code }),
+    );
+  }
+
+  /** Spend this account's one lifetime redemption on a code. Durable: once recorded, every
+   *  later checkout reads the percentage back, so a provider failure while opening the
+   *  payment page costs a retry rather than the offer. */
+  async function promoRedeem(code: string): Promise<{ percent_off: number }> {
+    return requestData<{ percent_off: number }>(
+      '/api/v1/me/promo/redeem',
+      jsonBody('POST', { code }),
+    );
+  }
+
+  /** This account's invite link and what it has earned. */
+  async function myInvite(): Promise<InviteSummary> {
+    return requestData<InviteSummary>('/api/v1/me/invite');
   }
 
   /** What the caller is paying and what has been charged. 404 when there is no
@@ -2400,6 +2434,9 @@ export function createApi(
     myPlan,
     plans,
     billingCheckout,
+    promoPreview,
+    promoRedeem,
+    myInvite,
     billingManageUrl,
     billingSubscription,
     myPlanHistory,
