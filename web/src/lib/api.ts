@@ -318,13 +318,6 @@ export interface EmailBody extends EmailLinking {
   read: boolean;
 }
 
-/** Options for a read a caller may abandon. Carried by the endpoints a typeahead
- *  drives, where the next keystroke makes the request in flight the answer to a
- *  question nobody is asking any more. */
-export interface Abortable {
-  signal?: AbortSignal;
-}
-
 /** Build an API client bound to a specific fetch and base URL.
  *
  *  - Browser: the default `api` uses global fetch and an empty base, so requests
@@ -394,16 +387,6 @@ export function createApi(
    *  its payload this way, so this collapses the request+`.data` unwrap into one call. */
   async function requestData<T>(path: string, init?: RequestInit): Promise<T> {
     return (await request<{ data: T }>(path, init)).data;
-  }
-
-  /** The read endpoints a typeahead calls take this: a caller that fires a fresh
-   *  request on every settled keystroke abandons the previous one rather than waiting
-   *  for an answer to a question nobody is asking any more. Distinct from the server
-   *  client's `timeoutMs` — that guards the SSR process against a slow backend, this is
-   *  the CALLER saying the question went stale. A caller that brings a signal keeps it
-   *  (see `call`), so the two never compete for the same request. */
-  function aborting(opts?: Abortable): RequestInit | undefined {
-    return opts?.signal ? { signal: opts.signal } : undefined;
   }
 
   /** Build the request init for a JSON body (POST/PATCH/PUT). Single-sources the
@@ -507,15 +490,12 @@ export function createApi(
     facets: URLSearchParams,
     limit: number,
     offset: number,
-    opts?: Abortable,
+    signal?: AbortSignal,
   ): Promise<Slice<Job>> {
     const params = new URLSearchParams(facets);
     params.set('limit', String(limit));
     params.set('offset', String(offset));
-    return toSlice(
-      await request<Page<Job>>(`/api/v1/jobs/search?${params}`, aborting(opts)),
-      offset,
-    );
+    return toSlice(await request<Page<Job>>(`/api/v1/jobs/search?${params}`, { signal }), offset);
   }
 
   /** Complete a partly-typed query against the catalogue's own vocabulary: the
@@ -526,9 +506,13 @@ export function createApi(
    *  Engineer Google" carries the role AND the company, and applying only one of them
    *  discards what was typed. An empty query returns nothing: what an empty box offers
    *  is a curated starting point the client owns (see starterSuggestions). */
-  async function suggest(q: string, limit: number, opts?: Abortable): Promise<ApiSuggestion[]> {
+  async function suggest(
+    q: string,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<ApiSuggestion[]> {
     const params = new URLSearchParams({ q, limit: String(limit) });
-    return requestData<ApiSuggestion[]>(`/api/v1/suggest?${params}`, aborting(opts));
+    return requestData<ApiSuggestion[]>(`/api/v1/suggest?${params}`, { signal });
   }
 
   /** Turn a written description of a job search into filter values (the AI filter).
@@ -646,14 +630,14 @@ export function createApi(
     limit: number,
     offset: number,
     facets?: URLSearchParams,
-    opts?: Abortable,
+    signal?: AbortSignal,
   ): Promise<Slice<CompanyListItem>> {
     const params = new URLSearchParams(facets);
     if (q) params.set('q', q);
     params.set('limit', String(limit));
     params.set('offset', String(offset));
     return toSlice(
-      await request<Page<CompanyListItem>>(`/api/v1/companies?${params}`, aborting(opts)),
+      await request<Page<CompanyListItem>>(`/api/v1/companies?${params}`, { signal }),
       offset,
     );
   }
