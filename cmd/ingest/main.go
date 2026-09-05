@@ -37,8 +37,9 @@ import (
 	"github.com/strelov1/freehire/internal/platform/worker"
 )
 
-// staleAfter is the DEFAULT grace window before an unseen job is closed. An adapter that
-// crawls only a slice of its catalogue widens it for its own provider — see sweepWindowFor.
+// staleAfter is the DEFAULT grace window before an unseen job is closed. An adapter declares
+// its own window instead — wider for one that crawls only a slice of its catalogue, narrower
+// for one whose full-board crawl makes an unseen reading positive evidence — see sweepWindowFor.
 // Shared with cmd/liveness's staleCutoff via sources.DefaultSweepGrace, since liveness's
 // probeDespiteRegistered backstop only picks up what this sweep has already had a chance
 // to close and must not drift out of sync with it.
@@ -198,7 +199,9 @@ func run() int {
 	now := time.Now()
 	// A slice-crawled source (e.g. whatjobs) declares a window wider than staleAfter: its crawl
 	// reaches only a keyword's first pages, so a posting that drifted deeper reads as unseen and
-	// the default window would close it and reopen it on the next run.
+	// the default window would close it and reopen it on the next run. A full-board source with a
+	// reliably tight crawl cadence (e.g. gem) may instead declare one narrower, since its unseen
+	// reading is already positive evidence rather than a guess about how deep the crawl got.
 	grace := sources.SweepGraceWindows(registry)
 	// A self-closing source (e.g. jobtech) manages its own closes from its stream, so the
 	// unseen sweep must skip it: it re-reports only changed ads, and the cutoff would wrongly
@@ -272,9 +275,9 @@ func sweepBySource(stats pipeline.Stats, fullCatalog bool) bool {
 }
 
 // sweepWindowFor reports how long a provider's unseen jobs are spared before the sweep closes
-// them: the window its adapter declared (sources.SweepGraceWindows) when it crawls only a slice
-// of a catalogue too deep to walk, else staleAfter. Widening is per-provider so one feed's drift
-// tolerance never slows the sweep for the ATS boards, whose crawls are complete.
+// them: the window its adapter declared (sources.SweepGraceWindows), wider or narrower than
+// staleAfter, else staleAfter itself. The override is per-provider so one feed's drift tolerance
+// (or one full-board crawl's tighter cadence) never changes the sweep for every other provider.
 func sweepWindowFor(grace map[string]time.Duration, provider string) time.Duration {
 	if w, ok := grace[provider]; ok {
 		return w
