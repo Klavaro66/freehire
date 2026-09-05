@@ -26,9 +26,9 @@
   // The header's search box — the ONE of them, on every page.
   //
   // There were two: this, which filtered the list under it, and a launcher on every
-  // other page, which navigated to the feed. They shared the debounce, the
-  // stale-response token, the arrow keys, the hotkeys, the dismissal and the row
-  // rendering, in two copies, and differed in exactly one thing: what a pick DOES. So
+  // other page, which navigated to the feed. They shared the debounce, the stale-answer
+  // guard, the arrow keys, the hotkeys, the dismissal and the row rendering, in two
+  // copies, and differed in exactly one thing: what a pick DOES. So
   // that one thing is a target now (see `target` below), and everything else is
   // written once.
   //
@@ -217,25 +217,35 @@
     return () => clearTimeout(timer);
   });
 
-  // An empty box offers the catalogue's shape; a typed one offers what matches.
+  // A box with nothing to complete offers the catalogue's shape; a typed one offers
+  // what matches.
   //
-  // The empty case is the whole point of opening on focus, and it is answered LOCALLY:
+  // The first case is the whole point of opening on focus, and it is answered LOCALLY:
   // the curated group order lives in the filter modal's own grouping, checked there
   // against the category vocabulary at compile time, so asking a server for it would
   // be a second copy of that order. The typed case is the endpoint's — it completes a
   // phrase against the catalogue's real vocabulary, which no dictionary shipped to the
   // browser can do.
+  //
+  // The threshold is SUGGEST_MIN_CHARS, the same one the fetch below gates on, and
+  // deliberately not a separate `=== ''`. Two thresholds opened a state nobody designed:
+  // at exactly one character the box was past "empty" but short of "asked", so it showed
+  // neither the starters nor completions it had not fetched — a ten-row panel collapsing
+  // to the single free-text row, then refilling on the next keystroke. One predicate
+  // answers "is there a query yet", so there is no gap for a state to fall into.
   const starters = $derived(suggest ? starterSuggestions(suggest.counts()) : []);
   let completions = $state.raw<Suggestion[]>([]);
-  const suggestions = $derived(settledQuery.trim() === '' ? starters : completions);
+  const suggestions = $derived(
+    settledQuery.trim().length < SUGGEST_MIN_CHARS ? starters : completions,
+  );
   // The parts each completion applies, by row key — kept beside the rows rather than
   // inside them because a Suggestion is what the dropdown RENDERS, and these are what
   // choosing it DOES.
   let completionParts = $state.raw(new Map<string, ApiSuggestionPart[]>());
   // Postings and companies for the typed text, fetched exactly the way the launcher
-  // dropdown (HeaderSearch) fetches them — same endpoints, same stale-response token,
-  // same row rendering below. A second implementation of "show me matching jobs" is
-  // how the two would drift.
+  // dropdown (HeaderSearch) fetches them — same endpoints, same abandonment rule, same
+  // row rendering below. A second implementation of "show me matching jobs" is how the
+  // two would drift.
   //
   // These matter MORE now than before, not less: the list below no longer narrows as
   // you type, so these rows are the only live evidence the query finds anything.
@@ -330,8 +340,9 @@
     // The box may have moved on while the intake was out: a paste over the old text, or
     // the text cleared entirely. The answer is about the URL we asked with, so applying
     // it now would navigate to a posting nobody is asking about any more — the same
-    // stale-response hazard the suggestion fetches guard with `previewToken`, answered
-    // here by the question itself rather than by a counter.
+    // stale-answer hazard the suggestion fetches guard with their AbortController, held
+    // off here by comparing the question instead, because this runs from a click rather
+    // than from an effect with a cleanup to hang the abort on.
     if (link?.url !== pasted.url) return;
     if (step.kind === 'open') {
       openPosting(step.slug);

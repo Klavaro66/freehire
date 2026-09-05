@@ -350,6 +350,13 @@ export function createApi(
     };
     // Assigned after the spread, so a timeout is added to the init rather than
     // substituted for it. A caller that brought its own signal keeps it.
+    //
+    // `== null` is LOAD-BEARING, not a loose-equality slip: the abortable reads
+    // (searchJobs/suggest/listCompanies) pass `{ signal }` unconditionally, so a caller
+    // that named no signal arrives here with `signal: undefined` rather than with no
+    // `signal` key at all. Tighten this to `===` and those three quietly stop getting
+    // the SSR timeout above — which is the ~8 `+page.server.ts` callers, and exactly the
+    // failure that comment describes.
     const timeout = timeoutMs != null && request.signal == null ? AbortSignal.timeout(timeoutMs) : undefined;
     if (timeout) {
       request.signal = timeout;
