@@ -50,6 +50,12 @@ type Querier interface {
 	// tuple) so a file's rows land in a single round trip; view_count accumulates across
 	// a job's day-rows, and additivity lets a day spanning two rotated files sum right.
 	ApplyDailyView(ctx context.Context, arg []ApplyDailyViewParams) *ApplyDailyViewBatchResults
+	// Records an approval. Guarded by review_decision IS NULL so a second attempt at an
+	// already-reviewed entry affects zero rows rather than overwriting a recorded decision —
+	// the handler reads the row first (GetAutoApplyQueueEntryForReview) to tell "already
+	// reviewed" apart from "not found" before ever reaching this statement, so zero rows here
+	// would only mean a race with a concurrent decision on the same entry.
+	ApproveAutoApplyReview(ctx context.Context, id int64) (int64, error)
 	// Resolve a presented token (by its SHA-256 hash) to the owning user id and the key's
 	// scope, enforcing expiry and touching last_used_at in one atomic statement. No row
 	// means the key is unknown, revoked, or expired; the caller treats pgx.ErrNoRows as 401
@@ -214,6 +220,12 @@ type Querier interface {
 	// separate reaper process is needed. failed_at/blocked_at excluded so a dead-lettered or
 	// parked attempt is never reclaimed by this query — auto_apply_queue_claimable_idx exists
 	// for exactly this predicate.
+	//
+	// tailored_cv_id IS NOT NULL AND review_decision = 'approved' (openspec/changes/
+	// auto-apply-tailored-resume): a submission attempt only ever runs for an entry the
+	// candidate has reviewed and approved. An unreviewed or declined entry sits in the queue
+	// but is never claimed — declining also sets blocked_at (via the review endpoint's own
+	// Park-shaped write), so it is additionally excluded by the predicate above.
 	//
 	// Returns job.source, job.external_id and job.url because the caller builds the sidecar
 	// request from the row alone — source doubles as the ATS provider name, the same vocabulary
@@ -864,6 +876,12 @@ type Querier interface {
 	// status='pending' guard makes the decision idempotent-safe: a second decision on an
 	// already-decided offer matches no row (the repository maps that to "not pending").
 	DecideReferralOffer(ctx context.Context, arg DecideReferralOfferParams) (ReferralOffer, error)
+	// Records a decline AND parks the entry in one statement — the same fields
+	// MarkAutoApplyBlocked sets (blocked_at, last_error), reusing that park vocabulary rather
+	// than inventing a second one, plus the review columns MarkAutoApplyBlocked has no reason
+	// to know about. unmapped stays NULL: this is not a form-field park. last_error is what
+	// tells the two park reasons apart in the queue's own history, per design.md.
+	DeclineAutoApplyReview(ctx context.Context, arg DeclineAutoApplyReviewParams) (int64, error)
 	// Revoke (delete) a key, scoped to its owner so a user can only delete their own.
 	// Returns the affected row count: 0 means the key does not exist or is not the
 	// caller's (the handler maps that to 404).
@@ -1245,6 +1263,15 @@ type Querier interface {
 	// Idempotent via the outbox's UNIQUE (job_id). Run in the same transaction as the job's
 	// UpsertJob so a newly ingested job is queued atomically with its write.
 	EnqueueApplyFormCapture(ctx context.Context, jobID int64) (int64, error)
+	// Creates the candidate-facing entry that starts the tailor-then-review sequence
+	// (openspec/changes/auto-apply-submit-trigger). ON CONFLICT DO NOTHING against the
+	// existing UNIQUE (user_id, job_id) (migration 0116) rather than a SELECT-then-INSERT: a
+	// double-click or a page reload racing this same request is expected, common traffic here,
+	// not a fault, and the constraint is the only thing that closes the window between a
+	// check and an insert. No row back means the handler's own INSERT lost the race (or the
+	// pair was already queued by an earlier request) — it re-reads via
+	// GetAutoApplyQueueEntryForJob rather than treating an empty result as an error.
+	EnqueueAutoApply(ctx context.Context, arg EnqueueAutoApplyParams) (int64, error)
 	// Scoped, one-off re-enqueue used by cmd/backfill-company-type-hint: force OPEN,
 	// eligible jobs of the given company_slugs back into enrichment_outbox at the CURRENT
 	// target version, regardless of their existing enrichment_version. Unlike
@@ -1472,6 +1499,33 @@ type Querier interface {
 	// One session owned by the caller. Owner-scoped: a foreign or missing id returns no row,
 	// which the handler maps to 404 — so a probe cannot tell the two apart.
 	GetAssistantSession(ctx context.Context, arg GetAssistantSessionParams) (GetAssistantSessionRow, error)
+	// The same read as GetAutoApplyQueueEntryForReview, but by id ALONE — no ownership
+	// predicate. This is for the trusted auto-apply orchestrator caller only
+	// (openspec/changes/auto-apply-inngest-orchestration): it authenticates as the
+	// deployment's own shared secret, not as any particular user, so it has no owner of its
+	// own to check the row against — the row's own user_id in the result IS the owner it
+	// acts as. Never used for a caller that presented ownership-scoped credentials; see
+	// resolveAutoApplyEntry in internal/api/handler/auto_apply_tailor.go.
+	GetAutoApplyQueueEntryByID(ctx context.Context, id int64) (GetAutoApplyQueueEntryByIDRow, error)
+	// The caller's own existing auto-apply entry for one job, if any — the conflict-read path
+	// for EnqueueAutoApply, and the read behind the job detail response's own auto-apply
+	// status field (openspec/changes/auto-apply-submit-trigger). review_decision distinguishes
+	// a live, undecided entry from a permanently declined one; pgx.ErrNoRows means no attempt
+	// exists yet for this (user, job) pair.
+	//
+	// failed_at/blocked_at are also read (a code review found their absence): once
+	// cmd/auto-apply claims an approved entry, a dead-letter (RecordAutoApplyFailure) or a
+	// form-field park (MarkAutoApplyBlocked) leaves review_decision at 'approved' — without
+	// these two columns, both call sites would read a permanently stuck submission as
+	// indistinguishable from a healthy one still in flight.
+	GetAutoApplyQueueEntryForJob(ctx context.Context, arg GetAutoApplyQueueEntryForJobParams) (GetAutoApplyQueueEntryForJobRow, error)
+	// One read backing both the tailoring-trigger and the review-decision endpoints
+	// (openspec/changes/auto-apply-tailored-resume): resolves ownership (a foreign or missing
+	// id comes back as pgx.ErrNoRows, which the handler renders as 404 — never 403, so a
+	// probing caller learns nothing about entries they do not own) and carries enough of the
+	// entry's own state (job_id for tailoring, tailored_cv_id/review_decision for the review
+	// gate) that neither endpoint needs a second query to decide whether to proceed.
+	GetAutoApplyQueueEntryForReview(ctx context.Context, arg GetAutoApplyQueueEntryForReviewParams) (GetAutoApplyQueueEntryForReviewRow, error)
 	// Read-only balance for display (no lock, no LLM). Returns no rows for a user who has never
 	// had credit activity; the caller treats that as a full monthly grant remaining.
 	GetBalance(ctx context.Context, userID int64) (GetBalanceRow, error)
@@ -1859,6 +1913,15 @@ type Querier interface {
 	// compares all four against the live model, CV upload time, job content_hash and profile
 	// language to decide the stale flag.
 	GetUserJobAnalysis(ctx context.Context, arg GetUserJobAnalysisParams) (GetUserJobAnalysisRow, error)
+	// Whether the caller already applied to a job (applications.applied_at set — the process
+	// table, not user_jobs, holds this column; see RecordJobView's own comment above), the
+	// durable signal cmd/auto-apply/store.go's Submit stamps via MarkJobApplied on a real ATS
+	// submission. The guard PostJobAutoApply consults so a re-click after a successful
+	// auto-apply cannot start a second one; auto_apply_queue's own row is gone by then (Submit
+	// deletes it in the same transaction). Same COALESCE'd-scalar-subquery idiom as GetJobVote,
+	// for the same reason: always exactly one row, so a miss reads as "not applied" rather than
+	// needing its own pgx.ErrNoRows branch.
+	GetUserJobApplied(ctx context.Context, arg GetUserJobAppliedParams) (bool, error)
 	// The caller's current stage for one application (empty string when unset), so the
 	// worker can decide a monotonic-forward advancement.
 	GetUserJobStage(ctx context.Context, arg GetUserJobStageParams) (string, error)
@@ -4040,6 +4103,16 @@ type Querier interface {
 	// so a long conversation keeps the name it was born with. Owner-scoped for the same
 	// reason TouchAssistantSession is.
 	SetAssistantSessionLabel(ctx context.Context, arg SetAssistantSessionLabelParams) error
+	// Records which tailored CV a queue entry's tailoring run produced. Guarded by
+	// review_decision IS NULL, matching ApproveAutoApplyReview/DeclineAutoApplyReview's own
+	// guard: PostAutoApplyTailor's own review_decision check happens before its (potentially
+	// minutes-long) LLM run, not after, so a candidate can approve or decline an EARLIER
+	// tailored CV while a stale or retried tailor call for the same entry is still in flight.
+	// Without this guard that call's own write here would silently attach a fresh, never-seen
+	// CV to an already-decided entry — which ClaimAutoApplyBatch's own predicate
+	// (tailored_cv_id IS NOT NULL AND review_decision = 'approved') would then submit for
+	// real. Zero rows here means exactly that race happened; the handler checks it.
+	SetAutoApplyTailoredCV(ctx context.Context, arg SetAutoApplyTailoredCVParams) (int64, error)
 	// Apply the Go-computed cooldown window to a board (called only when the backoff
 	// policy says to cool down).
 	SetBoardCooldown(ctx context.Context, arg SetBoardCooldownParams) error
