@@ -1,4 +1,12 @@
-## ADDED Requirements
+# job-page-actions Specification
+
+## Purpose
+How the job detail page ranks and places what a reader can do with a posting: which
+control is the page's single primary call to action, where the CTAs sit relative to the
+title and the content tabs, and how the pair changes as auto-apply becomes available,
+starts, completes or gives up.
+
+## Requirements
 
 ### Requirement: Primary CTAs sit under the title, not on the tab row
 
@@ -123,7 +131,7 @@ Demotion changes only the button's label and treatment. Its destination, its
 #### Scenario: No primary CTA while a submission is in flight
 
 - **WHEN** an auto-apply attempt for the posting is queued
-- **THEN** no button on the page carries the primary (brand fill) treatment
+- **THEN** neither the auto-apply button nor the apply link carries the primary (brand fill) treatment
 
 #### Scenario: Applying by hand does not demote anything
 
