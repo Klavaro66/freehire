@@ -55,9 +55,9 @@ func run() int {
 
 	// Register every configured delivery channel; the Router dispatches each
 	// subscription to its channel and soft-skips one that is not configured.
-	// Push needs no server credential (see the package doc), so it is always
-	// registered — a recipient with no registered device still soft-skips
-	// per-user via recipient()'s HasPushDevice check.
+	// Push and webhook need no server credential (see each package's doc), so
+	// both are always registered — a per-recipient soft-skip (no registered
+	// device, no enabled destination) is handled inside recipient() instead.
 	pushStore := pushnotify.NewQueriesStore(queries)
 	router := notify.Router{
 		notify.ChannelPush:    notify.NewPushNotifier(queries, pushnotify.NewExpoNotifier(pushStore, pushStore, pushStore)),

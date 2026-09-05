@@ -35,7 +35,7 @@ const ChannelTelegram = "telegram"
 // environment configuration.
 const ChannelPush = "push"
 
-// ChannelWebhook delivers a digest as a signed HTTP POST to the account's
+// ChannelWebhook delivers a digest as a plain HTTP POST to the account's
 // configured webhook destination (see internal/engage/webhooknotify). Unlike
 // Telegram/email/push, the destination is a URL the user supplies, not a
 // platform-owned transport.
