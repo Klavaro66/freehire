@@ -2819,6 +2819,23 @@ type Querier interface {
 	// (concurrent writes can't skip or repeat rows) filtered to a single source. Returns
 	// closed rows too — a one-time backfill of a missing description fills open and closed alike.
 	ListJobsBySourceAfter(ctx context.Context, arg ListJobsBySourceAfterParams) ([]Job, error)
+	// One chunk of the requirements backfill: the open postings in an id range, with the
+	// description the derivation reads.
+	//
+	// Open rows only, unlike SetJobRequiresClearance's companion: a closed posting is not
+	// served on a job page and cannot be applied to, so deriving for it would pay the
+	// de-TOAST of its description for a list nothing reads.
+	//
+	// There is deliberately NO predicate on `description` (not even `<> ''`): a WHERE over
+	// that column de-TOASTs it for every row examined, which is the trap cmd/backfill-clearance
+	// documents. The rows are already bounded by id here, and an empty description simply
+	// derives nothing, so the filter would cost the same read it is trying to avoid.
+	// The LIMIT is what bounds MEMORY, and the id range is what bounds the number of
+	// statements. Both are needed: pgx buffers a :many result whole, descriptions run to
+	// ~1 MB on some sources, and an id RANGE puts no ceiling at all on how many rows fall
+	// inside it. The caller resumes from the last id it saw when a chunk comes back full,
+	// so a dense stretch is walked in bounded steps rather than materialised at once.
+	ListJobsForRequirementsBackfill(ctx context.Context, arg ListJobsForRequirementsBackfillParams) ([]ListJobsForRequirementsBackfillRow, error)
 	// Incremental keyset scan for `reindex --since`: like ListJobsByIDAfter but only
 	// rows changed at or after the cutoff. Every write path (UpsertJob, the close
 	// sweeps, SetJobEnrichment, UpdateJobDerived on a fingerprint move) stamps
@@ -4047,6 +4064,10 @@ type Querier interface {
 	// same reason ClaimDueRuns counts it: the rows ARE the shard count, and a report that read
 	// the intended number instead would show a healthy 24 while 12 rows existed.
 	ReportIngestSchedule(ctx context.Context) ([]ReportIngestScheduleRow, error)
+	// The id span cmd/backfill-requirements walks. MIN/MAX over the primary key are two
+	// index probes, so this stays cheap on an 11M-row table — deliberately unfiltered,
+	// because counting the open rows would be a scan and the chunk query filters anyway.
+	RequirementsDerivedBackfillBounds(ctx context.Context) (RequirementsDerivedBackfillBoundsRow, error)
 	// A healthy (not-expired) probe clears any accumulated strikes, so only CONSECUTIVE
 	// expired probes can close a job. Guarded to the non-zero case so probing an
 	// already-clean job does not churn the row.
@@ -4317,6 +4338,15 @@ type Querier interface {
 	// jsonb_strip_nulls drops an unstated bound so an overlay firing on just one of
 	// min/max does not blank the other's payload value; each overlay only fires at all
 	// when at least one of its own bounds is set (the presence signal).
+	//
+	// There is deliberately NO overlay for requirements_derived here, though one lived in
+	// this statement briefly. It would MATERIALISE the derived list into the blob, and
+	// nothing revises a blob: a later crawl rewrites the column and leaves the copy, so a
+	// description edit that deleted the requirements section would leave the page quoting
+	// a posting that no longer says it — and the backfill could not reach it either. The
+	// fold belongs on the read path, where it re-reads the column every time
+	// (jobview.FromDomain). The column stays the single source; the blob holds only what
+	// the model itself said.
 	SetJobEnrichment(ctx context.Context, arg SetJobEnrichmentParams) error
 	// Publish a list: set its public slug, owner-scoped, bumping updated_at. The service
 	// decides the slug (keeping an existing one on re-share, minting a fresh one
@@ -4335,6 +4365,15 @@ type Querier interface {
 	// the guard answers that per row, which is cheaper and more honest than a cursor that
 	// would go stale the moment ingest writes a new posting behind it.
 	SetJobRequiresClearance(ctx context.Context, arg SetJobRequiresClearanceParams) (int64, error)
+	// Write one chunk's derived requirements, for cmd/backfill-requirements. Batched
+	// through unnest rather than a statement per row: the pass covers millions of rows and
+	// a round trip each would dominate its runtime.
+	//
+	// The IS DISTINCT FROM guard is what makes the pass idempotent, for the same reason
+	// SetJobRequiresClearance's does: a row already carrying the derived value is not
+	// rewritten, so a re-run writes nothing and produces no dead tuples. It also means the
+	// backfill needs no record of which rows it has visited.
+	SetJobsRequirementsDerived(ctx context.Context, arg SetJobsRequirementsDerivedParams) (int64, error)
 	// Pro GIVEN rather than sold: support's manual grant today, awarded days once add-invites
 	// lands. No provider sync touches it, which is the whole reason it is separate — before
 	// migration 0135 a hand-set value lived in the column the Stripe sync overwrites, and the
