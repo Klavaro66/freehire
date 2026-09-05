@@ -93,20 +93,20 @@ func (s Structured) Professional() Professional {
 	}
 }
 
-// Experience is one work-history entry. Start/End are a structured perioddate.Date
+// Experience is one work-history entry. Start/End are a structured perioddate.PeriodDate
 // (year, optional month) that the model interprets from however the CV prints the
 // range; Current marks an ongoing role instead of a fabricated End. Summary is the
 // role/company one-line context; Highlights are the achievement bullets.
 type Experience struct {
-	Title      string           `json:"title,omitempty"`
-	Company    string           `json:"company,omitempty"`
-	Location   string           `json:"location,omitempty"`
-	Start      *perioddate.Date `json:"start,omitempty"`
-	End        *perioddate.Date `json:"end,omitempty"`
-	Current    bool             `json:"current,omitempty"`
-	Summary    string           `json:"summary,omitempty"`
-	Highlights []string         `json:"highlights,omitempty"`
-	Stack      []string         `json:"stack,omitempty"`
+	Title      string                 `json:"title,omitempty"`
+	Company    string                 `json:"company,omitempty"`
+	Location   string                 `json:"location,omitempty"`
+	Start      *perioddate.PeriodDate `json:"start,omitempty"`
+	End        *perioddate.PeriodDate `json:"end,omitempty"`
+	Current    bool                   `json:"current,omitempty"`
+	Summary    string                 `json:"summary,omitempty"`
+	Highlights []string               `json:"highlights,omitempty"`
+	Stack      []string               `json:"stack,omitempty"`
 }
 
 // Project is one portfolio/side-project entry.
@@ -116,13 +116,13 @@ type Project struct {
 	Highlights []string `json:"highlights,omitempty"`
 }
 
-// Education is one education entry. Year is the same structured perioddate.Date as
+// Education is one education entry. Year is the same structured perioddate.PeriodDate as
 // Experience's Start/End (month is rarely stated for a degree, so it is usually
 // year-only, but the type stays the one shared shape rather than a bare int).
 type Education struct {
-	Degree      string           `json:"degree,omitempty"`
-	Institution string           `json:"institution,omitempty"`
-	Year        *perioddate.Date `json:"year,omitempty"`
+	Degree      string                 `json:"degree,omitempty"`
+	Institution string                 `json:"institution,omitempty"`
+	Year        *perioddate.PeriodDate `json:"year,omitempty"`
 }
 
 // Sanitize bounds every string, coerces total-years into [0, maxYears], caps each

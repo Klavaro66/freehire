@@ -67,7 +67,7 @@ func TestRequestSchema_AsksForTotalYearsAsText(t *testing.T) {
 	}
 }
 
-// perioddate.Date carries its own lowercase `json:"year"`/`json:"month"` tags
+// perioddate.PeriodDate carries its own lowercase `json:"year"`/`json:"month"` tags
 // specifically so the schema (derived from Structured by reflection) asks the model
 // for {"year":...,"month":...} rather than the Go field names {"Year":...,"Month":...}
 // an untagged struct would produce.
@@ -91,7 +91,7 @@ func TestRequestSchema_DateFieldsAreLowercase(t *testing.T) {
 	}
 	dateProps, ok := start["properties"].(map[string]any)
 	if !ok {
-		t.Fatal("start has no nested properties — perioddate.Date did not schema as an object")
+		t.Fatal("start has no nested properties — perioddate.PeriodDate did not schema as an object")
 	}
 	for _, field := range []string{"year", "month"} {
 		if _, ok := dateProps[field]; !ok {

@@ -83,7 +83,7 @@ func seedBankedCareer(t *testing.T, queries *db.Queries, userID int64) {
 	if errors.Is(err, experience.ErrNotFound) {
 		place, err = bank.CreateEmployment(ctx, userID, experience.Employment{
 			Kind: experience.KindJob, Company: company, Role: role,
-			Start: &perioddate.Date{Year: 2019, Month: 1}, Current: true, Stack: []string{"go"},
+			Start: &perioddate.PeriodDate{Year: 2019, Month: 1}, Current: true, Stack: []string{"go"},
 		})
 	}
 	if err != nil {

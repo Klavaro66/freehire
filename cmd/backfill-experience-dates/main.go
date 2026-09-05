@@ -96,7 +96,7 @@ func run() int {
 // ("Present", "Current", ...) means the period genuinely was not stated — nil, no
 // fallback. A label that parses is used as-is. Anything else (non-empty, not a present
 // label, still unparseable) falls back to createdAt's year — see the package doc.
-func parseOrFallback(raw string, createdAt time.Time) *perioddate.Date {
+func parseOrFallback(raw string, createdAt time.Time) *perioddate.PeriodDate {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || perioddate.IsPresentLabel(trimmed) {
 		return nil
@@ -104,12 +104,12 @@ func parseOrFallback(raw string, createdAt time.Time) *perioddate.Date {
 	if d, ok := perioddate.Parse(trimmed); ok {
 		return d
 	}
-	return &perioddate.Date{Year: createdAt.Year()}
+	return &perioddate.PeriodDate{Year: createdAt.Year()}
 }
 
 // isFallback reports whether parseOrFallback took the created_at-year fallback path for
 // raw, purely for the run's own summary log — it does not affect what gets written.
-func isFallback(raw string, got *perioddate.Date) bool {
+func isFallback(raw string, got *perioddate.PeriodDate) bool {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || perioddate.IsPresentLabel(trimmed) || got == nil {
 		return false
@@ -118,7 +118,7 @@ func isFallback(raw string, got *perioddate.Date) bool {
 	return !ok
 }
 
-func dateToParams(d *perioddate.Date) (year pgtype.Int4, month pgtype.Int2) {
+func dateToParams(d *perioddate.PeriodDate) (year pgtype.Int4, month pgtype.Int2) {
 	if d == nil {
 		return year, month
 	}

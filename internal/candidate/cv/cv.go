@@ -208,17 +208,17 @@ func (d Document) withoutContacts() Document {
 	return d
 }
 
-// Experience is one work-history entry. Start/End are a structured perioddate.Date
+// Experience is one work-history entry. Start/End are a structured perioddate.PeriodDate
 // (year, optional month) — the same shared type experience.Employment and
 // resumeextract.Experience use. Rendering to PDF formats this back to display text
 // (see renderer.go); no template deals with the structured value directly.
 type ExperienceItem struct {
-	Role     string           `json:"role,omitempty"`
-	Company  string           `json:"company,omitempty"`
-	Location string           `json:"location,omitempty"`
-	Start    *perioddate.Date `json:"start,omitempty"`
-	End      *perioddate.Date `json:"end,omitempty"`
-	Current  bool             `json:"current,omitempty"`
+	Role     string                 `json:"role,omitempty"`
+	Company  string                 `json:"company,omitempty"`
+	Location string                 `json:"location,omitempty"`
+	Start    *perioddate.PeriodDate `json:"start,omitempty"`
+	End      *perioddate.PeriodDate `json:"end,omitempty"`
+	Current  bool                   `json:"current,omitempty"`
 	// Summary is the one-line company/role context printed under the role header, before
 	// the bullets. Stack is the per-role technology line printed after the bullets.
 	Summary string   `json:"summary,omitempty"`
@@ -226,13 +226,13 @@ type ExperienceItem struct {
 	Stack   []string `json:"stack,omitempty"`
 }
 
-// Education is one education entry. Start/End are the same structured perioddate.Date.
+// Education is one education entry. Start/End are the same structured perioddate.PeriodDate.
 type EducationItem struct {
-	Institution string           `json:"institution,omitempty"`
-	Degree      string           `json:"degree,omitempty"`
-	Field       string           `json:"field,omitempty"`
-	Start       *perioddate.Date `json:"start,omitempty"`
-	End         *perioddate.Date `json:"end,omitempty"`
+	Institution string                 `json:"institution,omitempty"`
+	Degree      string                 `json:"degree,omitempty"`
+	Field       string                 `json:"field,omitempty"`
+	Start       *perioddate.PeriodDate `json:"start,omitempty"`
+	End         *perioddate.PeriodDate `json:"end,omitempty"`
 }
 
 // SkillGroup is a named cluster of skills (e.g. "Languages" → Go, Python). A group with
@@ -256,11 +256,11 @@ type Project struct {
 }
 
 // Certification is one certification/credential. Year is the same structured
-// perioddate.Date.
+// perioddate.PeriodDate.
 type Certification struct {
-	Name   string           `json:"name,omitempty"`
-	Issuer string           `json:"issuer,omitempty"`
-	Year   *perioddate.Date `json:"year,omitempty"`
+	Name   string                 `json:"name,omitempty"`
+	Issuer string                 `json:"issuer,omitempty"`
+	Year   *perioddate.PeriodDate `json:"year,omitempty"`
 }
 
 // EmptyDocument returns an empty skeleton (default margins, no content) that is already

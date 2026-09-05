@@ -14,13 +14,13 @@ func structuredFixture() resumeextract.Structured {
 		Experience: []resumeextract.Experience{
 			{
 				Title: "Senior Software Engineer", Company: "RingCentral", Location: "USA, Remote",
-				Start: &perioddate.Date{Year: 2023, Month: 9}, Current: true, Summary: "Global SaaS leader",
+				Start: &perioddate.PeriodDate{Year: 2023, Month: 9}, Current: true, Summary: "Global SaaS leader",
 				Highlights: []string{"Cut latency 20s to 1s", "Sustained a 99.999% SLA"},
 				Stack:      []string{"golang", "mongodb"},
 			},
 			{
 				Title: "Team Lead", Company: "Sber",
-				Start: &perioddate.Date{Year: 2020, Month: 4}, End: &perioddate.Date{Year: 2022, Month: 4},
+				Start: &perioddate.PeriodDate{Year: 2020, Month: 4}, End: &perioddate.PeriodDate{Year: 2022, Month: 4},
 				Highlights: []string{"Cut report load by 95%"},
 			},
 		},

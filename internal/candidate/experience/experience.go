@@ -99,20 +99,20 @@ func (p Provenance) Publishable() bool {
 }
 
 // Employment is a place where evidence was produced. Start/End are a structured
-// perioddate.Date (year, optional month) — the same shared type resumeextract.Experience
+// perioddate.PeriodDate (year, optional month) — the same shared type resumeextract.Experience
 // and cv.ExperienceItem use.
 // JSON is kind-aware (see employment_json.go): jobs emit `company`, projects emit `name`
 // for the same stored Company field.
 type Employment struct {
-	ID       uuid.UUID        `json:"id"`
-	Kind     string           `json:"kind"`
-	Company  string           `json:"-"` // place label; wire: company (job) or name (project)
-	Role     string           `json:"role,omitempty"`
-	Location string           `json:"location,omitempty"`
-	Start    *perioddate.Date `json:"start,omitempty"`
-	End      *perioddate.Date `json:"end,omitempty"`
-	Current  bool             `json:"current,omitempty"`
-	Summary  string           `json:"summary,omitempty"`
+	ID       uuid.UUID              `json:"id"`
+	Kind     string                 `json:"kind"`
+	Company  string                 `json:"-"` // place label; wire: company (job) or name (project)
+	Role     string                 `json:"role,omitempty"`
+	Location string                 `json:"location,omitempty"`
+	Start    *perioddate.PeriodDate `json:"start,omitempty"`
+	End      *perioddate.PeriodDate `json:"end,omitempty"`
+	Current  bool                   `json:"current,omitempty"`
+	Summary  string                 `json:"summary,omitempty"`
 	// Link is the outbound URL for a portfolio project. Empty for jobs; for projects it
 	// is what Document.Projects.Link needs when seeding a CV from the bank.
 	Link string `json:"link,omitempty"`

@@ -10,7 +10,7 @@ import (
 // The model is asked for structured {"year":N,"month":N} dates, but it frequently emits
 // a bare number instead (prod: user 291 — resume_structured never persisted because
 // encoding/json aborts the WHOLE unmarshal on the first type mismatch, and one numeric
-// year silently killed the entire structured résumé). perioddate.Date.UnmarshalJSON's
+// year silently killed the entire structured résumé). perioddate.PeriodDate.UnmarshalJSON's
 // defensive bare-number tolerance must still catch this with the new schema shape.
 func TestUnmarshal_NumericDateFieldsDecodeAsYears(t *testing.T) {
 	raw := `{
@@ -24,12 +24,12 @@ func TestUnmarshal_NumericDateFieldsDecodeAsYears(t *testing.T) {
 		t.Fatalf("unmarshal with numeric year/dates failed: %v", err)
 	}
 
-	if len(s.Education) != 1 || *s.Education[0].Year != (perioddate.Date{Year: 2015}) {
+	if len(s.Education) != 1 || *s.Education[0].Year != (perioddate.PeriodDate{Year: 2015}) {
 		t.Errorf("Education[0].Year = %+v, want {2015 0}", educationYear(s))
 	}
 	if len(s.Experience) != 1 ||
-		*s.Experience[0].Start != (perioddate.Date{Year: 2019}) ||
-		*s.Experience[0].End != (perioddate.Date{Year: 2021}) {
+		*s.Experience[0].Start != (perioddate.PeriodDate{Year: 2019}) ||
+		*s.Experience[0].End != (perioddate.PeriodDate{Year: 2021}) {
 		t.Errorf("Experience start/end = %+v/%+v, want {2019 0}/{2021 0}",
 			experienceStart(s), experienceEnd(s))
 	}
@@ -56,21 +56,21 @@ func TestUnmarshal_TotalYearsFromString(t *testing.T) {
 	}
 }
 
-func educationYear(s Structured) *perioddate.Date {
+func educationYear(s Structured) *perioddate.PeriodDate {
 	if len(s.Education) == 0 {
 		return nil
 	}
 	return s.Education[0].Year
 }
 
-func experienceStart(s Structured) *perioddate.Date {
+func experienceStart(s Structured) *perioddate.PeriodDate {
 	if len(s.Experience) == 0 {
 		return nil
 	}
 	return s.Experience[0].Start
 }
 
-func experienceEnd(s Structured) *perioddate.Date {
+func experienceEnd(s Structured) *perioddate.PeriodDate {
 	if len(s.Experience) == 0 {
 		return nil
 	}

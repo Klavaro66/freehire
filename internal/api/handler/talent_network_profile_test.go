@@ -103,7 +103,7 @@ func TestTalentNetworkProfile_PublicMode(t *testing.T) {
 		Links:    []string{"https://linkedin.com/in/ada"},
 		Skills:   []string{"go", "algorithms"},
 		Experience: []resumeextract.Experience{
-			{Company: "Analytical Engines Inc", Title: "Engineer", End: &perioddate.Date{Year: 2020, Month: 1}},
+			{Company: "Analytical Engines Inc", Title: "Engineer", End: &perioddate.PeriodDate{Year: 2020, Month: 1}},
 		},
 	}
 	store := &fakeTalentNetworkPublicStore{row: db.GetTalentNetworkProfileByPublicIDRow{
@@ -139,7 +139,7 @@ func TestTalentNetworkProfile_AnonymousMode(t *testing.T) {
 		Links:    []string{"https://linkedin.com/in/ada"},
 		Experience: []resumeextract.Experience{
 			{Company: "Current Corp", Title: "Staff Engineer", Current: true},
-			{Company: "Past Co", Title: "Engineer", End: &perioddate.Date{Year: 2019, Month: 6}},
+			{Company: "Past Co", Title: "Engineer", End: &perioddate.PeriodDate{Year: 2019, Month: 6}},
 		},
 	}
 	store := &fakeTalentNetworkPublicStore{row: db.GetTalentNetworkProfileByPublicIDRow{

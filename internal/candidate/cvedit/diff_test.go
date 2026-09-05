@@ -181,7 +181,7 @@ func TestDiffHandlesAListThatWasEmpty(t *testing.T) {
 func TestDiffHandlesAWholeSectionAppearing(t *testing.T) {
 	old := sample()
 	want := sample()
-	want.Certifications = []cv.Certification{{Name: "CKA", Issuer: "CNCF", Year: &perioddate.Date{Year: 2024}}}
+	want.Certifications = []cv.Certification{{Name: "CKA", Issuer: "CNCF", Year: &perioddate.PeriodDate{Year: 2024}}}
 	want.Education = []cv.EducationItem{{Institution: "TU Delft", Degree: "MSc"}}
 
 	applyingTheDiffReproducesTheTarget(t, old, want)

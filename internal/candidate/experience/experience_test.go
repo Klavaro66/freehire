@@ -162,7 +162,7 @@ func TestEmploymentSanitizeAndValidate(t *testing.T) {
 		Company:  "  RingCentral  ",
 		Role:     strings.Repeat("r", maxShortRunes+20),
 		Location: "USA, Remote",
-		Start:    &perioddate.Date{Year: 2023, Month: 9},
+		Start:    &perioddate.PeriodDate{Year: 2023, Month: 9},
 		Current:  true,
 		Summary:  strings.Repeat("s", maxSummaryRunes+20),
 	}

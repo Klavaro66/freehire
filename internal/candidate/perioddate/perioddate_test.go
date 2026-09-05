@@ -8,18 +8,18 @@ import (
 func TestParse(t *testing.T) {
 	cases := []struct {
 		in   string
-		want *Date
+		want *PeriodDate
 		ok   bool
 	}{
-		{"2024", &Date{Year: 2024}, true},
-		{"2023-09", &Date{Year: 2023, Month: 9}, true},
-		{"2023/09", &Date{Year: 2023, Month: 9}, true},
-		{"Jan 2018", &Date{Year: 2018, Month: 1}, true},
-		{"January 2018", &Date{Year: 2018, Month: 1}, true},
-		{"Oct 2018", &Date{Year: 2018, Month: 10}, true},
-		{"October 2018", &Date{Year: 2018, Month: 10}, true},
-		{"May 2018", &Date{Year: 2018, Month: 5}, true},
-		{"Jun 2017", &Date{Year: 2017, Month: 6}, true},
+		{"2024", &PeriodDate{Year: 2024}, true},
+		{"2023-09", &PeriodDate{Year: 2023, Month: 9}, true},
+		{"2023/09", &PeriodDate{Year: 2023, Month: 9}, true},
+		{"Jan 2018", &PeriodDate{Year: 2018, Month: 1}, true},
+		{"January 2018", &PeriodDate{Year: 2018, Month: 1}, true},
+		{"Oct 2018", &PeriodDate{Year: 2018, Month: 10}, true},
+		{"October 2018", &PeriodDate{Year: 2018, Month: 10}, true},
+		{"May 2018", &PeriodDate{Year: 2018, Month: 5}, true},
+		{"Jun 2017", &PeriodDate{Year: 2017, Month: 6}, true},
 		{"Present", nil, false},
 		{"", nil, false},
 		{"sometime", nil, false},
@@ -41,13 +41,13 @@ func TestParse(t *testing.T) {
 
 func TestFormat(t *testing.T) {
 	cases := []struct {
-		in   *Date
+		in   *PeriodDate
 		want string
 	}{
 		{nil, ""},
-		{&Date{Year: 2018}, "2018"},
-		{&Date{Year: 2018, Month: 3}, "Mar 2018"},
-		{&Date{Year: 0}, ""}, // Year<=0 is treated as absent (see UnmarshalJSON's failure path)
+		{&PeriodDate{Year: 2018}, "2018"},
+		{&PeriodDate{Year: 2018, Month: 3}, "Mar 2018"},
+		{&PeriodDate{Year: 0}, ""}, // Year<=0 is treated as absent (see UnmarshalJSON's failure path)
 	}
 	for _, tc := range cases {
 		if got := tc.in.Format(); got != tc.want {
@@ -58,13 +58,13 @@ func TestFormat(t *testing.T) {
 
 func TestFormatRange(t *testing.T) {
 	cases := []struct {
-		start, end *Date
+		start, end *PeriodDate
 		current    bool
 		want       string
 	}{
-		{&Date{Year: 2018, Month: 3}, &Date{Year: 2021}, false, "Mar 2018 – 2021"},
-		{&Date{Year: 2018, Month: 10}, nil, true, "Oct 2018 – Present"},
-		{&Date{Year: 2018}, nil, false, "2018"},
+		{&PeriodDate{Year: 2018, Month: 3}, &PeriodDate{Year: 2021}, false, "Mar 2018 – 2021"},
+		{&PeriodDate{Year: 2018, Month: 10}, nil, true, "Oct 2018 – Present"},
+		{&PeriodDate{Year: 2018}, nil, false, "2018"},
 		{nil, nil, false, ""},
 	}
 	for _, tc := range cases {
@@ -77,15 +77,15 @@ func TestFormatRange(t *testing.T) {
 func TestSanitize(t *testing.T) {
 	cases := []struct {
 		name string
-		in   *Date
-		want *Date
+		in   *PeriodDate
+		want *PeriodDate
 	}{
 		{"nil stays nil", nil, nil},
-		{"in range unchanged", &Date{Year: 2020, Month: 6}, &Date{Year: 2020, Month: 6}},
-		{"year too low clears the whole date", &Date{Year: 1899, Month: 6}, nil},
-		{"year too high clears the whole date", &Date{Year: 2101}, nil},
-		{"month too high coerces to year-only", &Date{Year: 2020, Month: 13}, &Date{Year: 2020}},
-		{"negative month coerces to year-only", &Date{Year: 2020, Month: -1}, &Date{Year: 2020}},
+		{"in range unchanged", &PeriodDate{Year: 2020, Month: 6}, &PeriodDate{Year: 2020, Month: 6}},
+		{"year too low clears the whole date", &PeriodDate{Year: 1899, Month: 6}, nil},
+		{"year too high clears the whole date", &PeriodDate{Year: 2101}, nil},
+		{"month too high coerces to year-only", &PeriodDate{Year: 2020, Month: 13}, &PeriodDate{Year: 2020}},
+		{"negative month coerces to year-only", &PeriodDate{Year: 2020, Month: -1}, &PeriodDate{Year: 2020}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,11 +102,11 @@ func TestSanitize(t *testing.T) {
 
 func TestMarshalJSON(t *testing.T) {
 	cases := []struct {
-		in   Date
+		in   PeriodDate
 		want string
 	}{
-		{Date{Year: 2018, Month: 3}, `{"year":2018,"month":3}`},
-		{Date{Year: 2018}, `{"year":2018}`},
+		{PeriodDate{Year: 2018, Month: 3}, `{"year":2018,"month":3}`},
+		{PeriodDate{Year: 2018}, `{"year":2018}`},
 	}
 	for _, tc := range cases {
 		b, err := json.Marshal(tc.in)
@@ -123,20 +123,20 @@ func TestUnmarshalJSON(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
-		want Date
+		want PeriodDate
 	}{
-		{"new object shape, month present", `{"year":2018,"month":3}`, Date{Year: 2018, Month: 3}},
-		{"new object shape, year only", `{"year":2018}`, Date{Year: 2018}},
-		{"legacy string, year-month", `"2023-09"`, Date{Year: 2023, Month: 9}},
-		{"legacy string, month-name year", `"October 2018"`, Date{Year: 2018, Month: 10}},
-		{"legacy string, bare year", `"2024"`, Date{Year: 2024}},
-		{"legacy string, unparseable garbage decodes to zero value, no error", `"sometime"`, Date{}},
-		{"legacy string, Present decodes to zero value, no error", `"Present"`, Date{}},
-		{"bare number defensive shim (model returns a raw year)", `2019`, Date{Year: 2019}},
+		{"new object shape, month present", `{"year":2018,"month":3}`, PeriodDate{Year: 2018, Month: 3}},
+		{"new object shape, year only", `{"year":2018}`, PeriodDate{Year: 2018}},
+		{"legacy string, year-month", `"2023-09"`, PeriodDate{Year: 2023, Month: 9}},
+		{"legacy string, month-name year", `"October 2018"`, PeriodDate{Year: 2018, Month: 10}},
+		{"legacy string, bare year", `"2024"`, PeriodDate{Year: 2024}},
+		{"legacy string, unparseable garbage decodes to zero value, no error", `"sometime"`, PeriodDate{}},
+		{"legacy string, Present decodes to zero value, no error", `"Present"`, PeriodDate{}},
+		{"bare number defensive shim (model returns a raw year)", `2019`, PeriodDate{Year: 2019}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var got Date
+			var got PeriodDate
 			if err := json.Unmarshal([]byte(tc.in), &got); err != nil {
 				t.Fatalf("Unmarshal(%s): %v", tc.in, err)
 			}
@@ -148,12 +148,12 @@ func TestUnmarshalJSON(t *testing.T) {
 }
 
 func TestUnmarshalJSON_RoundTripsThroughMarshal(t *testing.T) {
-	original := Date{Year: 2018, Month: 3}
+	original := PeriodDate{Year: 2018, Month: 3}
 	b, err := json.Marshal(original)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	var got Date
+	var got PeriodDate
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}

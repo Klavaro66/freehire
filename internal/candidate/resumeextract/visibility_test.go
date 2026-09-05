@@ -14,8 +14,8 @@ import (
 // rule is content-based (Current), so position must not matter to it.
 func noEndedExperience() []Experience {
 	return []Experience{
-		{Title: "Engineer", Company: "Difference Co", Start: &perioddate.Date{Year: 2015, Month: 6}, End: &perioddate.Date{Year: 2017, Month: 12}},
-		{Title: "Senior Engineer", Company: "Babbage Systems", Start: &perioddate.Date{Year: 2018, Month: 1}, End: &perioddate.Date{Year: 2021, Month: 2}},
+		{Title: "Engineer", Company: "Difference Co", Start: &perioddate.PeriodDate{Year: 2015, Month: 6}, End: &perioddate.PeriodDate{Year: 2017, Month: 12}},
+		{Title: "Senior Engineer", Company: "Babbage Systems", Start: &perioddate.PeriodDate{Year: 2018, Month: 1}, End: &perioddate.PeriodDate{Year: 2021, Month: 2}},
 	}
 }
 
@@ -24,8 +24,8 @@ func noEndedExperience() []Experience {
 // wrong entry here.
 func oneCurrentExperience() []Experience {
 	return []Experience{
-		{Title: "Engineer", Company: "Difference Co", Start: &perioddate.Date{Year: 2015, Month: 6}, End: &perioddate.Date{Year: 2017, Month: 12}},
-		{Title: "Staff Engineer", Company: "Analytical Engines", Start: &perioddate.Date{Year: 2021, Month: 3}, Current: true},
+		{Title: "Engineer", Company: "Difference Co", Start: &perioddate.PeriodDate{Year: 2015, Month: 6}, End: &perioddate.PeriodDate{Year: 2017, Month: 12}},
+		{Title: "Staff Engineer", Company: "Analytical Engines", Start: &perioddate.PeriodDate{Year: 2021, Month: 3}, Current: true},
 	}
 }
 
@@ -33,9 +33,9 @@ func oneCurrentExperience() []Experience {
 // that must stay unmasked.
 func multipleCurrentExperience() []Experience {
 	return []Experience{
-		{Title: "Freelance Consultant", Company: "Self-employed", Start: &perioddate.Date{Year: 2022, Month: 1}, Current: true},
-		{Title: "Engineer", Company: "Difference Co", Start: &perioddate.Date{Year: 2015, Month: 6}, End: &perioddate.Date{Year: 2017, Month: 12}},
-		{Title: "Advisor", Company: "Babbage Systems", Start: &perioddate.Date{Year: 2023, Month: 5}, Current: true},
+		{Title: "Freelance Consultant", Company: "Self-employed", Start: &perioddate.PeriodDate{Year: 2022, Month: 1}, Current: true},
+		{Title: "Engineer", Company: "Difference Co", Start: &perioddate.PeriodDate{Year: 2015, Month: 6}, End: &perioddate.PeriodDate{Year: 2017, Month: 12}},
+		{Title: "Advisor", Company: "Babbage Systems", Start: &perioddate.PeriodDate{Year: 2023, Month: 5}, Current: true},
 	}
 }
 

@@ -41,7 +41,7 @@ type employmentRow struct {
 // dateToDB splits d into the two nullable columns Create/Update/FillBlanks bind — both
 // invalid (NULL) for a nil or year-only-with-zero-year date, month additionally invalid
 // for a year-only date.
-func dateToDB(d *perioddate.Date) (year pgtype.Int4, month pgtype.Int2) {
+func dateToDB(d *perioddate.PeriodDate) (year pgtype.Int4, month pgtype.Int2) {
 	if d == nil {
 		return year, month
 	}
@@ -53,12 +53,12 @@ func dateToDB(d *perioddate.Date) (year pgtype.Int4, month pgtype.Int2) {
 }
 
 // dateFromDB is dateToDB's inverse, used by employmentFromRow (store.go) to rebuild the
-// domain's *perioddate.Date from the two columns a row carries.
-func dateFromDB(year pgtype.Int4, month pgtype.Int2) *perioddate.Date {
+// domain's *perioddate.PeriodDate from the two columns a row carries.
+func dateFromDB(year pgtype.Int4, month pgtype.Int2) *perioddate.PeriodDate {
 	if !year.Valid {
 		return nil
 	}
-	d := &perioddate.Date{Year: int(year.Int32)}
+	d := &perioddate.PeriodDate{Year: int(year.Int32)}
 	if month.Valid {
 		d.Month = int(month.Int16)
 	}

@@ -491,7 +491,7 @@ func TestStoreCreateEmployment(t *testing.T) {
 
 	got, err := s.CreateEmployment(ctx, owner, Employment{
 		Kind: KindJob, Company: "  RingCentral  ", Role: "Senior Software Engineer",
-		Start: &perioddate.Date{Year: 2023, Month: 9}, Current: true,
+		Start: &perioddate.PeriodDate{Year: 2023, Month: 9}, Current: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateEmployment: %v", err)

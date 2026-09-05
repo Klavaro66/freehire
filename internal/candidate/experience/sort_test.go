@@ -8,8 +8,8 @@ import (
 	"github.com/strelov1/freehire/internal/candidate/perioddate"
 )
 
-func date(year, month int) *perioddate.Date {
-	return &perioddate.Date{Year: year, Month: month}
+func date(year, month int) *perioddate.PeriodDate {
+	return &perioddate.PeriodDate{Year: year, Month: month}
 }
 
 // Fixture matching a career scramble: the free-text era's lexicographic period_start

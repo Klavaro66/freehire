@@ -3,7 +3,7 @@
 //
 // Real CVs give this at one of two precisions: a bare year ("2024") or a month and
 // year ("October 2018", "2021-03"). Neither a SQL date column nor a Go time.Time can
-// represent "year-only" without lying about a precision nobody stated, so Date is a
+// represent "year-only" without lying about a precision nobody stated, so PeriodDate is a
 // plain (Year, Month) pair with Month == 0 meaning "year-only" — never a day.
 //
 // experience.Employment, resumeextract.Experience, and cv.ExperienceItem all embed
@@ -21,16 +21,16 @@ import (
 	"unicode"
 )
 
-// Date is a candidate-facing period boundary: a year, and optionally a month (1-12;
-// zero means the CV gave no month). A *Date of nil means the boundary is unset —
-// distinct from a Date whose Year is zero, which Sanitize never produces.
+// PeriodDate is a candidate-facing period boundary: a year, and optionally a month (1-12;
+// zero means the CV gave no month). A *PeriodDate of nil means the boundary is unset —
+// distinct from a PeriodDate whose Year is zero, which Sanitize never produces.
 //
 // Tagged lowercase (matching every other field on the structs that embed it) because
 // this shape also reaches an LLM: resumeextract's request schema is derived from
 // Structured by reflection (internal/platform/llmschema), which reads these same
 // struct tags — untagged fields would ask the model for {"Year":...,"Month":...}
 // instead of {"year":...,"month":...}.
-type Date struct {
+type PeriodDate struct {
 	Year  int `json:"year"`
 	Month int `json:"month,omitempty"`
 }
@@ -49,7 +49,7 @@ const (
 // evidence of when something happened, and there is nothing safe to fall back to
 // within just the date value. A month outside [1, 12] is dropped, coercing to
 // year-only instead of discarding the (valid) year alongside it.
-func Sanitize(d *Date) *Date {
+func Sanitize(d *PeriodDate) *PeriodDate {
 	if d == nil {
 		return nil
 	}
@@ -60,20 +60,20 @@ func Sanitize(d *Date) *Date {
 	if month < 0 || month > 12 {
 		month = 0
 	}
-	return &Date{Year: d.Year, Month: month}
+	return &PeriodDate{Year: d.Year, Month: month}
 }
 
 // monthNames indexes 1-12 to Format's three-letter abbreviation; index 0 is unused.
 var monthNames = [...]string{"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 
 // Format renders d for display, e.g. "Mar 2021" or "2018" for a year-only date. A nil
-// Date, or one with no valid year, formats as "" — callers joining a start/end pair
+// PeriodDate, or one with no valid year, formats as "" — callers joining a start/end pair
 // (see cv/renderer.go's daterange-equivalent) already treat an empty side as absent.
-// The Year <= 0 case matters beyond nil: UnmarshalJSON cannot make the *Date field
+// The Year <= 0 case matters beyond nil: UnmarshalJSON cannot make the *PeriodDate field
 // itself nil when handed an unparseable legacy string (encoding/json has already
-// allocated the pointee before calling it), so it leaves the zero Date{} instead —
+// allocated the pointee before calling it), so it leaves the zero PeriodDate{} instead —
 // Format treats that the same as absent rather than printing "0".
-func (d *Date) Format() string {
+func (d *PeriodDate) Format() string {
 	if d == nil || d.Year <= 0 {
 		return ""
 	}
@@ -89,7 +89,7 @@ func (d *Date) Format() string {
 // when only it is present, "" when neither is. current, when true, renders end as
 // "Present" instead of leaving it blank — the caller passes end=nil for an ongoing
 // entry, matching Employment/ExperienceItem's own Current-means-no-end convention.
-func FormatRange(start, end *Date, current bool) string {
+func FormatRange(start, end *PeriodDate, current bool) string {
 	a := start.Format()
 	b := end.Format()
 	if current {
@@ -114,10 +114,10 @@ func IsPresentLabel(s string) bool {
 	}
 }
 
-// Parse best-effort reads a free-text CV date label into a Date. Supported shapes:
+// Parse best-effort reads a free-text CV date label into a PeriodDate. Supported shapes:
 // "2024", "2023-09", "2023/09", "Jan 2018", "January 2018". Present/current labels and
 // anything else unrecognised report ok=false — Parse never guesses a date for those.
-func Parse(raw string) (d *Date, ok bool) {
+func Parse(raw string) (d *PeriodDate, ok bool) {
 	s := strings.TrimSpace(raw)
 	if s == "" || IsPresentLabel(s) {
 		return nil, false
@@ -132,12 +132,12 @@ func Parse(raw string) (d *Date, ok bool) {
 		return d, true
 	}
 	if y, err := strconv.Atoi(s); err == nil && y >= minYear && y <= maxYear {
-		return &Date{Year: y}, true
+		return &PeriodDate{Year: y}, true
 	}
 	return nil, false
 }
 
-func parseYearMonth(s string) (*Date, bool) {
+func parseYearMonth(s string) (*PeriodDate, bool) {
 	parts := strings.Split(s, "-")
 	if len(parts) != 2 {
 		return nil, false
@@ -147,10 +147,10 @@ func parseYearMonth(s string) (*Date, bool) {
 	if errY != nil || errM != nil || y < minYear || y > maxYear || m < 1 || m > 12 {
 		return nil, false
 	}
-	return &Date{Year: y, Month: m}, true
+	return &PeriodDate{Year: y, Month: m}, true
 }
 
-func parseMonthYear(s string) (*Date, bool) {
+func parseMonthYear(s string) (*PeriodDate, bool) {
 	parts := strings.Split(s, " ")
 	if len(parts) != 2 {
 		return nil, false
@@ -163,7 +163,7 @@ func parseMonthYear(s string) (*Date, bool) {
 	if err != nil || y < minYear || y > maxYear {
 		return nil, false
 	}
-	return &Date{Year: y, Month: m}, true
+	return &PeriodDate{Year: y, Month: m}, true
 }
 
 func monthNumber(name string) (int, bool) {
@@ -188,14 +188,14 @@ func monthNumber(name string) (int, bool) {
 	return m, ok
 }
 
-// dateAlias breaks the recursion a Date method calling json.Marshal/Unmarshal(d) on
+// dateAlias breaks the recursion a PeriodDate method calling json.Marshal/Unmarshal(d) on
 // itself would cause, while still going through the ordinary struct-tag-driven
 // encoding (Year/Month's own `json:` tags) rather than a second, hand-written shape.
-type dateAlias Date
+type dateAlias PeriodDate
 
 // MarshalJSON always emits the object shape — a value read from the legacy string
 // shape (see UnmarshalJSON) is upgraded the moment it is next saved.
-func (d Date) MarshalJSON() ([]byte, error) {
+func (d PeriodDate) MarshalJSON() ([]byte, error) {
 	return json.Marshal(dateAlias(d))
 }
 
@@ -205,15 +205,15 @@ func (d Date) MarshalJSON() ([]byte, error) {
 // perioddate's package doc); or a bare JSON number, the same defensive tolerance
 // resumeextract's old verbatimString shim gave free-text dates, kept here because a
 // model asked for {"year": N} routinely emits a bare N instead. A string or number that
-// fails to parse as a date decodes to the zero Date with no error: the jsonb stores
+// fails to parse as a date decodes to the zero PeriodDate with no error: the jsonb stores
 // this feeds are read-and-regenerated snapshots, not accumulating records, so a value
 // nobody can make sense of is dropped the same way an absent field would be, not
 // treated as a decode failure.
-func (d *Date) UnmarshalJSON(b []byte) error {
+func (d *PeriodDate) UnmarshalJSON(b []byte) error {
 	if trimmed := bytes.TrimSpace(b); len(trimmed) > 0 && trimmed[0] != '"' && trimmed[0] != '{' {
 		var y int
 		if err := json.Unmarshal(b, &y); err == nil {
-			if sanitized := Sanitize(&Date{Year: y}); sanitized != nil {
+			if sanitized := Sanitize(&PeriodDate{Year: y}); sanitized != nil {
 				*d = *sanitized
 			}
 			return nil
@@ -230,6 +230,6 @@ func (d *Date) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
 	}
-	*d = Date(a)
+	*d = PeriodDate(a)
 	return nil
 }

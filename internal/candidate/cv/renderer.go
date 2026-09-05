@@ -144,7 +144,7 @@ type LinkHrefs struct {
 // fields, so the templates keep reading cv.header — and because the extras live only on this
 // render-time wrapper, they are neither settable by a client nor persisted with the CV.
 //
-// Experience/Education/Certifications are re-declared here with their perioddate.Date
+// Experience/Education/Certifications are re-declared here with their perioddate.PeriodDate
 // fields formatted back to the plain display strings every template's daterange-style
 // helper has always expected (Go's json package resolves the same-named, shallower
 // field in favor of the one promoted from the embedded Document) — no .typ file needs

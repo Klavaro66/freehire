@@ -504,7 +504,7 @@ func TestResetCVFromResume_RefusesWhenTheBankSeedExceedsTheBulletCap(t *testing.
 
 	emp, err := bank.CreateEmployment(ctx, userID, experience.Employment{
 		Kind: experience.KindJob, Company: "Neon", Role: "Staff Engineer",
-		Start: &perioddate.Date{Year: 2018}, End: &perioddate.Date{Year: 2024},
+		Start: &perioddate.PeriodDate{Year: 2018}, End: &perioddate.PeriodDate{Year: 2024},
 	})
 	if err != nil {
 		t.Fatalf("CreateEmployment: %v", err)

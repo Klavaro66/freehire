@@ -13,15 +13,15 @@ func TestParseOrFallback(t *testing.T) {
 	cases := []struct {
 		name string
 		raw  string
-		want *perioddate.Date
+		want *perioddate.PeriodDate
 	}{
-		{"parses cleanly", "October 2018", &perioddate.Date{Year: 2018, Month: 10}},
-		{"bare year parses", "2024", &perioddate.Date{Year: 2024}},
+		{"parses cleanly", "October 2018", &perioddate.PeriodDate{Year: 2018, Month: 10}},
+		{"bare year parses", "2024", &perioddate.PeriodDate{Year: 2024}},
 		{"empty is a real absence, no fallback", "", nil},
 		{"whitespace-only is a real absence, no fallback", "   ", nil},
 		{"Present is a real absence, no fallback", "Present", nil},
 		{"present-label case/whitespace insensitive", "  current  ", nil},
-		{"garbled text falls back to created_at year", "sometime last year", &perioddate.Date{Year: 2022}},
+		{"garbled text falls back to created_at year", "sometime last year", &perioddate.PeriodDate{Year: 2022}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -62,11 +62,11 @@ func TestDateToParams(t *testing.T) {
 	if year, month := dateToParams(nil); year.Valid || month.Valid {
 		t.Errorf("dateToParams(nil) = %+v/%+v, want both invalid", year, month)
 	}
-	year, month := dateToParams(&perioddate.Date{Year: 2018})
+	year, month := dateToParams(&perioddate.PeriodDate{Year: 2018})
 	if !year.Valid || year.Int32 != 2018 || month.Valid {
 		t.Errorf("dateToParams(year-only) = %+v/%+v, want year=2018 valid, month invalid", year, month)
 	}
-	year, month = dateToParams(&perioddate.Date{Year: 2018, Month: 3})
+	year, month = dateToParams(&perioddate.PeriodDate{Year: 2018, Month: 3})
 	if !year.Valid || year.Int32 != 2018 || !month.Valid || month.Int16 != 3 {
 		t.Errorf("dateToParams(year+month) = %+v/%+v, want year=2018, month=3, both valid", year, month)
 	}
