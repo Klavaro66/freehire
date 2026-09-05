@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/strelov1/freehire/internal/candidate/perioddate"
 	"github.com/strelov1/freehire/internal/candidate/resumeextract"
 	"github.com/strelov1/freehire/internal/platform/db"
 )
@@ -146,8 +147,8 @@ func clipEducation(items []resumeextract.Education, maxCount int) []resumeextrac
 	for _, e := range items {
 		e.Degree = clipRunes(strings.TrimSpace(e.Degree), maxOwnedShort)
 		e.Institution = clipRunes(strings.TrimSpace(e.Institution), maxOwnedShort)
-		e.Year = clipRunes(strings.TrimSpace(e.Year), maxOwnedShort)
-		if e.Degree == "" && e.Institution == "" && e.Year == "" {
+		e.Year = perioddate.Sanitize(e.Year)
+		if e.Degree == "" && e.Institution == "" && e.Year == nil {
 			continue
 		}
 		out = append(out, e)

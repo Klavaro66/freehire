@@ -143,12 +143,75 @@ type LinkHrefs struct {
 // own fields plus has_photo and the resolved link targets. The embedding inlines Document's
 // fields, so the templates keep reading cv.header — and because the extras live only on this
 // render-time wrapper, they are neither settable by a client nor persisted with the CV.
+//
+// Experience/Education/Certifications are re-declared here with their perioddate.Date
+// fields formatted back to the plain display strings every template's daterange-style
+// helper has always expected (Go's json package resolves the same-named, shallower
+// field in favor of the one promoted from the embedded Document) — no .typ file needs
+// to know the stored value is now structured.
 func renderPayload(doc Document, hasPhoto bool, hrefs LinkHrefs) ([]byte, error) {
 	return json.Marshal(struct {
 		Document
-		HasPhoto  bool      `json:"has_photo"`
-		LinkHrefs LinkHrefs `json:"link_hrefs"`
-	}{Document: doc, HasPhoto: hasPhoto, LinkHrefs: resolveHrefs(doc, hrefs)})
+		Experience     []renderExperienceItem `json:"experience,omitempty"`
+		Education      []renderEducationItem  `json:"education,omitempty"`
+		Certifications []renderCertification  `json:"certifications,omitempty"`
+		HasPhoto       bool                   `json:"has_photo"`
+		LinkHrefs      LinkHrefs              `json:"link_hrefs"`
+	}{
+		Document:       doc,
+		Experience:     formatExperienceForRender(doc.Experience),
+		Education:      formatEducationForRender(doc.Education),
+		Certifications: formatCertificationsForRender(doc.Certifications),
+		HasPhoto:       hasPhoto,
+		LinkHrefs:      resolveHrefs(doc, hrefs),
+	})
+}
+
+// renderExperienceItem, renderEducationItem, and renderCertification are the render-time
+// shape of their Document counterparts, with Start/End/Year formatted to plain strings.
+type renderExperienceItem struct {
+	ExperienceItem
+	Start string `json:"start,omitempty"`
+	End   string `json:"end,omitempty"`
+}
+
+type renderEducationItem struct {
+	EducationItem
+	Start string `json:"start,omitempty"`
+	End   string `json:"end,omitempty"`
+}
+
+type renderCertification struct {
+	Certification
+	Year string `json:"year,omitempty"`
+}
+
+func formatExperienceForRender(items []ExperienceItem) []renderExperienceItem {
+	out := make([]renderExperienceItem, len(items))
+	for i, e := range items {
+		end := e.End.Format()
+		if e.Current {
+			end = "Present"
+		}
+		out[i] = renderExperienceItem{ExperienceItem: e, Start: e.Start.Format(), End: end}
+	}
+	return out
+}
+
+func formatEducationForRender(items []EducationItem) []renderEducationItem {
+	out := make([]renderEducationItem, len(items))
+	for i, e := range items {
+		out[i] = renderEducationItem{EducationItem: e, Start: e.Start.Format(), End: e.End.Format()}
+	}
+	return out
+}
+
+func formatCertificationsForRender(items []Certification) []renderCertification {
+	out := make([]renderCertification, len(items))
+	for i, c := range items {
+		out[i] = renderCertification{Certification: c, Year: c.Year.Format()}
+	}
+	return out
 }
 
 // resolveHrefs fills in a target for every link position: the caller's, when it supplied one, and
