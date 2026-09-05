@@ -26,9 +26,9 @@
   // The header's search box — the ONE of them, on every page.
   //
   // There were two: this, which filtered the list under it, and a launcher on every
-  // other page, which navigated to the feed. They shared the debounce, the
-  // stale-response token, the arrow keys, the hotkeys, the dismissal and the row
-  // rendering, in two copies, and differed in exactly one thing: what a pick DOES. So
+  // other page, which navigated to the feed. They shared the debounce, the stale-answer
+  // guard, the arrow keys, the hotkeys, the dismissal and the row rendering, in two
+  // copies, and differed in exactly one thing: what a pick DOES. So
   // that one thing is a target now (see `target` below), and everything else is
   // written once.
   //
@@ -43,12 +43,26 @@
   // feed. A hero-sized second copy of this component is how the two would drift.
   let {
     placeholder,
+    label,
     size = 'header',
     autofocus = false,
     counts = null,
     onOpenFilters,
   }: {
-    placeholder: string;
+    /** What an empty box shows. A single string is static; an array cycles through its
+     *  entries while the box is empty and untouched, fully composed by the caller (see
+     *  lib/placeholderRoles.ts).
+     *
+     *  One prop rather than a static one plus an override, because an override would
+     *  always win and leave the static string dead at every rotating call site — the
+     *  reader would have two candidates and no way to tell which one ships. Either way
+     *  this is never the field's accessible name; that is `label`. */
+    placeholder: string | string[];
+    /** The field's accessible name. Static, and required of every caller rather than
+     *  defaulting to `placeholder`: the two were one prop until the placeholder learned
+     *  to rotate, at which point a screen reader announced the input as whatever example
+     *  happened to be on screen. A default would reinstate that at the next call site. */
+    label: string;
     size?: 'header' | 'hero';
     /** Focus the box on mount — desktop only. A page whose whole content is this box
      *  should put the caret in it; on a phone the same call raises the keyboard over
@@ -69,11 +83,86 @@
 
   const hero = $derived(size === 'hero');
 
-  // How long the draft must sit still before the suggestions are recomputed. A pass
-  // costs ~10 ms over the catalogue on a warm desktop, more on a phone. Short enough
-  // to read as instant, long enough that a fast typist pays for it once rather than
-  // per letter.
-  const SUGGEST_DEBOUNCE_MS = 120;
+  // ---- the rotating placeholder ----
+  //
+  // Runs only while the box is empty and has never been touched. The first focus or
+  // keystroke stops it for the rest of the visit and freezes it on the entry then
+  // showing: text moving under the cursor while a query is being composed is the failure
+  // an animated placeholder invites, and reverting to a static string on stop would be a
+  // visible jump at the moment the visitor's attention is on the field.
+  //
+  // The list itself is composed in lib/placeholderRoles.ts, from the generated category
+  // vocabulary rather than from hand-written strings.
+  // Long enough to read the word and notice it is an example, short enough that a
+  // visitor who pauses sees it is a list rather than a typo. The fade is a fifth of it,
+  // so the box is legible for the great majority of each step.
+  const ROTATE_MS = 2500;
+  const FADE_MS = 200;
+
+  const rotation = $derived(Array.isArray(placeholder) ? placeholder : []);
+
+  let rotationIndex = $state(0);
+  let rotationStopped = $state(false);
+  let placeholderFading = $state(false);
+
+  function stopRotation() {
+    rotationStopped = true;
+  }
+
+  // Sampled AND subscribed: the OS-level setting can be turned on mid-visit, and reading
+  // it once would leave that visitor with a timer already running for the rest of it.
+  let reduceMotion = $state(false);
+  $effect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reduceMotion = query.matches;
+    const onChange = (e: MediaQueryListEvent) => (reduceMotion = e.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  });
+
+  $effect(() => {
+    // Under reduced motion the first entry stands alone, so no timer is started at all.
+    if (rotationStopped || reduceMotion || rotation.length < 2) return;
+
+    let swap: ReturnType<typeof setTimeout> | undefined;
+    const tick = setInterval(() => {
+      placeholderFading = true;
+      swap = setTimeout(() => {
+        rotationIndex = (rotationIndex + 1) % rotation.length;
+        placeholderFading = false;
+      }, FADE_MS);
+    }, ROTATE_MS);
+    return () => {
+      clearInterval(tick);
+      clearTimeout(swap);
+      // Every teardown path — a stop, an unmount, reduced motion switched on — can land
+      // inside the fade window, where the text is transparent and the swap that would
+      // restore it has just been cancelled. Without this the field keeps a placeholder
+      // nobody can see, which is worse than the one it was rotating away from.
+      placeholderFading = false;
+    };
+  });
+
+  // `rotation[0]` is what server-rendered markup carries, since the effects above are
+  // client-only — so the box never paints empty and then fills in.
+  const shownPlaceholder = $derived(
+    Array.isArray(placeholder) ? (placeholder[rotationIndex] ?? placeholder[0] ?? '') : placeholder,
+  );
+
+  // How long the draft must sit still before the suggestions are refetched.
+  //
+  // A settled draft costs THREE requests (completions, postings, companies), so the
+  // window is not sized against one cheap pass — it is sized against the gap between
+  // keystrokes. At 120ms it sat inside that gap: a fast typist's 18 characters fired
+  // six rounds, eighteen requests, for one query they had not finished writing. 300ms
+  // is past the gap and is the window the filter store already debounces its reload by
+  // (see urlSynced.svelte.ts) — one answer to "how long is a pause" across the app.
+  const SUGGEST_DEBOUNCE_MS = 300;
+
+  // Below this, the box asks nothing. A single character matches a large fraction of
+  // the catalogue, so the round trip buys a list nobody can act on — and it is the one
+  // round that fires with certainty, since every query passes through its first letter.
+  const SUGGEST_MIN_CHARS = 2;
 
   // Section caps. The dropdown is a shortcut, not a results page: past a handful each
   // section stops being scannable and the whole thing stops fitting on a phone.
@@ -104,6 +193,11 @@
     // underneath it. A caret the visitor did not place is not the question "what can I
     // put here", so close it back: their first click or keystroke opens it as usual.
     dismissed = true;
+    // Same reasoning, and the same undo: the focus above fires the field's own handler,
+    // which stops the placeholder rotation. On the homepage — where this box IS the
+    // page, and the one surface the rotation exists for — that killed it before the
+    // first tick. A caret nobody placed has not interrupted anything.
+    rotationStopped = false;
   });
   // -1 means nothing is highlighted, which is the state the dropdown opens in: Enter
   // then falls through to the free-text search it has always run.
@@ -208,44 +302,56 @@
     return () => clearTimeout(timer);
   });
 
-  // An empty box offers the catalogue's shape; a typed one offers what matches.
+  // A box with nothing to complete offers the catalogue's shape; a typed one offers
+  // what matches.
   //
-  // The empty case is the whole point of opening on focus, and it is answered LOCALLY:
+  // The first case is the whole point of opening on focus, and it is answered LOCALLY:
   // the curated group order lives in the filter modal's own grouping, checked there
   // against the category vocabulary at compile time, so asking a server for it would
   // be a second copy of that order. The typed case is the endpoint's — it completes a
   // phrase against the catalogue's real vocabulary, which no dictionary shipped to the
   // browser can do.
+  //
+  // The threshold is SUGGEST_MIN_CHARS, the same one the fetch below gates on, and
+  // deliberately not a separate `=== ''`. Two thresholds opened a state nobody designed:
+  // at exactly one character the box was past "empty" but short of "asked", so it showed
+  // neither the starters nor completions it had not fetched — a ten-row panel collapsing
+  // to the single free-text row, then refilling on the next keystroke. One predicate
+  // answers "is there a query yet", so there is no gap for a state to fall into.
   const starters = $derived(suggest ? starterSuggestions(suggest.counts()) : []);
   let completions = $state.raw<Suggestion[]>([]);
-  const suggestions = $derived(settledQuery.trim() === '' ? starters : completions);
+  const suggestions = $derived(
+    settledQuery.trim().length < SUGGEST_MIN_CHARS ? starters : completions,
+  );
   // The parts each completion applies, by row key — kept beside the rows rather than
   // inside them because a Suggestion is what the dropdown RENDERS, and these are what
   // choosing it DOES.
   let completionParts = $state.raw(new Map<string, ApiSuggestionPart[]>());
   // Postings and companies for the typed text, fetched exactly the way the launcher
-  // dropdown (HeaderSearch) fetches them — same endpoints, same stale-response token,
-  // same row rendering below. A second implementation of "show me matching jobs" is
-  // how the two would drift.
+  // dropdown (HeaderSearch) fetches them — same endpoints, same abandonment rule, same
+  // row rendering below. A second implementation of "show me matching jobs" is how the
+  // two would drift.
   //
   // These matter MORE now than before, not less: the list below no longer narrows as
   // you type, so these rows are the only live evidence the query finds anything.
   let jobs = $state.raw<Job[]>([]);
   let companies = $state.raw<CompanyListItem[]>([]);
-  // Bumped on every fetch; a response for an older token is stale and dropped, so a
-  // slow request cannot overwrite a fresher one.
-  let previewToken = 0;
 
   $effect(() => {
     const q = settledQuery.trim();
-    const mine = ++previewToken;
-    if (q === '' || !suggest) {
+    if (q.length < SUGGEST_MIN_CHARS || !suggest) {
       completions = [];
       completionParts = new Map();
       jobs = [];
       companies = [];
       return;
     }
+    // One controller per settled query, aborted by this effect's own cleanup. It
+    // replaced a stale-response counter, which dropped the ANSWER after the request had
+    // already gone out and the server had already worked for it. The signal doubles as
+    // the staleness check below: abandoned and stale are the same condition here, so a
+    // counter beside it would be a second answer to one question.
+    const ac = new AbortController();
     void (async () => {
       // allSettled, not all: the three sections are independent, so one endpoint
       // failing still shows the sections that succeeded instead of blanking all of
@@ -253,14 +359,16 @@
       // a schedule — a cold or missing one must cost the box its completions, not its
       // postings.
       const [s, j, c] = await Promise.allSettled([
-        api.suggest(q, completionsLimit),
-        api.searchJobs(new URLSearchParams({ q }), jobsLimit, 0),
+        api.suggest(q, completionsLimit, ac.signal),
+        api.searchJobs(new URLSearchParams({ q }), jobsLimit, 0, ac.signal),
         // Over-fetch: most of what the fuzzy endpoint returns is discarded below, and
         // asking for exactly three would leave the section empty whenever the fourth
         // was the only real match.
-        api.listCompanies(q, companiesFetch, 0),
+        api.listCompanies(q, companiesFetch, 0, undefined, ac.signal),
       ]);
-      if (mine !== previewToken) return;
+      // An abort rejects all three, and `allSettled` would otherwise report that as
+      // three empty sections — blanking the panel a fresher query is about to fill.
+      if (ac.signal.aborted) return;
       const rows = s.status === 'fulfilled' ? s.value : [];
       completions = fromApi(rows);
       completionParts = new Map(completions.map((row, i) => [row.slug, rows[i]?.parts ?? []]));
@@ -268,6 +376,7 @@
       companies =
         c.status === 'fulfilled' ? namedCompanies(c.value.items, q, companiesLimit) : [];
     })();
+    return () => ac.abort();
   });
 
   // ── A pasted link ─────────────────────────────────────────────────────────
@@ -316,8 +425,9 @@
     // The box may have moved on while the intake was out: a paste over the old text, or
     // the text cleared entirely. The answer is about the URL we asked with, so applying
     // it now would navigate to a posting nobody is asking about any more — the same
-    // stale-response hazard the suggestion fetches guard with `previewToken`, answered
-    // here by the question itself rather than by a counter.
+    // stale-answer hazard the suggestion fetches guard with their AbortController, held
+    // off here by comparing the question instead, because this runs from a click rather
+    // than from an effect with a cleanup to hang the abort on.
     if (link?.url !== pasted.url) return;
     if (step.kind === 'open') {
       openPosting(step.slug);
@@ -613,10 +723,12 @@
         // autofocused hero would stay silent when its own field is clicked.
         dismissed = false;
         activeIndex = -1;
+        stopRotation();
       }}
       oninput={(e) => {
         dismissed = false;
         activeIndex = -1;
+        stopRotation();
         // Editing the text asks a different question, so the last link's answer goes
         // with it — otherwise a half-corrected URL sits under a verdict on the old one.
         linkStep = null;
@@ -634,18 +746,23 @@
         // box permanently silent for the rest of the visit.
         dismissed = false;
         activeIndex = -1;
+        stopRotation();
       }}
       onkeydown={onKeydown}
       type="text"
-      {placeholder}
-      aria-label={placeholder}
+      placeholder={shownPlaceholder}
+      aria-label={label}
       autocomplete="off"
       spellcheck="false"
       role="combobox"
       aria-expanded={suggestOpen}
       aria-controls="role-suggestions"
       aria-activedescendant={activeIndex >= 0 ? `role-suggestion-${activeIndex}` : undefined}
-      class="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+      style="--placeholder-fade: {FADE_MS}ms"
+      class={cn(
+        'placeholder-rotates min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground',
+        placeholderFading && 'placeholder-faded',
+      )}
     />
     {#if draft.text}
       <!-- Clearing is an explicit act, not typing, so it commits at once: the visitor
@@ -853,3 +970,25 @@
     </ul>
   {/if}
 </div>
+
+<style>
+  /* The rotating placeholder's crossfade.
+     Transitioning ::placeholder colour rather than overlaying a positioned span keeps
+     the box's flex row untouched — the field, the location prefix, the clear button and
+     the filters trigger already negotiate width in there, and a second element is a
+     layout risk taken for a cosmetic gain.
+
+     The duration comes from the script's FADE_MS rather than being written twice: it is
+     the same measurement — how long the text is held invisible before it is swapped —
+     and two copies would drift into swapping the word while it was still legible.
+
+     No reduced-motion rule here: under that setting no timer is ever started, so nothing
+     ever adds the faded class and a transition that can't run needs no switching off. */
+  .placeholder-rotates::placeholder {
+    transition: color var(--placeholder-fade) ease;
+  }
+
+  .placeholder-faded::placeholder {
+    color: transparent;
+  }
+</style>

@@ -46,7 +46,7 @@ var blocks = map[string][]string{
 	},
 	"dict": {
 		"classify", "companyname", "industrytag", "lang", "location", "normalize",
-		"roletype", "skilladjacency", "skillbundle", "skilltag",
+		"roletype", "skilladjacency", "skillbundle", "skilltag", "slugmint",
 		// skillvec/gen is the registry generator — a main package that reads skilltag
 		// and writes skillvec's source. It never ships in a binary, but it is a package
 		// in the repo, so it needs a block like any other.
@@ -107,9 +107,9 @@ var blocks = map[string][]string{
 	},
 	"application": {
 		"appevent", "apptimeline", "autoapply", "autoapplyorchestrate", "calmatch", "calsync",
-		"deliverywindow", "followup", "gmailsync", "ical", "inbox", "jobtracking", "mailbox",
-		"mailclassify", "mailingest", "maillink", "mailmatch", "mailrecall", "mailtpl", "userjob",
-		"viewlog",
+		"deliverywindow", "followup", "gmailsync", "ical", "inbox", "jobtracking", "joblists",
+		"mailbox", "mailclassify", "mailingest", "maillink", "mailmatch", "mailrecall", "mailtpl",
+		"userjob", "viewlog",
 	},
 	"search": {
 		"facetsnapshot", "savedsearch", "search", "searchdrain", "searchintent",
@@ -126,10 +126,15 @@ var blocks = map[string][]string{
 		"catalogstats", "contribution", "ingestsched", "jdresolve", "linkimport", "linksource",
 		"moderation", "pipeline", "screeninganswers", "sources", "submission", "telegram",
 	},
+	// socialdigest is here and not in ingest because it is outbound engagement — the
+	// same shape as broadcast and notify, differing only in that its audience is the
+	// public rather than an account. It reads the catalogue (job) and the view rollup
+	// (application), both below it.
 	"engage": {
 		"broadcast", "community", "companyfeedback", "emailnotify",
 		"mailpreview", "notify", "nudge", "onboarding", "pushnotify", "referral",
-		"reminder", "report", "subscription", "telegramnotify", "vote", "webhooknotify",
+		"reminder", "report", "socialdigest", "subscription", "telegramnotify", "vote",
+		"webhooknotify",
 	},
 	// atsapply and candidateprofile sit here, not lower, because both need to reach
 	// ingest (applyform, screeninganswers) as well as candidate (experience, cv,

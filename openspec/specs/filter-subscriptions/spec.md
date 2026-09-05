@@ -169,8 +169,8 @@ SHALL resolve the recipient from the user's account email, read live at delivery
 time, so that no per-subscription address is stored and a changed account email
 takes effect on the next delivery. The `webhook` channel SHALL resolve the
 recipient from the account's configured webhook destination, read live at
-delivery time, so that a rotated secret, a changed URL, or a disabled
-destination takes effect on the next delivery without editing the subscription.
+delivery time, so that a changed URL or a disabled destination takes effect on the next
+delivery without editing the subscription.
 A subscription whose channel has no configured notifier, or whose account has no
 enabled destination for that channel, SHALL be softly skipped (its matches stay
 pending, no attempt counted).
@@ -193,7 +193,7 @@ pending, no attempt counted).
 #### Scenario: Webhook delivery resolves the account's destination
 
 - **WHEN** a `webhook` subscription is delivered
-- **THEN** the worker resolves the URL and current secret from the account's webhook destination rather than from a per-subscription value
+- **THEN** the worker resolves the URL from the account's webhook destination rather than from a per-subscription value
 
 #### Scenario: No configured or disabled webhook destination is skipped, not failed
 

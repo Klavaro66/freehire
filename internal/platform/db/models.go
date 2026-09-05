@@ -709,6 +709,24 @@ type JobDailyView struct {
 	Day     pgtype.Date `json:"day"`
 	JobID   int64       `json:"job_id"`
 	Uniques int32       `json:"uniques"`
+	// Unique daily visitors counted from PAGE opens only, which are bot-filtered. The `uniques` column beside it fuses page opens with API reads, and API reads carry no bot filtering — so page_uniques is the only one of the two that describes people, and the only one safe to rank a public post on. Zero for every row written before migration 0138; deliberately not backfilled.
+	PageUniques int32 `json:"page_uniques"`
+}
+
+type JobList struct {
+	ID          int64              `json:"id"`
+	UserID      int64              `json:"user_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	PublicSlug  pgtype.Text        `json:"public_slug"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type JobListItem struct {
+	ListID  int64              `json:"list_id"`
+	JobID   int64              `json:"job_id"`
+	AddedAt pgtype.Timestamptz `json:"added_at"`
 }
 
 type JobReminder struct {
@@ -915,8 +933,6 @@ type SavedSearch struct {
 	Query              string             `json:"query"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	PublicSlug         pgtype.Text        `json:"public_slug"`
-	AuthorLabel        pgtype.Text        `json:"author_label"`
 	DerivedFromProfile bool               `json:"derived_from_profile"`
 }
 
@@ -970,6 +986,15 @@ type SemanticOutbox struct {
 	LastError   string             `json:"last_error"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	JobPostedAt pgtype.Timestamptz `json:"job_posted_at"`
+}
+
+// Ledger of published daily social digests. Unique on (day, channel, job_id): the publish-once check reads the (day, channel) prefix, the quarantine scans a day RANGE across all channels — [digest day - 7, digest day), the upper bound exclusive so that a digest cannot quarantine itself. Written only after a channel publishes successfully; a dry run never writes here.
+type SocialDigestPost struct {
+	Day         pgtype.Date        `json:"day"`
+	Channel     string             `json:"channel"`
+	JobID       int64              `json:"job_id"`
+	Slot        int32              `json:"slot"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
 }
 
 type Subscription struct {
@@ -1098,11 +1123,14 @@ type User struct {
 	Timezone                   pgtype.Text        `json:"timezone"`
 	Language                   string             `json:"language"`
 	LlmKeyID                   pgtype.Text        `json:"llm_key_id"`
-	ProUntil                   pgtype.Timestamptz `json:"pro_until"`
 	Username                   pgtype.Text        `json:"username"`
 	UsernameUpdatedAt          pgtype.Timestamptz `json:"username_updated_at"`
 	StripeCustomerID           pgtype.Text        `json:"stripe_customer_id"`
 	OnboardingCompletedAt      pgtype.Timestamptz `json:"onboarding_completed_at"`
+	ProUntilStripe             pgtype.Timestamptz `json:"pro_until_stripe"`
+	ProUntilRevenuecat         pgtype.Timestamptz `json:"pro_until_revenuecat"`
+	ProUntilGranted            pgtype.Timestamptz `json:"pro_until_granted"`
+	ProUntil                   pgtype.Timestamptz `json:"pro_until"`
 }
 
 type UserEmailCode struct {

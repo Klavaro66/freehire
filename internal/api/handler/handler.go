@@ -419,6 +419,7 @@ func Register(app *fiber.App, cfg Config) {
 	reportsH := newReportHandlers(queries)
 	ghostReportsH := newGhostReportHandlers(queries)
 	savedSearchH := newSavedSearchHandlers(queries)
+	jobListH := newJobListHandlers(queries)
 	subscriptionH := newSubscriptionHandlers(queries)
 	webhookH := newWebhookHandlers(queries)
 	profileSvc := userprofile.New(userprofile.NewQueriesRepository(queries))
@@ -482,7 +483,11 @@ func Register(app *fiber.App, cfg Config) {
 	jdResolveH := newJDResolveHandlers(jdresolve.New(queries, importer, privatejob.NewWriter(queries)))
 	planH := newPlanHandlers(plans, queries)
 	billingSvc := billing.New(cfg.Billing, queries)
-	billingH := newBillingHandlers(billingSvc)
+	// The store provider reads its own environment rather than taking configuration from
+	// cfg: it is enabled, disabled and credentialed independently of Stripe, and threading it
+	// through the handler config would tie the two together for no reason but symmetry.
+	storeSvc := billing.NewRevenueCat(billing.RevenueCatConfigFromEnv(), queries)
+	billingH := newBillingHandlers(billingSvc, storeSvc)
 	// Public: a pricing page that needs an account cannot do a pricing page's job.
 	plansH := newPlansHandlers(cfg.Plan, billingSvc)
 	matchH := newMatchHandlers(queries, profileSvc, resumeStore, matchAnalyzer, plans)
@@ -724,6 +729,9 @@ func Register(app *fiber.App, cfg Config) {
 
 	// Saved searches + the public shared-board read (see savedSearchHandlers).
 	savedSearchH.register(api, mw)
+	// Job lists: named sets of specific jobs, independent of "save", with an
+	// optional public read-only page (see jobListHandlers).
+	jobListH.register(api, mw)
 
 	// Public catalogue-activity, member-growth, engagement, facet-snapshot, and
 	// ingest-status reads (see statsHandlers).
