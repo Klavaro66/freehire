@@ -251,11 +251,11 @@
       companies = [];
       return;
     }
-    // One controller per settled query, aborted by this effect's own cleanup. It does
-    // two jobs a stale-response counter did only half of: the browser drops the
-    // connection instead of holding it open for an answer nobody will read, AND
-    // `signal.aborted` below is the staleness check — the request that was abandoned
-    // is exactly the one whose answer must not land.
+    // One controller per settled query, aborted by this effect's own cleanup. It
+    // replaced a stale-response counter, which dropped the ANSWER after the request had
+    // already gone out and the server had already worked for it. The signal doubles as
+    // the staleness check below: abandoned and stale are the same condition here, so a
+    // counter beside it would be a second answer to one question.
     const ac = new AbortController();
     void (async () => {
       // allSettled, not all: the three sections are independent, so one endpoint
@@ -264,12 +264,12 @@
       // a schedule — a cold or missing one must cost the box its completions, not its
       // postings.
       const [s, j, c] = await Promise.allSettled([
-        api.suggest(q, completionsLimit, { signal: ac.signal }),
-        api.searchJobs(new URLSearchParams({ q }), jobsLimit, 0, { signal: ac.signal }),
+        api.suggest(q, completionsLimit, ac.signal),
+        api.searchJobs(new URLSearchParams({ q }), jobsLimit, 0, ac.signal),
         // Over-fetch: most of what the fuzzy endpoint returns is discarded below, and
         // asking for exactly three would leave the section empty whenever the fourth
         // was the only real match.
-        api.listCompanies(q, companiesFetch, 0, undefined, { signal: ac.signal }),
+        api.listCompanies(q, companiesFetch, 0, undefined, ac.signal),
       ]);
       // An abort rejects all three, and `allSettled` would otherwise report that as
       // three empty sections — blanking the panel a fresher query is about to fill.
