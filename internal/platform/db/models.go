@@ -1119,11 +1119,14 @@ type User struct {
 	Timezone                   pgtype.Text        `json:"timezone"`
 	Language                   string             `json:"language"`
 	LlmKeyID                   pgtype.Text        `json:"llm_key_id"`
-	ProUntil                   pgtype.Timestamptz `json:"pro_until"`
 	Username                   pgtype.Text        `json:"username"`
 	UsernameUpdatedAt          pgtype.Timestamptz `json:"username_updated_at"`
 	StripeCustomerID           pgtype.Text        `json:"stripe_customer_id"`
 	OnboardingCompletedAt      pgtype.Timestamptz `json:"onboarding_completed_at"`
+	ProUntilStripe             pgtype.Timestamptz `json:"pro_until_stripe"`
+	ProUntilRevenuecat         pgtype.Timestamptz `json:"pro_until_revenuecat"`
+	ProUntilGranted            pgtype.Timestamptz `json:"pro_until_granted"`
+	ProUntil                   pgtype.Timestamptz `json:"pro_until"`
 }
 
 type UserEmailCode struct {
