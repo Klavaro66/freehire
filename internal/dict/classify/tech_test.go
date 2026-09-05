@@ -92,6 +92,21 @@ func TestIsTech(t *testing.T) {
 	}
 }
 
+func TestIsTechSlug(t *testing.T) {
+	for _, title := range []string{
+		"python-fejleszto-acme-kft-budapest",
+		"sap-abap-fejleszto-acme-kft-budapest",
+		"software-engineer-acme-kft-budapest",
+	} {
+		if !IsTechSlug(title) {
+			t.Errorf("IsTechSlug(%q) = false, want true", title)
+		}
+	}
+	if IsTechSlug("gepeszmernok-acme-kft-budapest") {
+		t.Error("IsTechSlug(mechanical engineer slug) = true, want false")
+	}
+}
+
 // A software title that spells "design" in the middle must still read as technical.
 // "software design engineer" is not adjacent to any techTitleTerms entry — wordmatch
 // needs adjacency — so without its own term it fell through to unknown once the

@@ -3,6 +3,7 @@ package classify
 import (
 	"strings"
 
+	"github.com/strelov1/freehire/internal/dict/normalize"
 	"github.com/strelov1/freehire/internal/dict/wordmatch"
 )
 
@@ -106,6 +107,14 @@ var techTitleTerms = []string{
 	// Aerospace, Texas Instruments, Flextronics), so it is not software-anchored and
 	// stays unknown rather than dragging plant engineers into tech.
 	"member of technical staff", "member of the technical staff", "founding engineer",
+	// Profession.hu emits these Hungarian titles in ASCII URL slugs. Keeping the native
+	// spellings here makes them useful to normal title classification too; IsTechSlug
+	// normalizes both the slug and these terms through normalize.Slug before matching.
+	"java fejlesztő", "szoftver mérnök", "szoftverfejlesztő", "szoftver fejlesztő",
+	"alkalmazásfejlesztő", "alkalmazás fejlesztő", "python fejlesztő", "node.js fejlesztő",
+	".net fejlesztő", "adatbázis fejlesztő", "adattárház fejlesztő", "bi fejlesztő",
+	"sap abap fejlesztő", "pega fejlesztő", "odoo fejlesztő", "beágyazott szoftverfejlesztő",
+	"mobilalkalmazás fejlesztő", "front end engineer",
 	// "AI-native"/"AI-enabled" describe the toolchain the engineer works with, not
 	// the discipline, so they claim no category — but the role is still software.
 	// Hyphen and space are separate aliases: a hyphen is a word boundary here.
@@ -124,6 +133,20 @@ func IsTech(title string) bool {
 	lower := strings.ToLower(title)
 	for _, term := range techTitleTerms {
 		if wordmatch.Contains(lower, term, wordmatch.UnicodeBoundary) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsTechSlug applies the same technical-title dictionary to an ASCII URL slug. Both
+// sides are slug-normalized so Hungarian accents and URL punctuation cannot make the
+// source-specific representation drift from the common classification vocabulary.
+func IsTechSlug(slug string) bool {
+	text := strings.ReplaceAll(normalize.Slug(slug), "-", " ")
+	for _, term := range techTitleTerms {
+		term = strings.ReplaceAll(normalize.Slug(term), "-", " ")
+		if wordmatch.Contains(text, term, wordmatch.UnicodeBoundary) {
 			return true
 		}
 	}

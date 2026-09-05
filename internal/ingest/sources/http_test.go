@@ -373,3 +373,20 @@ func TestClientGetJSONAcceptsBodyExactlyAtCap(t *testing.T) {
 		t.Errorf("decoded content = %q, want %q", out.Content, "acme")
 	}
 }
+
+func TestNewProfessionClientUsesFreshHTTP11Connections(t *testing.T) {
+	c := NewProfessionClient()
+	transport, ok := c.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport = %T, want *http.Transport", c.httpClient.Transport)
+	}
+	if transport.ForceAttemptHTTP2 {
+		t.Error("Profession transport must not attempt HTTP/2")
+	}
+	if !transport.DisableKeepAlives {
+		t.Error("Profession transport must not reuse sitemap connections")
+	}
+	if transport.DialContext == nil {
+		t.Error("Profession transport dropped the SSRF-guarded dialer")
+	}
+}

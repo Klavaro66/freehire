@@ -94,7 +94,11 @@ func run() int {
 	defer cleanup()
 	repo := boardcatalog.NewQueriesRepository(db.New(pool))
 
-	client := newCountingClient(paced(sources.NewClient(), *pace))
+	transport := sources.NewClient()
+	if provider == "profession" {
+		transport = sources.NewProfessionClient()
+	}
+	client := newCountingClient(paced(transport, *pace))
 	if *pace > 0 {
 		log.Printf("harvest-boards: pacing probes at %.2f req/s with %d workers", *pace, *workers)
 	}

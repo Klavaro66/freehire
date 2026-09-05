@@ -314,6 +314,98 @@ func TestProfessionFetchNewSkipsSeen(t *testing.T) {
 	}
 }
 
+func TestProfessionNonITBoardPrefiltersBySlug(t *testing.T) {
+	const techURL = "https://www.profession.hu/allas/python-fejleszto-acme-kft-budapest-2991001"
+	const nonTechURL = "https://www.profession.hu/allas/gepeszmernok-acme-kft-budapest-2991002"
+
+	http := &routedHTTP{}
+	http.route("sitemap-listings-index-hu.xml", `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<sitemap><loc>https://www.profession.hu/sitemap-listings-engineering-hu.xml</loc></sitemap>
+</sitemapindex>`)
+	http.route("sitemap-listings-engineering-hu.xml", professionCategorySitemapXML(
+		techURL,
+		nonTechURL,
+	))
+	http.route("-2991001", professionPostingHTML(professionPostingOpts{
+		title:       "Python Developer",
+		company:     "ACME Kft.",
+		addressLine: "Budapest",
+		sections: [][3]string{
+			{"tasks", "Feladatok", "<p>Backend fejlesztés</p>"},
+		},
+	}))
+	http.route("-2991002", professionPostingHTML(professionPostingOpts{
+		title:       "Gépészmérnök",
+		company:     "ACME Kft.",
+		addressLine: "Budapest",
+		sections: [][3]string{
+			{"tasks", "Feladatok", "<p>Gépészeti tervezés</p>"},
+		},
+	}))
+
+	entry := CompanyEntry{
+		Company:  "Profession.hu — Engineering",
+		Provider: "profession",
+		Board:    "engineering",
+	}
+
+	jobs, err := NewProfession(http).Fetch(context.Background(), entry)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	if len(jobs) != 1 {
+		t.Fatalf("Fetch returned %d jobs, want 1: %+v", len(jobs), jobs)
+	}
+	if jobs[0].ExternalID != "2991001" {
+		t.Errorf("external id = %q, want 2991001", jobs[0].ExternalID)
+	}
+	if jobs[0].Title != "Python Developer" {
+		t.Errorf("title = %q, want Python Developer", jobs[0].Title)
+	}
+
+	// Index + category sitemap + tech detail. The non-tech posting must not be fetched.
+	if http.calls != 3 {
+		t.Errorf("requests = %d, want 3", http.calls)
+	}
+}
+
+func TestProfessionNonITBoardRejectsSlugFalsePositiveAfterHydration(t *testing.T) {
+	const candidateURL = "https://www.profession.hu/allas/python-fejleszto-acme-kft-budapest-2991003"
+
+	http := &routedHTTP{}
+	http.route("sitemap-listings-index-hu.xml", `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<sitemap><loc>https://www.profession.hu/sitemap-listings-engineering-hu.xml</loc></sitemap>
+</sitemapindex>`)
+	http.route("sitemap-listings-engineering-hu.xml", professionCategorySitemapXML(candidateURL))
+	http.route("-2991003", professionPostingHTML(professionPostingOpts{
+		title:       "HR Business Partner",
+		company:     "ACME Kft.",
+		addressLine: "Budapest",
+		sections: [][3]string{
+			{"tasks", "Feladatok", "<p>People operations</p>"},
+		},
+	}))
+
+	jobs, err := NewProfession(http).Fetch(context.Background(), CompanyEntry{
+		Company:  "Profession.hu — Engineering",
+		Provider: "profession",
+		Board:    "engineering",
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("Fetch returned %d jobs, want 0: %+v", len(jobs), jobs)
+	}
+	// The technical-looking slug is hydrated, then rejected by its actual title.
+	if http.calls != 3 {
+		t.Errorf("requests = %d, want 3", http.calls)
+	}
+}
+
 // TestProfessionUnknownCategoryFails pins the board error a mistyped category gets. An
 // unknown board must not read as an empty one — nothing downstream could tell them apart,
 // and an empty crawl closes the category's postings on the unseen sweep.

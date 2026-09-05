@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"regexp"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"golang.org/x/net/html"
 
+	"github.com/strelov1/freehire/internal/dict/classify"
 	"github.com/strelov1/freehire/internal/dict/location"
 )
 
@@ -16,15 +18,13 @@ import (
 // catalogue with no per-employer tenancy, so it is a multi-company aggregator whose
 // employer is read from each posting.
 //
-// THE BOARD IS ONE OF THE PLATFORM'S OWN CATEGORY SITEMAPS, and taking the technical
-// ones rather than the whole board is the design. Profession.hu publishes 23 category
-// sitemaps holding ~12k postings between them; two of those categories are IT
-// (itdev, itops) and hold ~770. That is the AppliTrack/EDJOIN lesson applied before it
-// costs anything — freehire's non-technical gate was written against tech-company ATS
-// boards and leaks badly on a general-population board, so the platform's own facet
-// picks the slice. Measured over 128 live postings from the two IT sitemaps,
-// classify.ConfirmedNonTech rejected zero: the slice is already what the catalogue
-// wants.
+// THE BOARD IS ONE OF THE PLATFORM'S OWN CATEGORY SITEMAPS. The two dedicated IT
+// categories (itdev, itops) are crawled in full. Other categories are useful too because
+// technical postings leak into them, but hydrating every posting across the whole catalogue
+// would be wasteful. Those boards therefore use the posting URL slug as a cheap technical
+// prefilter before buying the detail page. The slug filter is deliberately conservative:
+// it may leave an unknown posting unseen, but it must not turn a general-population board
+// into a full detail crawl.
 //
 // Traps, all verified live on 2026-09-03:
 //
@@ -69,12 +69,19 @@ type profession struct {
 // professionHTTP is the transport profession needs: the sitemaps as XML, and each
 // posting page as HTML for both its ld+json block and its rendered body sections.
 type professionHTTP interface {
-	XMLGetter
+	TextGetter
 	HTMLGetter
 }
 
-// NewProfession builds the Profession.hu adapter over the given HTTP client.
-func NewProfession(c professionHTTP) Source { return profession{http: c} }
+// NewProfession builds the Profession.hu adapter over the given HTTP client. A standard
+// sources client is replaced with Profession's fresh-connection HTTP/1.1 variant; narrow
+// test fakes remain untouched.
+func NewProfession(c professionHTTP) Source {
+	if _, ok := c.(*Client); ok {
+		c = NewProfessionClient()
+	}
+	return profession{http: c}
+}
 
 func (profession) Provider() string { return "profession" }
 
@@ -89,6 +96,18 @@ const (
 	// the platform no longer publishes fails as a board error instead of a 404 mid-crawl.
 	professionSitemapIndex = professionBaseURL + "/sitemap-listings-index-hu.xml"
 )
+
+type professionSitemapIndexDoc struct {
+	Sitemaps []struct {
+		Loc string `xml:"loc"`
+	} `xml:"sitemap"`
+}
+
+type professionSitemapURLSet struct {
+	URLs []struct {
+		Loc string `xml:"loc"`
+	} `xml:"url"`
+}
 
 // professionIDPattern captures the posting id the platform ends every /allas/ URL with.
 // It is the id the ld+json states as well (@id ".../JobPosting/2990578"), and it is
@@ -140,6 +159,9 @@ func (s profession) Fetch(ctx context.Context, e CompanyEntry) ([]Job, error) {
 // hydrated when the posting was new in place. That refresh carries no title, because the
 // listing is a sitemap and states none — so a stored posting the dictionary would now turn
 // away is not re-judged here. It ages out through the ordinary unseen sweep instead.
+// On non-IT category boards, unseen postings are hydrated only when their URL slug is
+// confidently technical; itdev and itops stay unfiltered because those slices are already
+// dedicated to IT.
 func (s profession) FetchNew(ctx context.Context, e CompanyEntry, seen func(externalID string) bool) ([]Job, error) {
 	locs, err := s.list(ctx, e)
 	if err != nil {
@@ -150,7 +172,15 @@ func (s profession) FetchNew(ctx context.Context, e CompanyEntry, seen func(exte
 		if seen(id) {
 			return Job{ExternalID: id, URL: loc, SeenRefresh: true}, true
 		}
-		return s.detail(ctx, loc, id)
+		isITBoard := professionCategoryIsIT(e.Board)
+		if !isITBoard && !professionSlugIsTech(loc) {
+			return Job{}, false
+		}
+		job, ok := s.detail(ctx, loc, id)
+		if !isITBoard && ok && !classify.IsTech(job.Title) {
+			return Job{}, false
+		}
+		return job, ok
 	}), nil
 }
 
@@ -159,16 +189,45 @@ func (s profession) FetchNew(ctx context.Context, e CompanyEntry, seen func(exte
 // difference between a mistyped board and an empty one, which nothing downstream could
 // tell apart otherwise.
 func (s profession) list(ctx context.Context, e CompanyEntry) ([]string, error) {
-	sitemap, err := resolveSubSitemap(ctx, s.http, professionSitemapIndex, professionSitemapNeedle(e.Board))
+	rawIndex, err := s.http.GetText(ctx, professionSitemapIndex)
 	if err != nil {
-		return nil, fmt.Errorf("profession: category %s: %w", e.Board, err)
+		return nil, fmt.Errorf("profession: sitemap index: %w", err)
+	}
+	var index professionSitemapIndexDoc
+	if err := xml.Unmarshal([]byte(rawIndex), &index); err != nil {
+		return nil, fmt.Errorf("profession: sitemap index: %w", err)
+	}
+
+	needle := professionSitemapNeedle(e.Board)
+	sitemap := ""
+	for _, entry := range index.Sitemaps {
+		if strings.Contains(strings.ToLower(entry.Loc), needle) {
+			sitemap = entry.Loc
+			break
+		}
 	}
 	if sitemap == "" {
 		return nil, fmt.Errorf("profession: category %s is not in the sitemap index", e.Board)
 	}
-	locs, err := sitemapJobLocs(ctx, s.http, sitemap, professionExternalID)
+
+	rawSitemap, err := s.http.GetText(ctx, sitemap)
 	if err != nil {
 		return nil, fmt.Errorf("profession: category %s: %w", e.Board, err)
+	}
+	var set professionSitemapURLSet
+	if err := xml.Unmarshal([]byte(rawSitemap), &set); err != nil {
+		return nil, fmt.Errorf("profession: category %s: %w", e.Board, err)
+	}
+
+	seen := make(map[string]bool, len(set.URLs))
+	locs := make([]string, 0, len(set.URLs))
+	for _, entry := range set.URLs {
+		id := professionExternalID(entry.Loc)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		locs = append(locs, entry.Loc)
 	}
 	return locs, nil
 }
@@ -177,6 +236,23 @@ func (s profession) list(ctx context.Context, e CompanyEntry) ([]string, error) 
 // carries both delimiters so a short board id cannot match a longer category's name.
 func professionSitemapNeedle(board string) string {
 	return "-" + strings.ToLower(strings.TrimSpace(board)) + "-hu.xml"
+}
+
+func professionCategoryIsIT(board string) bool {
+	switch strings.ToLower(strings.TrimSpace(board)) {
+	case "itdev", "itops":
+		return true
+	default:
+		return false
+	}
+}
+
+func professionSlugIsTech(loc string) bool {
+	m := professionIDPattern.FindStringSubmatch(loc)
+	if m == nil {
+		return false
+	}
+	return classify.IsTechSlug(m[0])
 }
 
 // detail fetches one posting page and maps it. It reports ok=false — so the caller skips

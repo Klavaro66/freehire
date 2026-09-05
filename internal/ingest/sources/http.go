@@ -218,6 +218,22 @@ func (c *Client) bodyLimit() int64 {
 // NewClient builds the default ingest HTTP client.
 func NewClient() *Client { return newClientWithProxy(nil) }
 
+// NewProfessionClient builds the guarded client Profession.hu needs. Its edge serves a
+// fresh HTTP/1.1 sitemap request but closes a reused Go HTTP/2 connection, so each request
+// uses an independent HTTP/1.1 connection while retaining Client's retry and body-limit logic.
+func NewProfessionClient() *Client {
+	c := NewClient()
+	newHTTPClient := func(timeout time.Duration) *http.Client {
+		transport := safehttp.NewTransport(5 * time.Second)
+		transport.ForceAttemptHTTP2 = false
+		transport.DisableKeepAlives = true
+		return &http.Client{Timeout: timeout, Transport: transport}
+	}
+	c.httpClient = newHTTPClient(15 * time.Second)
+	c.streamClient = newHTTPClient(streamTimeout)
+	return c
+}
+
 // NewProxyClient builds an ingest client whose requests egress through proxy. It is
 // identical to NewClient but for the proxied transport, and is handed only to the
 // curated set of providers whose prod-IP is anti-bot-blocklisted (see All). The proxy
