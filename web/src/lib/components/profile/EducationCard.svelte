@@ -11,6 +11,8 @@
   import { api } from '$lib/api';
   import type { CandidateContacts, ResumeEducation, ResumeStructured } from '$lib/types';
   import { Button, Chip } from '$lib/ui';
+  import PeriodDateInput from '$lib/components/PeriodDateInput.svelte';
+  import { formatPeriodDate } from '$lib/periodDate';
 
   let {
     structured,
@@ -43,7 +45,7 @@
   }
 
   function addEducationRow() {
-    educationDraft = [...educationDraft, { degree: '', institution: '', year: '' }];
+    educationDraft = [...educationDraft, { degree: '', institution: '', year: undefined }];
   }
 
   function removeEducationRow(i: number) {
@@ -58,7 +60,7 @@
         .map((e) => ({
           degree: (e.degree ?? '').trim(),
           institution: (e.institution ?? '').trim(),
-          year: (e.year ?? '').trim(),
+          year: e.year,
         }))
         .filter((e) => e.degree || e.institution || e.year);
       // Owned even when `cleaned` is empty — otherwise clearing every row here is
@@ -180,11 +182,9 @@
                   bind:value={row.institution}
                   placeholder="Institution"
                 />
-                <input
-                  class="rounded-md border border-border bg-background px-3 py-2 text-sm sm:col-span-2"
-                  bind:value={row.year}
-                  placeholder="Year"
-                />
+                <div class="sm:col-span-2">
+                  <PeriodDateInput bind:value={row.year} placeholder="Year" />
+                </div>
               </div>
               <Button
                 size="icon"
@@ -228,7 +228,7 @@
               {/if}
             </span>
             {#if ed.year}
-              <span class="text-xs tabular-nums text-muted-foreground">{ed.year}</span>
+              <span class="text-xs tabular-nums text-muted-foreground">{formatPeriodDate(ed.year)}</span>
             {/if}
           </li>
         {/each}

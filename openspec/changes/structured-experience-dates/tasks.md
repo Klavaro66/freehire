@@ -39,18 +39,18 @@
 
 ## 5. Frontend
 
-- [ ] 5.1 Regenerate `web/src/lib/generated/contracts.ts` (`make gen-contracts`) — `Experience`/`ExperienceItem`'s `start`/`end` become the generated `Date`-shaped interface.
-- [ ] 5.2 Hand-edit `web/src/lib/types.ts`'s `ExperienceEmployment` (`experience.Employment` is not in `gen-contracts`) to match: `start`/`end` become `{ year: number; month?: number } | undefined`.
-- [ ] 5.3 New shared component (e.g. `web/src/lib/components/PeriodDateInput.svelte`): `<input type="month">` bound to the structured value, plus a "I don't remember the month" toggle that swaps in a plain year `<input type="number">`; emits/accepts the `{year, month?}` shape (or `undefined`).
-- [ ] 5.4 `web/src/lib/components/ExperienceBankView.svelte`: replace the plain text start/end inputs (employment add/edit form) with `PeriodDateInput`; update the display line that concatenates `employment.start`/`end` to format the structured value instead.
-- [ ] 5.5 `web/src/lib/components/cv/CvSectionForm.svelte`: replace the plain text start/end inputs (experience and education entries) with `PeriodDateInput`.
-- [ ] 5.6 `web/src/lib/api.ts` (and any other call site constructing/reading `ExperienceEmployment`/`Experience`/`ExperienceItem` start/end as a plain string) updated to the structured shape.
-- [ ] 5.7 `pnpm --dir web check` (svelte-check) passes; `pnpm --dir web test` (vitest) passes.
+- [x] 5.1 Regenerated `web/src/lib/generated/contracts.ts` (`go run ./cmd/gen-contracts`) — `Experience`/`ExperienceItem`'s `start`/`end`, `Education.year`, `EducationItem.start`/`end`, `Certification.year` now the inlined `{ year: number; month?: number }` shape (`tygo` `TypeMappings`, to avoid a generated `Date` interface colliding with the global JS `Date`).
+- [x] 5.2 `web/src/lib/types.ts`'s `ExperienceEmployment.start`/`end` now `PeriodDate` (new exported `{ year: number; month?: number }` type); doc comment updated.
+- [x] 5.3 New `web/src/lib/components/PeriodDateInput.svelte`: `<input type="month">` bound to the structured value, plus a "I don't remember the month" toggle that swaps in a plain year `<input type="number">`; emits/accepts the `{year, month?}` shape (or `undefined`).
+- [x] 5.4 `ExperienceBankView.svelte`: employment/project/job add-and-edit forms use `PeriodDateInput`; the display line uses `formatPeriodRange`.
+- [x] 5.5 `CvSectionForm.svelte`: experience/education/certification date fields use `PeriodDateInput`.
+- [x] 5.6 `web/src/lib/cv.ts` (`dateRange`/`experienceHeader`/`educationLine`/`certificationLine`, blank-entry factories), `EducationCard.svelte`, and `talent-network/[publicId]/+page.svelte` (which had its own local, now-removed `dateRange` duplicate — switched to the shared one from `$lib/cv`) all updated to the structured shape. `web/src/lib/api.ts` itself needed no change — it only passes `Document`/`ExperienceEmployment` through untyped-JSON boundaries.
+- [x] 5.7 `npx svelte-check` — 0 errors (34 pre-existing warnings, unrelated). `npx vitest run` — 134 files / 1513 tests passed.
 
 ## 6. Verification
 
 - [x] 6.1 `go build ./...`, `go vet ./...`, `go vet -tags=integration ./...` all pass.
 - [x] 6.2 `go test ./...` passes (all packages, including `-tags=integration` compile check). The real `-tags=integration` *run* against Postgres (`internal/platform/db`'s `TestExperienceFillBlanksNeverOverwrites` etc.) was rewritten for the new columns but not executed in this environment — no Docker Postgres available at this step; flagged for CI/manual follow-up.
-- [ ] 6.3 Manual pass against the running dev stack (needs the frontend from section 5 first).
+- [ ] 6.3 Manual pass against the running dev stack — **not done**: no dev-stack containers were left running in this environment for this pass, and the checkout is a shared workdir where spinning up a fresh stack risks port/DB conflicts with other concurrent sessions. Deferred to a manual pass after merge (or a dedicated session dedicated to it).
 - [ ] 6.4 Manual pass: render a CV to PDF (or its HTML preview) for a profile with mixed-precision dates; confirm the rendered text is unchanged. Partially covered by 4.5's JSON-payload test; the actual PDF/typst step is still open (no `typst` binary in this environment).
 - [ ] 6.5 Run `cmd/backfill-experience-dates` against representative data and confirm the `created_at`-year fallback triggers for at least one deliberately-unparseable row. Covered at the unit level (`main_test.go`'s `TestParseOrFallback`/`TestIsFallback`); not yet run against a real seeded database.
