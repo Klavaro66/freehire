@@ -69,11 +69,20 @@
 
   const hero = $derived(size === 'hero');
 
-  // How long the draft must sit still before the suggestions are recomputed. A pass
-  // costs ~10 ms over the catalogue on a warm desktop, more on a phone. Short enough
-  // to read as instant, long enough that a fast typist pays for it once rather than
-  // per letter.
-  const SUGGEST_DEBOUNCE_MS = 120;
+  // How long the draft must sit still before the suggestions are refetched.
+  //
+  // A settled draft costs THREE requests (completions, postings, companies), so the
+  // window is not sized against one cheap pass — it is sized against the gap between
+  // keystrokes. At 120ms it sat inside that gap: a fast typist's 18 characters fired
+  // six rounds, eighteen requests, for one query they had not finished writing. 300ms
+  // is past the gap and is the window the filter store already debounces its reload by
+  // (see urlSynced.svelte.ts) — one answer to "how long is a pause" across the app.
+  const SUGGEST_DEBOUNCE_MS = 300;
+
+  // Below this, the box asks nothing. A single character matches a large fraction of
+  // the catalogue, so the round trip buys a list nobody can act on — and it is the one
+  // round that fires with certainty, since every query passes through its first letter.
+  const SUGGEST_MIN_CHARS = 2;
 
   // Section caps. The dropdown is a shortcut, not a results page: past a handful each
   // section stops being scannable and the whole thing stops fitting on a phone.
@@ -232,20 +241,22 @@
   // you type, so these rows are the only live evidence the query finds anything.
   let jobs = $state.raw<Job[]>([]);
   let companies = $state.raw<CompanyListItem[]>([]);
-  // Bumped on every fetch; a response for an older token is stale and dropped, so a
-  // slow request cannot overwrite a fresher one.
-  let previewToken = 0;
 
   $effect(() => {
     const q = settledQuery.trim();
-    const mine = ++previewToken;
-    if (q === '' || !suggest) {
+    if (q.length < SUGGEST_MIN_CHARS || !suggest) {
       completions = [];
       completionParts = new Map();
       jobs = [];
       companies = [];
       return;
     }
+    // One controller per settled query, aborted by this effect's own cleanup. It does
+    // two jobs a stale-response counter did only half of: the browser drops the
+    // connection instead of holding it open for an answer nobody will read, AND
+    // `signal.aborted` below is the staleness check — the request that was abandoned
+    // is exactly the one whose answer must not land.
+    const ac = new AbortController();
     void (async () => {
       // allSettled, not all: the three sections are independent, so one endpoint
       // failing still shows the sections that succeeded instead of blanking all of
@@ -253,14 +264,16 @@
       // a schedule — a cold or missing one must cost the box its completions, not its
       // postings.
       const [s, j, c] = await Promise.allSettled([
-        api.suggest(q, completionsLimit),
-        api.searchJobs(new URLSearchParams({ q }), jobsLimit, 0),
+        api.suggest(q, completionsLimit, { signal: ac.signal }),
+        api.searchJobs(new URLSearchParams({ q }), jobsLimit, 0, { signal: ac.signal }),
         // Over-fetch: most of what the fuzzy endpoint returns is discarded below, and
         // asking for exactly three would leave the section empty whenever the fourth
         // was the only real match.
-        api.listCompanies(q, companiesFetch, 0),
+        api.listCompanies(q, companiesFetch, 0, undefined, { signal: ac.signal }),
       ]);
-      if (mine !== previewToken) return;
+      // An abort rejects all three, and `allSettled` would otherwise report that as
+      // three empty sections — blanking the panel a fresher query is about to fill.
+      if (ac.signal.aborted) return;
       const rows = s.status === 'fulfilled' ? s.value : [];
       completions = fromApi(rows);
       completionParts = new Map(completions.map((row, i) => [row.slug, rows[i]?.parts ?? []]));
@@ -268,6 +281,7 @@
       companies =
         c.status === 'fulfilled' ? namedCompanies(c.value.items, q, companiesLimit) : [];
     })();
+    return () => ac.abort();
   });
 
   // ── A pasted link ─────────────────────────────────────────────────────────
