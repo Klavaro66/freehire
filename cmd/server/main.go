@@ -29,6 +29,7 @@ import (
 	appleauth "github.com/strelov1/freehire/internal/identity/auth/apple"
 	"github.com/strelov1/freehire/internal/identity/auth/oauth"
 	"github.com/strelov1/freehire/internal/identity/billing"
+	"github.com/strelov1/freehire/internal/job/recentfeed"
 	"github.com/strelov1/freehire/internal/platform/blobstore"
 	"github.com/strelov1/freehire/internal/platform/cache"
 	"github.com/strelov1/freehire/internal/platform/config"
@@ -294,6 +295,15 @@ func main() {
 	// than inline in the handler registration.
 	planConfig := plan.ConfigFromEnv()
 
+	// The homepage's live "recently added jobs" feed: an in-process poller drains
+	// recent_feed_outbox (populated by cmd/ingest) and publishes grouped entries to
+	// a Broadcaster the SSE handler subscribes to. Always on — unlike Search/Blob/LLM
+	// above, it needs no external credential, just the pool every other route already
+	// has. See openspec/changes/add-homepage-recent-jobs-feed.
+	recentFeedBroadcaster := recentfeed.NewBroadcaster(recentFeedRingBufferSize)
+	recentFeedPoller := recentfeed.NewPoller(db.New(pool), recentFeedBroadcaster, recentFeedBatchSize)
+	go recentFeedPoller.Run(ctx, recentFeedPollInterval)
+
 	handler.Register(app, handler.Config{
 		Pool:                        pool,
 		Throttler:                   throttler,
@@ -349,6 +359,8 @@ func main() {
 		AutoApplyOrchestratorSecret: cfg.AutoApplyOrchestratorSecret,
 		InngestEventAPIURL:          cfg.InngestEventAPIURL,
 		InngestEventKey:             cfg.InngestEventKey,
+
+		RecentJobsFeed: recentFeedBroadcaster,
 	})
 
 	// Site-status daily history sampler: no MeiliKey-style gate, since it has no
@@ -408,6 +420,22 @@ func buildGmail(cfg config.Settings) (*gmailsync.Connector, *tokencrypt.Cipher) 
 	}
 	return gmailsync.NewConnector(g.ClientID, g.ClientSecret, cfg.FrontendOrigin), cipher
 }
+
+// recentFeedRingBufferSize bounds how many entries a new SSE connection to the
+// homepage's live feed replays as backlog. Small on purpose — it exists so a
+// connection never starts on a visibly empty feed, not to be a scrollable history.
+const recentFeedRingBufferSize = 15
+
+// recentFeedPollInterval is how often the poller drains recent_feed_outbox. A
+// few seconds of latency is an accepted trade for reusing the outbox+poll
+// pattern instead of Postgres LISTEN/NOTIFY or Redis pub/sub — see
+// openspec/changes/add-homepage-recent-jobs-feed/design.md.
+const recentFeedPollInterval = 10 * time.Second
+
+// recentFeedBatchSize caps one poll tick's claim, so a large burst (e.g. an
+// INGEST_REFETCH_ALL=1 repair run) degrades to "the feed is a tick behind"
+// rather than one tick doing unbounded work.
+const recentFeedBatchSize = 500
 
 // siteStatusSampleInterval is how often the /status page's daily history
 // sampler (handler.StartSiteStatusSampler) records the site's current
