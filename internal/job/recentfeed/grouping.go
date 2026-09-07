@@ -13,51 +13,87 @@ const AggregationThreshold = 5
 type Posting struct {
 	Title       string
 	CompanyName string
+	// CompanySlug is the canonical company identity Group's company-aggregation
+	// pass keys on — never CompanyName, which is free text and varies in
+	// spelling/punctuation for one employer (see AGENTS.md, "Company key:
+	// normalize.CompanySlug", and docs/agents/company-identity.md).
+	CompanySlug string
 	JobSlug     string
 }
 
-// Group buckets postings by jobhash.NormalizedRoleTitle and turns each bucket into
-// one or more Entry values: a bucket below AggregationThreshold yields one
-// KindSingle Entry per posting; a bucket at or above it yields one KindAggregate
-// Entry naming a representative posting from the bucket. Buckets are emitted in
-// first-seen order, and postings within a KindSingle bucket keep their given
-// order, so the result reads in the same order postings were claimed.
+// Group runs two aggregation passes over a claimed batch, so a single posting is
+// never counted toward both:
+//
+//  1. Bucket by jobhash.NormalizedRoleTitle. A bucket at or above
+//     AggregationThreshold — the same role posted by several different
+//     companies — collapses into one KindAggregate entry naming a
+//     representative posting. Everything else is left over for pass 2.
+//  2. Bucket what's left by CompanySlug (never CompanyName — see Posting).
+//     A bucket at or above AggregationThreshold — one company posting several
+//     different roles at once, a mass hiring push — collapses into one
+//     KindCompanyAggregate entry. Everything still left over becomes a
+//     KindSingle entry.
+//
+// Buckets in each pass are emitted in first-seen order. Because pass 2 only
+// ever sees postings pass 1 did not already aggregate, the result partitions
+// the input exactly — role-aggregates first, then company-aggregates and
+// remaining singles.
 func Group(postings []Posting) []Entry {
 	if len(postings) == 0 {
 		return nil
 	}
 
+	roleAggregates, leftover := aggregateBy(postings, KindAggregate, func(p Posting) string {
+		return jobhash.NormalizedRoleTitle(p.Title)
+	})
+	companyAggregates, leftover := aggregateBy(leftover, KindCompanyAggregate, func(p Posting) string {
+		return p.CompanySlug
+	})
+
+	entries := make([]Entry, 0, len(postings))
+	entries = append(entries, roleAggregates...)
+	entries = append(entries, companyAggregates...)
+	for _, p := range leftover {
+		entries = append(entries, Entry{
+			Kind:        KindSingle,
+			Title:       p.Title,
+			CompanyName: p.CompanyName,
+			JobSlug:     p.JobSlug,
+		})
+	}
+	return entries
+}
+
+// aggregateBy buckets postings by key(p), preserving first-seen bucket order. A
+// bucket at or above AggregationThreshold becomes one Entry of the given kind,
+// naming a representative posting from it; every posting in a smaller bucket is
+// returned as leftover instead, for the caller to aggregate further or emit as
+// KindSingle. The two Group passes differ only in kind and key — this is the
+// bucket-or-leave-for-later shape both share.
+func aggregateBy(postings []Posting, kind Kind, key func(Posting) string) (aggregates []Entry, leftover []Posting) {
 	var order []string
 	buckets := make(map[string][]Posting, len(postings))
 	for _, p := range postings {
-		key := jobhash.NormalizedRoleTitle(p.Title)
-		if _, seen := buckets[key]; !seen {
-			order = append(order, key)
+		k := key(p)
+		if _, seen := buckets[k]; !seen {
+			order = append(order, k)
 		}
-		buckets[key] = append(buckets[key], p)
+		buckets[k] = append(buckets[k], p)
 	}
 
-	entries := make([]Entry, 0, len(postings))
-	for _, key := range order {
-		bucket := buckets[key]
-		if len(bucket) >= AggregationThreshold {
-			sample := bucket[0]
-			entries = append(entries, Entry{
-				Kind:        KindAggregate,
-				Title:       sample.Title,
-				CompanyName: sample.CompanyName,
-				Count:       len(bucket),
-			})
+	for _, k := range order {
+		bucket := buckets[k]
+		if len(bucket) < AggregationThreshold {
+			leftover = append(leftover, bucket...)
 			continue
 		}
-		for _, p := range bucket {
-			entries = append(entries, Entry{
-				Kind:        KindSingle,
-				Title:       p.Title,
-				CompanyName: p.CompanyName,
-				JobSlug:     p.JobSlug,
-			})
-		}
+		sample := bucket[0]
+		aggregates = append(aggregates, Entry{
+			Kind:        kind,
+			Title:       sample.Title,
+			CompanyName: sample.CompanyName,
+			Count:       len(bucket),
+		})
 	}
-	return entries
+	return aggregates, leftover
 }

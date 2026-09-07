@@ -4,8 +4,15 @@
   import { resolve } from '$app/paths';
   import { api } from '$lib/api';
   import { companyLogoUrl } from '$lib/logo';
-  import { aggregateLabel, pushFeedEntry, type RecentFeedEntry, type RecentFeedEvent } from '$lib/recentFeed';
+  import {
+    aggregateLabel,
+    companyAggregateLabel,
+    pushFeedEntry,
+    type RecentFeedEntry,
+    type RecentFeedEvent,
+  } from '$lib/recentFeed';
   import { EntityLogo, SectionLabel } from '$lib/ui';
+  import { timeAgo } from '$lib/utils';
 
   // The homepage's live "recently added jobs" feed (see
   // openspec/changes/add-homepage-recent-jobs-feed). Renders nothing until the first
@@ -15,6 +22,42 @@
 
   let entries = $state<RecentFeedEntry[]>([]);
   let nextId = 0;
+
+  // A millisecond clock, ticked once a second so the "N ago" label on each
+  // card advances live instead of freezing at whatever it read on arrival.
+  // Reading `now` from ago() below — called from the template — is what
+  // makes that call re-run on every tick; no separate signal needed.
+  let now = $state(Date.now());
+  $effect(() => {
+    const interval = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(interval);
+  });
+
+  function ago(entry: RecentFeedEntry): string {
+    const producedMs = Date.parse(entry.produced_at);
+    if (Number.isNaN(producedMs)) return '';
+    // Clamp a produced_at that reads as being in the client's future (clock
+    // skew between this browser and the server) to `now`, so the newest card
+    // never renders as "in 2 seconds" instead of "just now".
+    return timeAgo(new Date(Math.min(producedMs, now)).toISOString());
+  }
+
+  function headline(entry: RecentFeedEntry): string {
+    // A company_aggregate has no single featured role — the company itself
+    // is the headline, mirroring how a role-aggregate headlines the role.
+    return entry.kind === 'company_aggregate' ? entry.company_name : entry.title;
+  }
+
+  function subtitle(entry: RecentFeedEntry): string {
+    switch (entry.kind) {
+      case 'single':
+        return entry.company_name;
+      case 'aggregate':
+        return aggregateLabel(entry);
+      case 'company_aggregate':
+        return companyAggregateLabel(entry);
+    }
+  }
 
   $effect(() => {
     const source = new EventSource(api.recentJobsFeedUrl());
@@ -36,8 +79,8 @@
     if (entry.kind === 'single' && entry.job_slug) {
       return resolve('/jobs/[slug]', { slug: entry.job_slug });
     }
-    // An aggregate represents several postings from different companies — there is
-    // no single job to link to, so it points at the catalogue instead.
+    // Either aggregate kind represents several postings — there is no single
+    // job to link to, so it points at the catalogue instead.
     return resolve('/jobs');
   }
 </script>
@@ -60,11 +103,10 @@
               size="sm"
             />
             <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-medium">{entry.title}</p>
-              <p class="truncate text-xs text-muted-foreground">
-                {entry.kind === 'single' ? entry.company_name : aggregateLabel(entry)}
-              </p>
+              <p class="truncate text-sm font-medium">{headline(entry)}</p>
+              <p class="truncate text-xs text-muted-foreground">{subtitle(entry)}</p>
             </div>
+            <span class="shrink-0 text-xs tabular-nums text-muted-foreground">{ago(entry)}</span>
           </a>
         </li>
       {/each}
